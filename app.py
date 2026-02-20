@@ -433,12 +433,15 @@ with tab1:
         c1.metric("Market Sentiment", bot.state["current_trend"])
         c2.metric("Algo Action", bot.state["current_signal"])
 
-        if bot.state["active_trade"]:
+      if bot.state["active_trade"]:
             t = bot.state["active_trade"]
             pnl = t.get('floating_pnl', 0.0)
             ltp = t.get('current_ltp', t['entry'])
             indicator = "🟢" if pnl >= 0 else "🔴"
+            
+            # ---> NEW DISPLAY LOGIC:
             st.info(f"📈 Open: **{t['symbol']}** | Entry: **{t['entry']:.2f}** | LTP: **{ltp:.2f}** | PnL: {indicator} **₹{round(pnl, 2)}**")
+            st.caption(f"🛑 **Stop Loss:** {t['sl']:.2f} &nbsp; | &nbsp; 🎯 **Take Profit:** {t['tgt']:.2f}")
             
             if st.button("Close Manually"):
                 if not bot.settings['paper_mode'] and not bot.is_mock: bot.place_real_order(t['symbol'], t['token'], t['qty'], "SELL", t['exch'])
@@ -557,3 +560,4 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
+
