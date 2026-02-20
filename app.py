@@ -203,7 +203,6 @@ with st.sidebar:
     st.divider()
     st.subheader("📊 Export Data")
     
-    # Always create the DataFrame so the button never disappears
     if len(st.session_state.trade_history) > 0:
         df_history = pd.DataFrame(st.session_state.trade_history)
     else:
@@ -231,6 +230,16 @@ with tab1:
     if col2.button("🔴 STOP BOT"): st.session_state.bot_active = False
 
     if st.session_state.bot_active:
+        current_time = dt.datetime.now().time()
+        
+        # --- DYNAMIC MARKET TIMING ---
+        if INDEX in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]:
+            cutoff_time = dt.time(23, 15)  # 11:15 PM Auto-Square-Off for MCX
+            cutoff_label = "11:15 PM"
+        else:
+            cutoff_time = dt.time(15, 15)  # 3:15 PM Auto-Square-Off for NSE/BSE
+            cutoff_label = "3:15 PM"
+
         st.info(f"Bot is active. Waiting for setup on {INDEX}...")
         
         df_map = bot.token_map
@@ -267,36 +276,43 @@ with tab1:
 
                 # --- ENTRY LOGIC ---
                 if st.session_state.active_trade is None and signal in ["BUY_CE", "BUY_PE"]:
-                    strike_sym, strike_token, strike_exch = bot.get_strike(INDEX, spot, signal)
-                    if strike_sym:
-                        opt_ltp = bot.get_live_price(strike_exch, strike_sym, strike_token)
-                        if opt_ltp:
-                            lot_size = LOT_SIZES.get(INDEX, 10)
-                            qty = LOTS * lot_size
-                            
-                            # REAL TRADING EXECUTION
-                            if not PAPER:
-                                order_id = bot.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
-                                if order_id: 
-                                    log(f"⚡ REAL ENTRY PLACED: {strike_sym} | Qty: {qty} | ID: {order_id}")
-                                else:
-                                    log(f"❌ REAL ENTRY FAILED: Check margin/limits.")
-                            else:
-                                log(f"📝 PAPER ENTRY: {strike_sym} @ {opt_ltp} | Qty: {qty}")
+                    # Prevent new entries if past market cutoff
+                    if current_time >= cutoff_time:
+                        st.warning(f"⏰ {cutoff_label} Cutoff Reached. No new trades will be initiated today.")
+                    else:
+                        strike_sym, strike_token, strike_exch = bot.get_strike(INDEX, spot, signal)
+                        if strike_sym:
+                            opt_ltp = bot.get_live_price(strike_exch, strike_sym, strike_token)
+                            if opt_ltp:
+                                lot_size = LOT_SIZES.get(INDEX, 10)
+                                qty = LOTS * lot_size
                                 
-                            st.session_state.active_trade = {
-                                "symbol": strike_sym, 
-                                "token": strike_token, 
-                                "exch": strike_exch,
-                                "type": "CE" if "CE" in strike_sym else "PE",
-                                "entry": opt_ltp,
-                                "qty": qty,
-                                "sl": opt_ltp - SL_PTS,
-                                "tgt": opt_ltp + TGT_PTS
-                            }
+                                # REAL TRADING EXECUTION
+                                if not PAPER:
+                                    order_id = bot.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
+                                    if order_id: 
+                                        log(f"⚡ REAL ENTRY PLACED: {strike_sym} | Qty: {qty} | ID: {order_id}")
+                                    else:
+                                        log(f"❌ REAL ENTRY FAILED: Check margin/limits.")
+                                else:
+                                    log(f"📝 PAPER ENTRY: {strike_sym} @ {opt_ltp} | Qty: {qty}")
+                                    
+                                st.session_state.active_trade = {
+                                    "symbol": strike_sym, 
+                                    "token": strike_token, 
+                                    "exch": strike_exch,
+                                    "type": "CE" if "CE" in strike_sym else "PE",
+                                    "entry": opt_ltp,
+                                    "qty": qty,
+                                    "sl": opt_ltp - SL_PTS,
+                                    "tgt": opt_ltp + TGT_PTS
+                                }
                 
                 elif st.session_state.active_trade is None and signal == "WAIT":
-                    st.write("Looking for Volume Breakouts...")
+                    if current_time >= cutoff_time:
+                        st.write("⏰ Market closed for new intraday positions.")
+                    else:
+                        st.write("Looking for Volume Breakouts...")
 
                 # --- EXIT LOGIC ---
                 elif st.session_state.active_trade is not None:
@@ -309,8 +325,11 @@ with tab1:
                         exit_triggered = False
                         exit_reason = ""
                         
-                        # Auto SL / TGT Checks
-                        if close_price >= trade['tgt']:
+                        # Auto SL / TGT / Time Stop Checks
+                        if current_time >= cutoff_time:
+                            exit_triggered = True
+                            exit_reason = f"⏰ {cutoff_label} AUTO-SQUARE-OFF @ {close_price}"
+                        elif close_price >= trade['tgt']:
                             exit_triggered = True
                             exit_reason = f"🎯 TARGET HIT @ {close_price}"
                         elif close_price <= trade['sl']:
@@ -375,7 +394,6 @@ with tab2:
                     hist = bot.get_historical_data("NSE", token, "FIVE_MINUTE", 300)
                     if hist is not None and not hist.empty:
                         trend, signal = bot.analyzer.calculate_volume_breakout(hist, vol_length=20, vol_multiplier=1.8)
-                        # Display both the general trend and if there is a breakout signal
                         if signal != "WAIT" or "BUILDUP" in trend:
                             suggestions.append({"Stock": stock, "Trend": trend, "Action": signal})
                 time.sleep(0.4)
