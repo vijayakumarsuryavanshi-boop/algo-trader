@@ -407,3 +407,17 @@ with tab2:
         if was_active: 
             st.session_state.bot_active = True
             st.success("Scan complete. Live dashboard resumed.")
+            def send_whatsapp_alert(message):
+    # Replace with your actual number and the API key you just received
+    phone = "+919876543210" 
+    api_key = "123456"
+    
+    # URL encode the message to handle spaces and symbols
+    safe_message = requests.utils.quote(message)
+    url = f"https://api.callmebot.com/whatsapp.php?phone={phone}&text={safe_message}&apikey={api_key}"
+    
+    try:
+        requests.get(url, timeout=5)
+    except Exception:
+        pass # Fail silently so it doesn't crash your trading loop
+
