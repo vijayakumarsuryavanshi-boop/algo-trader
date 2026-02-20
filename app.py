@@ -21,12 +21,12 @@ class TechnicalAnalyzer:
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['date'] = df['timestamp'].dt.date
         
-        # 2. Calculate VWAP (Cumulative (Typical Price * Volume) / Cumulative Volume)
+        # 2. Calculate VWAP
         df['typical_price'] = (df['high'] + df['low'] + df['close']) / 3
         df['cum_tp_vol'] = (df['typical_price'] * df['volume']).groupby(df['date']).cumsum()
         df['cum_vol'] = df['volume'].groupby(df['date']).cumsum()
         df['vwap'] = df['cum_tp_vol'] / df['cum_vol']
-        df['vwap'] = df['vwap'].ffill() # Failsafe for zero volume
+        df['vwap'] = df['vwap'].ffill() 
         
         # 3. Calculate Fast EMA
         df['ema'] = df['close'].ewm(span=ema_length, adjust=False).mean()
@@ -45,7 +45,7 @@ class TechnicalAnalyzer:
         if current_vol == 0 or pd.isna(prev_avg_vol) or prev_avg_vol == 0:
             return "WAIT", "WAIT", current_vwap, current_ema
 
-        # --- TREND IDENTIFICATION (Price + Volume Logic) ---
+        # --- TREND IDENTIFICATION ---
         trend = "FLAT"
         if current_close > prev_close and current_vol > prev_avg_vol:
             trend = "LONG BUILDUP 🟢"
@@ -58,12 +58,9 @@ class TechnicalAnalyzer:
 
         # --- VWAP SCALPING SIGNAL LOGIC ---
         signal = "WAIT"
-        # Check if volume requirement is met (controlled by your UI slider)
         if current_vol > (prev_avg_vol * vol_multiplier):
-            # Bullish Scalp: Price is Green, EMA is ABOVE VWAP
             if current_close > current_open and current_ema > current_vwap: 
                 signal = "BUY_CE"
-            # Bearish Scalp: Price is Red, EMA is BELOW VWAP
             elif current_close < current_open and current_ema < current_vwap: 
                 signal = "BUY_PE"
                 
@@ -147,7 +144,6 @@ class SniperBot:
         exch_list = ["NFO"]
         valid_instruments = ['OPTIDX', 'OPTSTK']
         
-        # Commodity & Index Logic restored
         if symbol in ["CRUDEOIL", "GOLD", "SILVER", "NATURALGAS"]: 
             exch_list, valid_instruments = ["MCX", "NCO"], ['OPTFUT', 'OPTCOM', 'OPTENR', 'OPTBLN']
         elif symbol == "SENSEX": 
@@ -215,10 +211,7 @@ with st.sidebar:
     st.header("⚙️ Scalping Settings")
     INDEX = st.selectbox("Watchlist", ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"])
     TIMEFRAME = st.selectbox("Timeframe", ["ONE_MINUTE", "THREE_MINUTE", "FIVE_MINUTE"], index=2)
-    
-    # NEW: Dynamic Sensitivity Slider
-    VOL_MULT = st.slider("Volume Sensitivity (Lower = More Trades)", 1.1, 3.0, 1.5, 0.1, help="1.5 = Needs 50% more volume than average to trigger a scalp.")
-    
+    VOL_MULT = st.slider("Volume Sensitivity", 1.1, 3.0, 1.5, 0.1, help="1.5 = Needs 50% more volume than average.")
     LOTS = st.number_input("Lots", 1, 100, 2)
     SL_PTS = st.number_input("Stop Loss (Points)", 5, 200, 20)
     TGT_PTS = st.number_input("Target (Points)", 10, 500, 40)
@@ -258,12 +251,18 @@ with tab1:
         
         # --- DYNAMIC MARKET TIMING ---
         if INDEX in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]:
-            cutoff_time = dt.time(23, 15)  # 11:15 PM Auto-Square-Off for MCX
+            cutoff_time = dt.time(23, 15)
             cutoff_label = "11:15 PM"
         else:
-            cutoff_time = dt.time(15, 15)  # 3:15 PM Auto-Square-Off for NSE/BSE
+            cutoff_time = dt.time(15, 15)
             cutoff_label = "3:15 PM"
 
+        # --- TOTAL DAILY PNL DISPLAY ---
+        total_pnl = sum([t.get("PnL (₹)", 0.0) for t in st.session_state.trade_history])
+        pnl_color = "normal" if total_pnl == 0 else ("inverse" if total_pnl < 0 else "normal") # Visual cue
+        st.metric("💰 Total Daily Realized PnL", f"₹{round(total_pnl, 2)}")
+        st.divider()
+        
         st.info(f"Bot is active. Waiting for VWAP crossover on {INDEX}...")
         
         df_map = bot.token_map
@@ -298,13 +297,13 @@ with tab1:
                     m2.metric("Intraday VWAP", round(vwap_val, 2))
                     m3.metric("9-EMA", round(ema_val, 2))
                     
-                    # Show the live volume ratio so you know why it's waiting
                     current_vol = int(df_candles['volume'].iloc[-1])
                     avg_vol = int(df_candles['volume'].rolling(window=20).mean().shift(1).iloc[-1]) if len(df_candles) > 20 else 0
                     m4.metric(f"Volume vs Avg", f"{current_vol} / {avg_vol}")
                     
-                    st.metric("Market Sentiment (Trend)", st.session_state.current_trend)
-                    st.metric("Algo Action", st.session_state.current_signal)
+                    c1, c2 = st.columns(2)
+                    c1.metric("Market Sentiment", st.session_state.current_trend)
+                    c2.metric("Algo Action", st.session_state.current_signal)
                 else:
                     st.error("⚠️ API is returning empty historical data for this asset right now.")
 
@@ -313,7 +312,7 @@ with tab1:
                 # --- ENTRY LOGIC ---
                 if st.session_state.active_trade is None and signal in ["BUY_CE", "BUY_PE"]:
                     if current_time >= cutoff_time:
-                        st.warning(f"⏰ {cutoff_label} Cutoff Reached. No new trades will be initiated today.")
+                        st.warning(f"⏰ {cutoff_label} Cutoff Reached. No new trades will be initiated.")
                     else:
                         strike_sym, strike_token, strike_exch = bot.get_strike(INDEX, spot, signal)
                         if strike_sym:
@@ -325,7 +324,7 @@ with tab1:
                                 if not PAPER:
                                     order_id = bot.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
                                     if order_id: 
-                                        log(f"⚡ REAL ENTRY PLACED: {strike_sym} | Qty: {qty} | ID: {order_id}")
+                                        log(f"⚡ REAL ENTRY: {strike_sym} | Qty: {qty} | ID: {order_id}")
                                     else:
                                         log(f"❌ REAL ENTRY FAILED: Check margin/limits.")
                                 else:
@@ -348,13 +347,17 @@ with tab1:
                     else:
                         st.write("Looking for VWAP Crossover & Volume Spikes...")
 
-                # --- EXIT LOGIC ---
+                # --- EXIT LOGIC & FLOATING PNL ---
                 elif st.session_state.active_trade is not None:
                     trade = st.session_state.active_trade
                     close_price = bot.get_live_price(trade['exch'], trade['symbol'], trade['token'])
                     
                     if close_price:
-                        st.success(f"Open Trade: {trade['symbol']} | Entry: {trade['entry']} | LTP: {close_price}")
+                        # Calculate Live Floating PnL
+                        floating_pnl = (close_price - trade['entry']) * trade['qty'] if trade['type'] == "CE" else (trade['entry'] - close_price) * trade['qty']
+                        pnl_indicator = "🟢" if floating_pnl >= 0 else "🔴"
+                        
+                        st.info(f"📈 Open Trade: **{trade['symbol']}** | Entry: **{trade['entry']}** | LTP: **{close_price}** | Live PnL: {pnl_indicator} **₹{round(floating_pnl, 2)}**")
                         
                         exit_triggered = False
                         exit_reason = ""
@@ -373,8 +376,6 @@ with tab1:
                             if not exit_triggered:
                                 exit_reason = f"👋 MANUALLY CLOSED @ {close_price}"
                                 
-                            final_pnl = (close_price - trade['entry']) * trade['qty'] if trade['type'] == "CE" else (trade['entry'] - close_price) * trade['qty']
-                            
                             if not PAPER:
                                 bot.place_real_order(trade['symbol'], trade['token'], trade['qty'], "SELL", trade['exch'])
                                 log(f"⚡ REAL EXIT PLACED: {trade['symbol']} | Qty: {trade['qty']}")
@@ -386,13 +387,13 @@ with tab1:
                                 "Qty": trade['qty'],
                                 "Entry Price": trade['entry'],
                                 "Exit Price": close_price,
-                                "PnL (₹)": round(final_pnl, 2)
+                                "PnL (₹)": round(floating_pnl, 2)
                             })
                             
-                            log(f"{exit_reason} | PnL: ₹{round(final_pnl, 2)}")
+                            log(f"{exit_reason} | Final PnL: ₹{round(floating_pnl, 2)}")
                             st.session_state.active_trade = None
                         else:
-                            st.info(f"Tracking SL: {trade['sl']} | Target: {trade['tgt']}")
+                            st.caption(f"Tracking SL: {trade['sl']} | Target: {trade['tgt']}")
         else:
             st.error(f"Could not load Futures data for {INDEX}.")
 
