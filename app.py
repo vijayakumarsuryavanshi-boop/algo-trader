@@ -18,7 +18,6 @@ class TechnicalAnalyzer:
         current_close, current_open = df['close'].iloc[-1], df['open'].iloc[-1]
         current_vol, prev_avg_vol = df['volume'].iloc[-1], df['avg_vol'].iloc[-1]
 
-        # Failsafe: If volume is 0, we can't calculate a breakout
         if current_vol == 0 or pd.isna(prev_avg_vol) or prev_avg_vol == 0:
             return "WAIT", "WAIT"
 
@@ -120,17 +119,13 @@ def log(msg):
 with st.sidebar:
     st.header("🔐 Secure Connect")
     
-    MY_API_KEY = "YOUR_API_KEY"
-    MY_CLIENT_ID = "YOUR_CLIENT_ID"
-    MY_PIN = "YOUR_PIN"
-    MY_TOTP_SECRET = "YOUR_TOTP_SECRET"
-
     if not st.session_state.auth:
-        st.info("Log in with Angel One credentials.")
-        API_KEY = st.text_input("API Key", value=MY_API_KEY, type="password")
-        CLIENT_ID = st.text_input("Client ID", value=MY_CLIENT_ID)
-        PIN = st.text_input("PIN", value=MY_PIN, type="password")
-        TOTP = st.text_input("TOTP secret", value=MY_TOTP_SECRET, type="password")
+        st.info("Log in with your own Angel One credentials.")
+        # Notice that value defaults have been completely removed
+        API_KEY = st.text_input("API Key", type="password")
+        CLIENT_ID = st.text_input("Client ID")
+        PIN = st.text_input("PIN", type="password")
+        TOTP = st.text_input("TOTP secret", type="password")
         
         if st.button("Connect to Exchange", type="primary"):
             temp_bot = SniperBot(API_KEY, CLIENT_ID, PIN, TOTP)
@@ -156,7 +151,7 @@ with st.sidebar:
 
 if not st.session_state.auth:
     st.title("Welcome to Pro Algo Trader")
-    st.warning("Please connect using the sidebar.")
+    st.warning("Please connect using the sidebar with your Angel One details to begin.")
     st.stop()
 
 tab1, tab2 = st.tabs(["⚡ Live Dashboard", "🔎 Scanner"])
@@ -170,7 +165,6 @@ with tab1:
     if st.session_state.bot_active:
         st.info("Bot is active. Waiting for setup...")
         
-        # We MUST fetch FUTURES instead of SPOT for Indices to get Volume
         df_map = bot.token_map
         today = pd.Timestamp.today().normalize()
         
