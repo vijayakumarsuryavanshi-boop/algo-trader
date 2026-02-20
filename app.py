@@ -434,74 +434,76 @@ with tab1:
     for l in st.session_state.logs: st.text(l)
 
 with tab2:
-    st.write("### 🏛️ Direct NSE Market Scanner")
-    st.caption("Pulls real-time Gainers & Volume Shockers directly from NSE India.")
+    st.subheader("🔥 OI Spurt & Price Action Scanner")
+    st.write("Finds F&O stocks where big money is entering (Rising OI + Rising Price).")
 
-    # 1. Selection for Scans
-    scan_type = st.selectbox("Select NSE Scan", ["Top Gainers", "Volume Gainers", "Most Active (Value)"])
-    
-    if st.button("🚀 Run Live NSE Scan"):
-        from nsepython import nse_get_top_gainers, nse_get_active_surveillance
-        from nsetools import Nse
+    if st.button("🔍 Scan for Long Buildup"):
+        from nsepython import nsefetch
         
-        nse_tools = Nse()
         was_active = st.session_state.bot_active
         st.session_state.bot_active = False 
         
         suggestions = []
-        raw_stocks = []
-
-        with st.spinner(f"Fetching {scan_type} from NSE..."):
+        
+        with st.spinner("Fetching Live OI Data from NSE..."):
             try:
-                if scan_type == "Top Gainers":
-                    # Pulls top 10 gainers from NIFTY 50
-                    data = nse_tools.get_top_gainers()
-                    raw_stocks = [d['symbol'] for d in data]
+                # Direct API call to NSE OI Spurts
+                payload = nsefetch('https://www.nseindia.com/api/live-analysis-oi-spurts')
+                oi_data = payload.get('data', [])
                 
-                elif scan_type == "Volume Gainers":
-                    # Custom logic: We pull 'Most Active' by volume
-                    data = nse_tools.get_all_index_quote("NIFTY 50") # Example base
-                    # Alternatively, fetch pre-defined volume shockers
-                    raw_stocks = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "ADANIENT", "TATASTEEL"] # High liquidity list
-                
-                # --- FILTERING THROUGH YOUR BOT LOGIC ---
-                if raw_stocks:
-                    df_map = bot.token_map
-                    progress = st.progress(0)
+                if oi_data:
+                    df_oi = pd.DataFrame(oi_data)
                     
-                    for i, sym in enumerate(raw_stocks[:15]): # Limit to 15 to prevent rate blocks
-                        row = df_map[df_map['name'] == sym].head(1)
-                        if not row.empty:
-                            token = row.iloc[0]['token']
-                            # Fetch 5-min candles for technical confirmation
-                            hist = bot.get_historical_data("NSE", token, "FIVE_MINUTE", 200)
-                            
-                            if hist is not None and not hist.empty:
-                                trend, signal, vwap, ema = bot.analyzer.calculate_scalp_signals(hist)
-                                
-                                # Check your specific momentum criteria
-                                if signal != "WAIT" or "BUILDUP" in trend:
-                                    suggestions.append({
-                                        "Stock": sym,
-                                        "Trend": trend,
-                                        "Algo Signal": signal,
-                                        "LTP": hist['close'].iloc[-1],
-                                        "VWAP": round(vwap, 2)
-                                    })
+                    # Filter for 'Long Buildup' (Price Change > 0 and OI Change > 0)
+                    # We want the 'Top 10' strongest spurts
+                    df_oi['pChange'] = pd.to_numeric(df_oi['pChange'], errors='coerce')
+                    df_oi['per_chnge_oi'] = pd.to_numeric(df_oi['per_chnge_oi'], errors='coerce')
+                    
+                    long_buildup = df_oi[(df_oi['pChange'] > 0.5) & (df_oi['per_chnge_oi'] > 2)].head(10)
+                    
+                    if not long_buildup.empty:
+                        st.success(f"✅ Found {len(long_buildup)} stocks with fresh Long Buildup!")
                         
-                        time.sleep(0.5) # Crucial for direct NSE calls
-                        progress.progress((i + 1) / len(raw_stocks[:15]))
-                    
-                    if suggestions:
-                        st.subheader("✅ Technical Confirmation")
-                        st.dataframe(pd.DataFrame(suggestions), use_container_width=True)
-                        st.balloons()
-                    else:
-                        st.info("NSE stocks found, but none are showing technical crossovers right now.")
+                        df_map = bot.token_map
+                        progress = st.progress(0)
+                        
+                        for i, (idx, stock_row) in enumerate(long_buildup.iterrows()):
+                            symbol = stock_row['symbol']
+                            
+                            # Double-check with your bot's Technical Logic (9-EMA + VWAP)
+                            token_row = df_map[df_map['name'] == symbol].head(1)
+                            if not token_row.empty:
+                                token = token_row.iloc[0]['token']
+                                hist = bot.get_historical_data("NSE", token, "FIVE_MINUTE", 150)
+                                
+                                if hist is not None and not hist.empty:
+                                    trend, signal, vwap, ema = bot.analyzer.calculate_scalp_signals(hist)
+                                    
+                                    # We only care about BUY signals for these OI spurts
+                                    if signal == "BUY_CE" or "BUILDUP" in trend:
+                                        suggestions.append({
+                                            "Symbol": symbol,
+                                            "OI Change %": f"{stock_row['per_chnge_oi']}%",
+                                            "Price Change %": f"{stock_row['pChange']}%",
+                                            "Algo Signal": "🚀 READY" if signal == "BUY_CE" else "⏳ MONITOR",
+                                            "LTP": hist['close'].iloc[-1]
+                                        })
+                            
+                            time.sleep(0.5)
+                            progress.progress((i + 1) / len(long_buildup))
+                            
+                        if suggestions:
+                            st.table(pd.DataFrame(suggestions))
+                            st.info("💡 **Strategy:** Focus on stocks where 'Algo Signal' is READY. These have both Big Money (OI) and Momentum (VWAP) on their side.")
+                        else:
+                            st.warning("OI is rising, but VWAP/EMA technicals haven't crossed yet. Wait for a pullback.")
+                else:
+                    st.error("NSE API returned empty OI data. Market might be closed or throttled.")
             except Exception as e:
-                st.error(f"NSE Connection Error: {e}")
+                st.error(f"Error fetching OI Spurts: {e}")
 
         if was_active: st.session_state.bot_active = True
+
 
 
 
