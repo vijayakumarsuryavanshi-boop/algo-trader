@@ -323,29 +323,32 @@ class SniperBot:
             except Exception as e:
                 self.log(f"Thread Error: {str(e)}")
             time.sleep(3)
-# ==========================================
-# 4. STREAMLIT UI 
-# ==========================================
-st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
-
-# --- Initialize Session State Keys ---
-if 'bot' not in st.session_state:
-    st.session_state['bot'] = None
-
-# Your CSS/Branding cleanup code here
+# --- ULTIMATE BRANDING REMOVAL ---
 st.markdown("""
     <style>
+    /* 1. Hide the footer completely */
     footer {visibility: hidden;}
-    [data-testid="stStatusWidget"] {display: none;}
-    .stAppDeployButton {display: none;}
+
+    /* 2. Target the specific 'Hosted with Streamlit' button and its link */
+    [data-testid="stStatusWidget"], 
+    .st-emotion-cache-1wbqy5l, 
+    .st-emotion-cache-1dp5vir,
+    div[class*="stAppDeployButton"],
+    a[href*="streamlit.io"] {
+        display: none !important;
+    }
+
+    /* 3. Hide the Top Header bar (hides 'Manage App' and 'Deploy') */
+    /* Note: This might hide the sidebar button on mobile, see below */
+    header {visibility: hidden;}
+
+    /* 4. Hide the Hamburger Menu */
     #MainMenu {visibility: hidden;}
+
+    /* 5. Adjust padding so the app doesn't look cut off at the top */
+    .block-container {padding-top: 1rem;}
     </style>
     """, unsafe_allow_html=True)
-
-# Now this check will work perfectly
-if st.session_state.bot is None:
-    # Login / Connection logic
-    ...
 
 with st.sidebar:
     st.header("🔐 Connection Setup")
@@ -578,5 +581,6 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
+
 
 
