@@ -1,0 +1,11 @@
+
+streamlit
+pandas
+numpy
+pandas_ta
+smartapi-python
+pyotp
+requests
+logzero
+websocket-client
+scipy
