@@ -136,10 +136,12 @@ class SniperBot:
             st.error(f"Order Error: {e}")
             return None
 
-    def get_strike(self, symbol, spot, signal):
+    def get_strike(self, symbol, spot, signal, max_premium):
         df = self.token_map
         if df is None: return None, None, None
-        opt_type = "CE" if "BUY_CE" in signal else "PE"
+        
+        is_ce = "BUY_CE" in signal
+        opt_type = "CE" if is_ce else "PE"
         name = symbol
         exch_list = ["NFO"]
         valid_instruments = ['OPTIDX', 'OPTSTK']
@@ -152,11 +154,28 @@ class SniperBot:
         today = pd.Timestamp.today().normalize()
         mask = (df['name'] == name) & (df['exch_seg'].isin(exch_list)) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type)) & (df['instrumenttype'].isin(valid_instruments))
         subset = df[mask].copy()
+        
         if subset.empty: return None, None, None
+        
+        # Filter for closest expiry
         subset = subset[subset['expiry'] == subset['expiry'].min()]
-        subset['diff'] = abs(subset['strike'] - spot)
-        best = subset.sort_values('diff').iloc[0]
-        return best['symbol'], best['token'], best['exch_seg']
+        
+        # Sort strikes to prioritize ATM first, then move OTM to find cheaper options
+        if is_ce:
+            # For CE, we look at strikes >= spot (moving OTM)
+            candidates = subset[subset['strike'] >= spot].sort_values('strike', ascending=True)
+        else:
+            # For PE, we look at strikes <= spot (moving OTM)
+            candidates = subset[subset['strike'] <= spot].sort_values('strike', ascending=False)
+            
+        # Limit to checking 15 strikes to avoid API rate limits
+        for _, row in candidates.head(15).iterrows():
+            ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
+            # Check if we can afford this strike
+            if ltp and ltp <= max_premium:
+                return row['symbol'], row['token'], row['exch_seg']
+                
+        return None, None, None
 
 # ==========================================
 # 3. STREAMLIT UI & SECURITY
@@ -212,7 +231,10 @@ with st.sidebar:
     INDEX = st.selectbox("Watchlist", ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"])
     TIMEFRAME = st.selectbox("Timeframe", ["ONE_MINUTE", "THREE_MINUTE", "FIVE_MINUTE"], index=2)
     VOL_MULT = st.slider("Volume Sensitivity", 1.1, 3.0, 1.5, 0.1, help="1.5 = Needs 50% more volume than average.")
+    
     LOTS = st.number_input("Lots", 1, 100, 2)
+    MAX_CAPITAL = st.number_input("Max Capital (₹)", 1000, 500000, 10000, step=1000, help="Bot will only buy options that fit this budget.")
+    
     SL_PTS = st.number_input("Stop Loss (Points)", 5, 200, 20)
     TGT_PTS = st.number_input("Target (Points)", 10, 500, 40)
     PAPER = st.toggle("📝 Paper Mode (Turn OFF for Real Trading)", True)
@@ -314,13 +336,15 @@ with tab1:
                     if current_time >= cutoff_time:
                         st.warning(f"⏰ {cutoff_label} Cutoff Reached. No new trades will be initiated.")
                     else:
-                        strike_sym, strike_token, strike_exch = bot.get_strike(INDEX, spot, signal)
+                        lot_size = LOT_SIZES.get(INDEX, 10)
+                        qty = LOTS * lot_size
+                        max_premium_allowed = MAX_CAPITAL / qty
+                        
+                        strike_sym, strike_token, strike_exch = bot.get_strike(INDEX, spot, signal, max_premium_allowed)
+                        
                         if strike_sym:
                             opt_ltp = bot.get_live_price(strike_exch, strike_sym, strike_token)
                             if opt_ltp:
-                                lot_size = LOT_SIZES.get(INDEX, 10)
-                                qty = LOTS * lot_size
-                                
                                 if not PAPER:
                                     order_id = bot.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
                                     if order_id: 
@@ -340,6 +364,8 @@ with tab1:
                                     "sl": opt_ltp - SL_PTS,
                                     "tgt": opt_ltp + TGT_PTS
                                 }
+                        else:
+                            st.warning(f"⚠️ No strike found within budget of ₹{MAX_CAPITAL} (Max premium limit: ₹{max_premium_allowed:.2f}).")
                 
                 elif st.session_state.active_trade is None and signal == "WAIT":
                     if current_time >= cutoff_time:
