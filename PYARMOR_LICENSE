@@ -1,0 +1,33 @@
+name: Encrypt Code with PyArmor
+
+on:
+  push:
+    branches:
+      - main  # Runs every time you push to the main branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install PyArmor
+        run: pip install pyarmor
+
+      - name: Encrypt Script
+        run: |
+          # Replace 'app.py' with your filename
+          # Adding a 30-day expiry automatically
+          pyarmor gen -e 30 app.py 
+
+      - name: Upload Encrypted Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: encrypted-bot
+          path: dist/  # This is where the locked code lives
