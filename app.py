@@ -8,50 +8,70 @@ import pyotp
 from SmartApi import SmartConnect
 
 # ==========================================
-# 1. TECHNICAL ANALYZER (VOLUME & TREND LOGIC)
+# TECHNICAL ANALYZER (UPGRADED LOGIC)
 # ==========================================
 class TechnicalAnalyzer:
-    def calculate_volume_breakout(self, df, vol_length=20, vol_multiplier=1.8):
-        if df is None or len(df) < vol_length + 1: return "WAIT", "WAIT"
+
+    def calculate_indicators(self, df):
         df = df.copy()
-        
-        # Calculate the rolling average volume
-        df['avg_vol'] = df['volume'].rolling(window=vol_length).mean().shift(1)
-        
-        current_close = df['close'].iloc[-1]
-        prev_close = df['close'].iloc[-2]
-        current_vol = df['volume'].iloc[-1]
-        prev_avg_vol = df['avg_vol'].iloc[-1]
 
-        # Failsafe for 0 volume ticks
-        if current_vol == 0 or pd.isna(prev_avg_vol) or prev_avg_vol == 0:
-            return "WAIT", "WAIT"
+        # EMA Trend Filter
+        df['ema20'] = df['close'].ewm(span=20).mean()
+        df['ema50'] = df['close'].ewm(span=50).mean()
 
-        # --- TREND IDENTIFICATION (Price + Volume Logic) ---
+        # VWAP
+        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum()
+
+        # ATR
+        df['tr'] = df['high'] - df['low']
+        df['atr'] = df['tr'].rolling(14).mean()
+
+        # Volume Average
+        df['avg_vol'] = df['volume'].rolling(20).mean().shift(1)
+
+        return df
+
+    def generate_signal(self, df, vol_multiplier=1.8):
+        if df is None or len(df) < 50:
+            return "WAIT", "WAIT", None
+
+        df = self.calculate_indicators(df)
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+
         trend = "FLAT"
-        if current_close > prev_close and current_vol > prev_avg_vol:
-            trend = "LONG BUILDUP 🟢"
-        elif current_close < prev_close and current_vol > prev_avg_vol:
-            trend = "SHORT BUILDUP 🔴"
-        elif current_close > prev_close and current_vol < prev_avg_vol:
-            trend = "SHORT COVERING 🟡"
-        elif current_close < prev_close and current_vol < prev_avg_vol:
-            trend = "LONG UNWINDING 🟠"
-
-        # --- TRADE SIGNAL (Breakout Multiplier Logic) ---
         signal = "WAIT"
-        if current_vol > (prev_avg_vol * vol_multiplier):
-            if current_close > prev_close: 
+
+        # Trend Logic
+        if last['ema20'] > last['ema50']:
+            trend = "UPTREND"
+        elif last['ema20'] < last['ema50']:
+            trend = "DOWNTREND"
+
+        # Volume Breakout
+        if last['volume'] > last['avg_vol'] * vol_multiplier:
+
+            # CE Conditions
+            if (last['close'] > prev['close'] and
+                last['close'] > last['vwap'] and
+                trend == "UPTREND"):
                 signal = "BUY_CE"
-            elif current_close < prev_close: 
+
+            # PE Conditions
+            elif (last['close'] < prev['close'] and
+                  last['close'] < last['vwap'] and
+                  trend == "DOWNTREND"):
                 signal = "BUY_PE"
-                
-        return trend, signal
+
+        return trend, signal, last['atr']
+
 
 # ==========================================
-# 2. CORE BOT ENGINE
+# BOT ENGINE
 # ==========================================
 class SniperBot:
+
     def __init__(self, api_key, client_id, pwd, totp_secret):
         self.api_key = api_key
         self.client_id = client_id
@@ -69,355 +89,204 @@ class SniperBot:
             if res['status']:
                 self.api = obj
                 return True
-            return False
         except Exception as e:
-            st.error(f"Login Exception: {e}")
-            return False
+            st.error(e)
+        return False
 
     def fetch_master(self):
-        try:
-            df = pd.DataFrame(requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json").json())
-            df['expiry'] = pd.to_datetime(df['expiry'], errors='coerce')
-            df['strike'] = pd.to_numeric(df['strike'], errors='coerce') / 100 
-            self.token_map = df
-            return df
-        except Exception: return None
+        df = pd.DataFrame(requests.get(
+            "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+        ).json())
+        df['expiry'] = pd.to_datetime(df['expiry'], errors='coerce')
+        df['strike'] = pd.to_numeric(df['strike'], errors='coerce') / 100
+        self.token_map = df
 
     def get_live_price(self, exchange, symbol, token):
-        if not self.api: return None
-        try:
-            res = self.api.ltpData(exchange, symbol, str(token))
-            if res['status']: return float(res['data']['ltp'])
-        except: return None
+        res = self.api.ltpData(exchange, symbol, str(token))
+        if res['status']:
+            return float(res['data']['ltp'])
         return None
 
-    def get_historical_data(self, exchange, token, interval="FIVE_MINUTE", minutes=300):
-        if not self.api: return None
-        try:
-            todate = dt.datetime.now()
-            fromdate = todate - dt.timedelta(minutes=minutes)
-            res = self.api.getCandleData({
-                "exchange": exchange, "symboltoken": str(token), "interval": interval,
-                "fromdate": fromdate.strftime("%Y-%m-%d %H:%M"), "todate": todate.strftime("%Y-%m-%d %H:%M")
-            })
-            if res and res.get('status') and res.get('data'):
-                return pd.DataFrame(res['data'], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        except Exception: pass
+    def get_historical_data(self, exchange, token, interval, minutes=300):
+        todate = dt.datetime.now()
+        fromdate = todate - dt.timedelta(minutes=minutes)
+
+        res = self.api.getCandleData({
+            "exchange": exchange,
+            "symboltoken": str(token),
+            "interval": interval,
+            "fromdate": fromdate.strftime("%Y-%m-%d %H:%M"),
+            "todate": todate.strftime("%Y-%m-%d %H:%M")
+        })
+
+        if res['status'] and res['data']:
+            return pd.DataFrame(
+                res['data'],
+                columns=['timestamp','open','high','low','close','volume']
+            )
         return None
 
-    def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
-        try:
-            orderparams = {
-                "variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token),
-                "transactiontype": side, "exchange": exchange, "ordertype": "MARKET",
-                "producttype": "INTRADAY", "duration": "DAY", "quantity": str(qty)
-            }
-            orderId = self.api.placeOrder(orderparams)
-            return orderId
-        except Exception as e:
-            st.error(f"Order Error: {e}")
-            return None
-
-    def get_strike(self, symbol, spot, signal):
-        df = self.token_map
-        if df is None: return None, None, None
-        opt_type = "CE" if "BUY_CE" in signal else "PE"
-        name = symbol
-        exch_list = ["NFO"]
-        valid_instruments = ['OPTIDX', 'OPTSTK']
-        
-        # Commodity & Index Logic restored
-        if symbol in ["CRUDEOIL", "GOLD", "SILVER", "NATURALGAS"]: 
-            exch_list, valid_instruments = ["MCX", "NCO"], ['OPTFUT', 'OPTCOM', 'OPTENR', 'OPTBLN']
-        elif symbol == "SENSEX": 
-            exch_list, valid_instruments = ["BFO", "BSE"], ['OPTIDX']
-            
-        today = pd.Timestamp.today().normalize()
-        mask = (df['name'] == name) & (df['exch_seg'].isin(exch_list)) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type)) & (df['instrumenttype'].isin(valid_instruments))
-        subset = df[mask].copy()
-        if subset.empty: return None, None, None
-        subset = subset[subset['expiry'] == subset['expiry'].min()]
-        subset['diff'] = abs(subset['strike'] - spot)
-        best = subset.sort_values('diff').iloc[0]
-        return best['symbol'], best['token'], best['exch_seg']
 
 # ==========================================
-# 3. STREAMLIT UI & SECURITY
+# STREAMLIT APP
 # ==========================================
-st.set_page_config(page_title="Pro Algo Trader", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Pro Algo Trader", layout="wide")
 
-LOT_SIZES = {
-    "NIFTY": 75, "BANKNIFTY": 30, "SENSEX": 20, 
-    "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30
-}
+if "auth" not in st.session_state:
+    st.session_state.auth = False
+    st.session_state.bot_active = False
+    st.session_state.active_trade = None
+    st.session_state.daily_pnl = 0
+    st.session_state.trade_count = 0
+    st.session_state.trade_history = []
 
-# Initialize Session State Variables Safely
-for key in ['auth', 'bot_active', 'logs', 'trade_history']:
-    if key not in st.session_state: 
-        st.session_state[key] = False if key not in ['logs', 'trade_history'] else []
-if 'active_trade' not in st.session_state: st.session_state.active_trade = None
-if 'current_trend' not in st.session_state: st.session_state.current_trend = "WAIT"
-if 'current_signal' not in st.session_state: st.session_state.current_signal = "WAIT"
-
-def log(msg): 
-    st.session_state.logs.insert(0, f"[{dt.datetime.now().strftime('%H:%M:%S')}] {msg}")
-    if len(st.session_state.logs) > 50: st.session_state.logs.pop()
-
+# ------------------------------------------
+# LOGIN
+# ------------------------------------------
 with st.sidebar:
-    st.header("🔐 Secure Connect")
-    
-    if not st.session_state.auth:
-        st.info("Log in with your own Angel One credentials.")
-        API_KEY = st.text_input("API Key", type="password")
-        CLIENT_ID = st.text_input("Client ID")
-        PIN = st.text_input("PIN", type="password")
-        TOTP = st.text_input("TOTP secret", type="password")
-        
-        if st.button("Connect to Exchange", type="primary"):
-            temp_bot = SniperBot(API_KEY, CLIENT_ID, PIN, TOTP)
-            with st.spinner("Authenticating..."):
-                if temp_bot.login():
-                    st.session_state.bot = temp_bot
-                    st.session_state.auth = True
-                    temp_bot.fetch_master()
-                    log("System Authenticated Successfully")
-                    st.rerun()
-                else:
-                    st.error("Login Failed. Check credentials.")
-    else:
-        st.success(f"Connected: {st.session_state.bot.client_id}")
-        if st.button("Logout & Clear"):
-            st.session_state.clear()
-            st.rerun()
+    st.header("🔐 Login")
 
-    st.divider()
-    st.header("⚙️ Strategy Settings")
-    INDEX = st.selectbox("Watchlist", ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"])
-    TIMEFRAME = st.selectbox("Timeframe", ["ONE_MINUTE", "THREE_MINUTE", "FIVE_MINUTE"], index=2)
-    LOTS = st.number_input("Lots", 1, 100, 2)
-    SL_PTS = st.number_input("Stop Loss (Points)", 5, 200, 20)
-    TGT_PTS = st.number_input("Target (Points)", 10, 500, 40)
-    PAPER = st.toggle("📝 Paper Mode (Turn OFF for Real Trading)", True)
+    API = st.text_input("API Key", type="password")
+    CID = st.text_input("Client ID")
+    PIN = st.text_input("PIN", type="password")
+    TOTP = st.text_input("TOTP Secret", type="password")
 
-    # --- DOWNLOAD BUTTON LOGIC (FIXED) ---
-    st.divider()
-    st.subheader("📊 Export Data")
-    
-    if len(st.session_state.trade_history) > 0:
-        df_history = pd.DataFrame(st.session_state.trade_history)
-    else:
-        df_history = pd.DataFrame(columns=["Time", "Symbol", "Type", "Qty", "Entry Price", "Exit Price", "PnL (₹)"])
-        
-    csv_data = df_history.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download Excel/CSV",
-        data=csv_data,
-        file_name=f"Algo_Trades_{dt.date.today()}.csv",
-        mime="text/csv"
-    )
+    if st.button("Login"):
+        bot = SniperBot(API, CID, PIN, TOTP)
+        if bot.login():
+            bot.fetch_master()
+            st.session_state.bot = bot
+            st.session_state.auth = True
+            st.success("Connected")
 
 if not st.session_state.auth:
-    st.title("Welcome to Pro Algo Trader")
-    st.warning("Please connect using the sidebar with your Angel One details to begin.")
     st.stop()
 
-tab1, tab2 = st.tabs(["⚡ Live Dashboard", "🔎 Scanner"])
 bot = st.session_state.bot
 
-with tab1:
-    col1, col2 = st.columns(2)
-    if col1.button("🟢 START BOT"): st.session_state.bot_active = True
-    if col2.button("🔴 STOP BOT"): st.session_state.bot_active = False
+# ------------------------------------------
+# SETTINGS
+# ------------------------------------------
+INDEX = st.selectbox("Index", ["NIFTY", "BANKNIFTY"])
+TIMEFRAME = st.selectbox("Timeframe", ["FIVE_MINUTE"])
+LOTS = st.number_input("Lots", 1, 10, 1)
+DAILY_LOSS_LIMIT = -5000
+MAX_TRADES = 5
 
-    if st.session_state.bot_active:
-        current_time = dt.datetime.now().time()
-        
-        # --- DYNAMIC MARKET TIMING ---
-        if INDEX in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]:
-            cutoff_time = dt.time(23, 15)  # 11:15 PM Auto-Square-Off for MCX
-            cutoff_label = "11:15 PM"
-        else:
-            cutoff_time = dt.time(15, 15)  # 3:15 PM Auto-Square-Off for NSE/BSE
-            cutoff_label = "3:15 PM"
+# ------------------------------------------
+# CONTROL
+# ------------------------------------------
+col1, col2 = st.columns(2)
+if col1.button("START"):
+    st.session_state.bot_active = True
+if col2.button("STOP"):
+    st.session_state.bot_active = False
 
-        st.info(f"Bot is active. Waiting for setup on {INDEX}...")
-        
-        df_map = bot.token_map
-        today = pd.Timestamp.today().normalize()
-        
-        if INDEX in ["NIFTY", "BANKNIFTY", "SENSEX"]:
-            exch_seg = "BFO" if INDEX == "SENSEX" else "NFO"
-            mask = (df_map['name'] == INDEX) & (df_map['exch_seg'] == exch_seg) & (df_map['instrumenttype'] == 'FUTIDX')
-        else:
-            mask = (df_map['name'] == INDEX) & (df_map['exch_seg'].isin(['MCX', 'NCO'])) & (df_map['symbol'].str.contains('FUT'))
-            
-        futs = df_map[mask].copy()
-        futs = futs[futs['expiry'] >= today]
-        
-        if not futs.empty:
-            best_fut = futs[futs['expiry'] == futs['expiry'].min()].iloc[0]
-            exch, spot_sym, token = best_fut['exch_seg'], best_fut['symbol'], best_fut['token']
-            
-            spot = bot.get_live_price(exch, spot_sym, token)
-            
-            if spot:
-                df_candles = bot.get_historical_data(exch, token, interval=TIMEFRAME, minutes=300)
-                if df_candles is not None:
-                    trend, new_signal = bot.analyzer.calculate_volume_breakout(df_candles, vol_length=20, vol_multiplier=1.8)
-                    st.session_state.current_trend = trend
-                    st.session_state.current_signal = new_signal
+# ------------------------------------------
+# MAIN LOOP
+# ------------------------------------------
+if st.session_state.bot_active:
 
-                st.metric(f"Live {INDEX} Futures Price", spot)
-                st.metric("Market Sentiment (Trend)", st.session_state.current_trend)
-                st.metric("Algo Action", st.session_state.current_signal)
+    # No trade first 10 min
+    if dt.datetime.now().time() < dt.time(9,25):
+        st.warning("Waiting for market stabilization...")
+        st.stop()
 
-                # SCOPING FIX: Safely pull signal from session state
-                signal = st.session_state.current_signal
+    # Risk controls
+    if st.session_state.daily_pnl <= DAILY_LOSS_LIMIT:
+        st.error("Daily loss limit hit. Bot stopped.")
+        st.session_state.bot_active = False
+        st.stop()
 
-                # --- ENTRY LOGIC ---
-                if st.session_state.active_trade is None and signal in ["BUY_CE", "BUY_PE"]:
-                    # Prevent new entries if past market cutoff
-                    if current_time >= cutoff_time:
-                        st.warning(f"⏰ {cutoff_label} Cutoff Reached. No new trades will be initiated today.")
-                    else:
-                        strike_sym, strike_token, strike_exch = bot.get_strike(INDEX, spot, signal)
-                        if strike_sym:
-                            opt_ltp = bot.get_live_price(strike_exch, strike_sym, strike_token)
-                            if opt_ltp:
-                                lot_size = LOT_SIZES.get(INDEX, 10)
-                                qty = LOTS * lot_size
-                                
-                                # REAL TRADING EXECUTION
-                                if not PAPER:
-                                    order_id = bot.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
-                                    if order_id: 
-                                        log(f"⚡ REAL ENTRY PLACED: {strike_sym} | Qty: {qty} | ID: {order_id}")
-                                    else:
-                                        log(f"❌ REAL ENTRY FAILED: Check margin/limits.")
-                                else:
-                                    log(f"📝 PAPER ENTRY: {strike_sym} @ {opt_ltp} | Qty: {qty}")
-                                    
-                                st.session_state.active_trade = {
-                                    "symbol": strike_sym, 
-                                    "token": strike_token, 
-                                    "exch": strike_exch,
-                                    "type": "CE" if "CE" in strike_sym else "PE",
-                                    "entry": opt_ltp,
-                                    "qty": qty,
-                                    "sl": opt_ltp - SL_PTS,
-                                    "tgt": opt_ltp + TGT_PTS
-                                }
-                
-                elif st.session_state.active_trade is None and signal == "WAIT":
-                    if current_time >= cutoff_time:
-                        st.write("⏰ Market closed for new intraday positions.")
-                    else:
-                        st.write("Looking for Volume Breakouts...")
+    if st.session_state.trade_count >= MAX_TRADES:
+        st.warning("Max trades reached today.")
+        st.stop()
 
-                # --- EXIT LOGIC ---
-                elif st.session_state.active_trade is not None:
-                    trade = st.session_state.active_trade
-                    close_price = bot.get_live_price(trade['exch'], trade['symbol'], trade['token'])
-                    
-                    if close_price:
-                        st.success(f"Open Trade: {trade['symbol']} | Entry: {trade['entry']} | LTP: {close_price}")
-                        
-                        exit_triggered = False
-                        exit_reason = ""
-                        
-                        # Auto SL / TGT / Time Stop Checks
-                        if current_time >= cutoff_time:
-                            exit_triggered = True
-                            exit_reason = f"⏰ {cutoff_label} AUTO-SQUARE-OFF @ {close_price}"
-                        elif close_price >= trade['tgt']:
-                            exit_triggered = True
-                            exit_reason = f"🎯 TARGET HIT @ {close_price}"
-                        elif close_price <= trade['sl']:
-                            exit_triggered = True
-                            exit_reason = f"🛑 SL HIT @ {close_price}"
-                            
-                        if st.button("Close Trade Manually") or exit_triggered:
-                            if not exit_triggered:
-                                exit_reason = f"👋 MANUALLY CLOSED @ {close_price}"
-                                
-                            final_pnl = (close_price - trade['entry']) * trade['qty'] if trade['type'] == "CE" else (trade['entry'] - close_price) * trade['qty']
-                            
-                            # REAL TRADING EXECUTION
-                            if not PAPER:
-                                bot.place_real_order(trade['symbol'], trade['token'], trade['qty'], "SELL", trade['exch'])
-                                log(f"⚡ REAL EXIT PLACED: {trade['symbol']} | Qty: {trade['qty']}")
-                                
-                            st.session_state.trade_history.append({
-                                "Time": dt.datetime.now().strftime('%H:%M:%S'),
-                                "Symbol": trade['symbol'],
-                                "Type": trade['type'],
-                                "Qty": trade['qty'],
-                                "Entry Price": trade['entry'],
-                                "Exit Price": close_price,
-                                "PnL (₹)": round(final_pnl, 2)
-                            })
-                            
-                            log(f"{exit_reason} | PnL: ₹{round(final_pnl, 2)}")
-                            st.session_state.active_trade = None
-                        else:
-                            st.info(f"Tracking SL: {trade['sl']} | Target: {trade['tgt']}")
-        else:
-            st.error(f"Could not load Futures data for {INDEX}.")
+    # Fetch futures (simplified example for NIFTY)
+    df_map = bot.token_map
+    today = pd.Timestamp.today().normalize()
 
-        time.sleep(4)
-        st.rerun()
+    futs = df_map[
+        (df_map['name'] == INDEX) &
+        (df_map['instrumenttype'] == 'FUTIDX') &
+        (df_map['expiry'] >= today)
+    ]
 
-    else:
-        st.warning("Bot is currently stopped.")
-        
-    st.divider()
-    st.subheader("📜 Logs")
-    for l in st.session_state.logs: st.text(l)
+    if not futs.empty:
+        fut = futs.sort_values("expiry").iloc[0]
 
-with tab2:
-    st.write("Run manual scans without locking up the dashboard.")
-    if st.button("🔍 Scan Momentum Stocks"):
-        was_active = st.session_state.bot_active
-        st.session_state.bot_active = False 
+        hist = bot.get_historical_data(
+            fut['exch_seg'],
+            fut['token'],
+            TIMEFRAME,
+            300
+        )
 
-        BASKET = ["HDFCBANK", "RELIANCE", "ICICIBANK", "INFY", "TCS", "SBIN"]
-        df_map = bot.token_map
-        suggestions = []
-        progress_bar = st.progress(0)
-        
-        if df_map is not None:
-            eq_df = df_map[(df_map['exch_seg'] == 'NSE') & (df_map['symbol'].str.endswith('-EQ'))]
-            for i, stock in enumerate(BASKET):
-                row = eq_df[eq_df['name'] == stock]
-                if not row.empty:
-                    token = row.iloc[0]['token']
-                    hist = bot.get_historical_data("NSE", token, "FIVE_MINUTE", 300)
-                    if hist is not None and not hist.empty:
-                        trend, signal = bot.analyzer.calculate_volume_breakout(hist, vol_length=20, vol_multiplier=1.8)
-                        if signal != "WAIT" or "BUILDUP" in trend:
-                            suggestions.append({"Stock": stock, "Trend": trend, "Action": signal})
-                time.sleep(0.4)
-                progress_bar.progress((i + 1) / len(BASKET))
-            
-            if suggestions:
-                st.dataframe(pd.DataFrame(suggestions))
-            else:
-                st.info("No volume breakouts or buildups found right now.")
-        
-        if was_active: 
-            st.session_state.bot_active = True
-            st.success("Scan complete. Live dashboard resumed.")
-            def send_whatsapp_alert(message):
-    # Replace with your actual number and the API key you just received
-    phone = "+919876543210" 
-    api_key = "123456"
-    
-    # URL encode the message to handle spaces and symbols
-    safe_message = requests.utils.quote(message)
-    url = f"https://api.callmebot.com/whatsapp.php?phone={phone}&text={safe_message}&apikey={api_key}"
-    
-    try:
-        requests.get(url, timeout=5)
-    except Exception:
-        pass # Fail silently so it doesn't crash your trading loop
+        trend, signal, atr = bot.analyzer.generate_signal(hist)
 
+        st.metric("Trend", trend)
+        st.metric("Signal", signal)
+
+        # Entry
+        if st.session_state.active_trade is None and signal != "WAIT":
+
+            ltp = bot.get_live_price(
+                fut['exch_seg'],
+                fut['symbol'],
+                fut['token']
+            )
+
+            qty = LOTS * 75
+
+            st.session_state.active_trade = {
+                "entry": ltp,
+                "sl": ltp - atr,
+                "tgt": ltp + (atr * 2),
+                "qty": qty
+            }
+
+            st.session_state.trade_count += 1
+
+        # Exit Logic
+        if st.session_state.active_trade is not None:
+
+            trade = st.session_state.active_trade
+            ltp = bot.get_live_price(
+                fut['exch_seg'],
+                fut['symbol'],
+                fut['token']
+            )
+
+            # Trailing SL
+            if ltp > trade['entry'] + atr:
+                trade['sl'] = trade['entry']
+
+            if ltp >= trade['tgt'] or ltp <= trade['sl']:
+
+                pnl = (ltp - trade['entry']) * trade['qty']
+                st.session_state.daily_pnl += pnl
+
+                st.session_state.trade_history.append({
+                    "Entry": trade['entry'],
+                    "Exit": ltp,
+                    "PnL": pnl
+                })
+
+                st.session_state.active_trade = None
+
+    time.sleep(4)
+    st.rerun()
+
+# ------------------------------------------
+# ANALYTICS
+# ------------------------------------------
+if st.session_state.trade_history:
+    df = pd.DataFrame(st.session_state.trade_history)
+
+    st.subheader("Performance")
+    st.metric("Total PnL", round(df["PnL"].sum(),2))
+    st.metric("Win Rate",
+              round(len(df[df["PnL"]>0])/len(df)*100,2))
+
+    df["Equity"] = df["PnL"].cumsum()
+    st.line_chart(df["Equity"])
