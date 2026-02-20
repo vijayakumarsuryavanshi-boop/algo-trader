@@ -121,7 +121,8 @@ class SniperBot:
         except Exception: return None
 
     def get_live_price(self, exchange, symbol, token):
-        if self.is_mock: return float(np.random.uniform(10, 20)) if "CE" in str(symbol) or "PE" in str(symbol) else float(np.random.uniform(2000, 22100))
+        if self.is_mock: 
+            return float(np.random.uniform(100, 120)) if ("CE" in str(symbol) or "PE" in str(symbol)) else float(np.random.uniform(2000, 22100))
         if not self.api: return None
         try:
             res = self.api.ltpData(exchange, symbol, str(token))
@@ -167,7 +168,11 @@ class SniperBot:
         except Exception: return None
 
     def get_strike(self, symbol, spot, signal, max_premium):
-        if self.is_mock: return f"{symbol}24JAN{int(spot)}CE", "12345", "NFO"
+        if self.is_mock: 
+            opt_type = "CE" if "BUY_CE" in signal else "PE"
+            mock_expiry = (pd.Timestamp.today() + pd.Timedelta(days=2)).strftime('%d%b').upper()
+            return f"{symbol}{mock_expiry}{int(spot)}{opt_type}", "12345", "NFO"
+            
         df = self.token_map
         if df is None or df.empty: return None, None, None
         
@@ -230,6 +235,10 @@ class SniperBot:
                 cutoff_time = dt.time(23, 15) if is_commodity else dt.time(15, 15)
                 current_time = dt.datetime.now().time()
                 
+                # IGNORE TIME CUTOFF IN MOCK MODE FOR TESTING
+                if self.is_mock:
+                    cutoff_time = dt.time(23, 59) 
+                
                 spot, base_lot_size = None, 1
                 
                 if not self.is_mock:
@@ -260,7 +269,7 @@ class SniperBot:
                     
                     if s.get('hero_zero', False) and signal in ["BUY_CE", "BUY_PE"]:
                         hz_start_time = dt.time(19, 0) if is_commodity else dt.time(13, 30)
-                        if current_time < hz_start_time:
+                        if current_time < hz_start_time and not self.is_mock:
                             signal = "WAIT"
                             trend = f"H/Z Locked until {hz_start_time.strftime('%I:%M %p')}"
                             
