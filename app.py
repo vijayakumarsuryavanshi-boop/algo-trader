@@ -323,30 +323,29 @@ class SniperBot:
             except Exception as e:
                 self.log(f"Thread Error: {str(e)}")
             time.sleep(3)
+# ==========================================
+# 4. STREAMLIT UI 
+# ==========================================
+st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
 
-# --- TOTAL BRANDING REMOVAL ---
+# --- Initialize Session State Keys ---
+if 'bot' not in st.session_state:
+    st.session_state['bot'] = None
+
+# Your CSS/Branding cleanup code here
 st.markdown("""
     <style>
-    /* 1. Hide the standard 'Made with Streamlit' footer */
     footer {visibility: hidden;}
-
-    /* 2. Hide the 'Hosted with Streamlit' popup in bottom right */
     [data-testid="stStatusWidget"] {display: none;}
-
-    /* 3. Hide the 'Deploy' button */
     .stAppDeployButton {display: none;}
-
-    /* 4. Hide the Hamburger Menu */
     #MainMenu {visibility: hidden;}
-
-    /* 5. Hide the 'Manage app' viewer for you as the owner */
-    [data-testid="stConnectionStatus"] {display: none;}
-
-    /* 6. Clean up the header padding while keeping the sidebar button */
-    header {background-color: rgba(0,0,0,0);}
-    .block-container {padding-top: 1rem;}
     </style>
     """, unsafe_allow_html=True)
+
+# Now this check will work perfectly
+if st.session_state.bot is None:
+    # Login / Connection logic
+    ...
 
 with st.sidebar:
     st.header("🔐 Connection Setup")
@@ -579,4 +578,5 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
+
 
