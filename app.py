@@ -79,6 +79,19 @@ class SniperBot:
         except Exception: pass
         return None
 
+    def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
+        try:
+            orderparams = {
+                "variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token),
+                "transactiontype": side, "exchange": exchange, "ordertype": "MARKET",
+                "producttype": "INTRADAY", "duration": "DAY", "quantity": str(qty)
+            }
+            orderId = self.api.placeOrder(orderparams)
+            return orderId
+        except Exception as e:
+            st.error(f"Order Error: {e}")
+            return None
+
     def get_strike(self, symbol, spot, signal):
         df = self.token_map
         if df is None: return None, None, None
@@ -105,6 +118,11 @@ class SniperBot:
 # 3. STREAMLIT UI & SECURITY
 # ==========================================
 st.set_page_config(page_title="Pro Algo Trader", page_icon="📈", layout="wide")
+
+LOT_SIZES = {
+    "NIFTY": 75, "BANKNIFTY": 30, "SENSEX": 20, 
+    "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30
+}
 
 # Initialize Session State Variables Safely
 for key in ['auth', 'bot_active', 'logs', 'trade_history']:
@@ -138,7 +156,7 @@ with st.sidebar:
                     log("System Authenticated Successfully")
                     st.rerun()
                 else:
-                    st.error("Login Failed. Check credentials or IP whitelist.")
+                    st.error("Login Failed. Check credentials.")
     else:
         st.success(f"Connected: {st.session_state.bot.client_id}")
         if st.button("Logout & Clear"):
@@ -146,18 +164,20 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    INDEX = st.selectbox("Watchlist", ["NIFTY", "BANKNIFTY", "SENSEX"])
+    st.header("⚙️ Strategy Settings")
+    INDEX = st.selectbox("Watchlist", ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"])
     TIMEFRAME = st.selectbox("Timeframe", ["ONE_MINUTE", "THREE_MINUTE", "FIVE_MINUTE"], index=2)
-    PAPER = st.toggle("📝 Paper Mode", True)
+    LOTS = st.number_input("Lots", 1, 100, 2)
+    SL_PTS = st.number_input("Stop Loss (Points)", 5, 200, 20)
+    TGT_PTS = st.number_input("Target (Points)", 10, 500, 40)
+    PAPER = st.toggle("📝 Paper Mode (Turn OFF for Real Trading)", True)
 
     # --- DOWNLOAD BUTTON LOGIC ---
     if st.session_state.get('trade_history'):
         st.divider()
         st.subheader("📊 Export Data")
-        
         df_history = pd.DataFrame(st.session_state.trade_history)
         csv_data = df_history.to_csv(index=False).encode('utf-8')
-        
         st.download_button(
             label="📥 Download Trade History",
             data=csv_data,
@@ -179,9 +199,8 @@ with tab1:
     if col2.button("🔴 STOP BOT"): st.session_state.bot_active = False
 
     if st.session_state.bot_active:
-        st.info("Bot is active. Waiting for setup...")
+        st.info(f"Bot is active. Waiting for setup on {INDEX}...")
         
-        # We MUST fetch FUTURES instead of SPOT for Indices to get Volume
         df_map = bot.token_map
         today = pd.Timestamp.today().normalize()
         
@@ -210,48 +229,83 @@ with tab1:
                 st.metric(f"Live {INDEX} Futures Price", spot)
                 st.metric("Algo Action", st.session_state.current_signal)
 
-                # Entry Logic
+                # --- ENTRY LOGIC ---
                 if st.session_state.active_trade is None and signal in ["BUY_CE", "BUY_PE"]:
                     strike_sym, strike_token, strike_exch = bot.get_strike(INDEX, spot, signal)
                     if strike_sym:
                         opt_ltp = bot.get_live_price(strike_exch, strike_sym, strike_token)
                         if opt_ltp:
-                            log(f"📝 PAPER ENTRY: {strike_sym} @ {opt_ltp}")
+                            lot_size = LOT_SIZES.get(INDEX, 10)
+                            qty = LOTS * lot_size
+                            
+                            # REAL TRADING EXECUTION
+                            if not PAPER:
+                                order_id = bot.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
+                                if order_id: 
+                                    log(f"⚡ REAL ENTRY PLACED: {strike_sym} | Qty: {qty} | ID: {order_id}")
+                                else:
+                                    log(f"❌ REAL ENTRY FAILED: Check margin/limits.")
+                            else:
+                                log(f"📝 PAPER ENTRY: {strike_sym} @ {opt_ltp} | Qty: {qty}")
+                                
                             st.session_state.active_trade = {
                                 "symbol": strike_sym, 
                                 "token": strike_token, 
                                 "exch": strike_exch,
                                 "type": "CE" if "CE" in strike_sym else "PE",
-                                "entry": opt_ltp
+                                "entry": opt_ltp,
+                                "qty": qty,
+                                "sl": opt_ltp - SL_PTS,
+                                "tgt": opt_ltp + TGT_PTS
                             }
                 
                 elif st.session_state.active_trade is None and signal == "WAIT":
                     st.write("Looking for Volume Breakouts...")
 
-                # Exit Logic
+                # --- EXIT LOGIC ---
                 elif st.session_state.active_trade is not None:
                     trade = st.session_state.active_trade
-                    st.success(f"Open Trade: {trade['symbol']} | Entry: {trade['entry']}")
+                    close_price = bot.get_live_price(trade['exch'], trade['symbol'], trade['token'])
                     
-                    if st.button("Close Trade Manually"):
-                        close_price = bot.get_live_price(trade['exch'], trade['symbol'], trade['token'])
+                    if close_price:
+                        st.success(f"Open Trade: {trade['symbol']} | Entry: {trade['entry']} | LTP: {close_price}")
                         
-                        if close_price:
-                            final_pnl = (close_price - trade['entry']) if trade['type'] == "CE" else (trade['entry'] - close_price)
+                        exit_triggered = False
+                        exit_reason = ""
+                        
+                        # Auto SL / TGT Checks
+                        if close_price >= trade['tgt']:
+                            exit_triggered = True
+                            exit_reason = f"🎯 TARGET HIT @ {close_price}"
+                        elif close_price <= trade['sl']:
+                            exit_triggered = True
+                            exit_reason = f"🛑 SL HIT @ {close_price}"
                             
+                        if st.button("Close Trade Manually") or exit_triggered:
+                            if not exit_triggered:
+                                exit_reason = f"👋 MANUALLY CLOSED @ {close_price}"
+                                
+                            final_pnl = (close_price - trade['entry']) * trade['qty'] if trade['type'] == "CE" else (trade['entry'] - close_price) * trade['qty']
+                            
+                            # REAL TRADING EXECUTION
+                            if not PAPER:
+                                bot.place_real_order(trade['symbol'], trade['token'], trade['qty'], "SELL", trade['exch'])
+                                log(f"⚡ REAL EXIT PLACED: {trade['symbol']} | Qty: {trade['qty']}")
+                                
                             st.session_state.trade_history.append({
                                 "Time": dt.datetime.now().strftime('%H:%M:%S'),
                                 "Symbol": trade['symbol'],
                                 "Type": trade['type'],
+                                "Qty": trade['qty'],
                                 "Entry Price": trade['entry'],
                                 "Exit Price": close_price,
-                                "PnL (Points)": round(final_pnl, 2)
+                                "PnL (₹)": round(final_pnl, 2)
                             })
                             
-                            log(f"Closed {trade['symbol']} manually. PnL: {round(final_pnl, 2)}")
+                            log(f"{exit_reason} | PnL: ₹{round(final_pnl, 2)}")
                             st.session_state.active_trade = None
                         else:
-                            st.warning("Fetching exit price, try again...")
+                            st.info(f"Tracking SL: {trade['sl']} | Target: {trade['tgt']}")
         else:
             st.error(f"Could not load Futures data for {INDEX}.")
 
@@ -271,7 +325,7 @@ with tab2:
         was_active = st.session_state.bot_active
         st.session_state.bot_active = False 
 
-        BASKET = ["HDFCBANK", "RELIANCE", "ICICIBANK", "INFY"]
+        BASKET = ["HDFCBANK", "RELIANCE", "ICICIBANK", "INFY", "TCS", "SBIN"]
         df_map = bot.token_map
         suggestions = []
         progress_bar = st.progress(0)
