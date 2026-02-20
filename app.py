@@ -8,31 +8,57 @@ import pyotp
 from SmartApi import SmartConnect
 
 # ==========================================
-# 1. TECHNICAL ANALYZER (VOLUME BREAKOUT)
+# 1. TECHNICAL ANALYZER (VOLUME & TREND LOGIC)
 # ==========================================
 class TechnicalAnalyzer:
     def calculate_volume_breakout(self, df, vol_length=20, vol_multiplier=1.8):
         if df is None or len(df) < vol_length + 1: return "WAIT", "WAIT"
         df = df.copy()
+        
+        # Calculate the rolling average volume
         df['avg_vol'] = df['volume'].rolling(window=vol_length).mean().shift(1)
-        current_close, current_open = df['close'].iloc[-1], df['open'].iloc[-1]
-        current_vol, prev_avg_vol = df['volume'].iloc[-1], df['avg_vol'].iloc[-1]
+        
+        current_close = df['close'].iloc[-1]
+        prev_close = df['close'].iloc[-2]
+        current_vol = df['volume'].iloc[-1]
+        prev_avg_vol = df['avg_vol'].iloc[-1]
 
+        # Failsafe for 0 volume ticks
         if current_vol == 0 or pd.isna(prev_avg_vol) or prev_avg_vol == 0:
             return "WAIT", "WAIT"
 
+        # --- TREND IDENTIFICATION (Price + Volume Logic) ---
+        trend = "FLAT"
+        if current_close > prev_close and current_vol > prev_avg_vol:
+            trend = "LONG BUILDUP 🟢"
+        elif current_close < prev_close and current_vol > prev_avg_vol:
+            trend = "SHORT BUILDUP 🔴"
+        elif current_close > prev_close and current_vol < prev_avg_vol:
+            trend = "SHORT COVERING 🟡"
+        elif current_close < prev_close and current_vol < prev_avg_vol:
+            trend = "LONG UNWINDING 🟠"
+
+        # --- TRADE SIGNAL (Breakout Multiplier Logic) ---
+        signal = "WAIT"
         if current_vol > (prev_avg_vol * vol_multiplier):
-            if current_close > current_open: return "VOL SURGE 🟢", "BUY_CE"
-            elif current_close < current_open: return "VOL DUMP 🔴", "BUY_PE"
-        return "WAIT", "WAIT"
+            if current_close > prev_close: 
+                signal = "BUY_CE"
+            elif current_close < prev_close: 
+                signal = "BUY_PE"
+                
+        return trend, signal
 
 # ==========================================
 # 2. CORE BOT ENGINE
 # ==========================================
 class SniperBot:
     def __init__(self, api_key, client_id, pwd, totp_secret):
-        self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
-        self.api, self.token_map = None, None
+        self.api_key = api_key
+        self.client_id = client_id
+        self.pwd = pwd
+        self.totp_secret = totp_secret
+        self.api = None
+        self.token_map = None
         self.analyzer = TechnicalAnalyzer()
 
     def login(self):
@@ -100,6 +126,7 @@ class SniperBot:
         exch_list = ["NFO"]
         valid_instruments = ['OPTIDX', 'OPTSTK']
         
+        # Commodity & Index Logic restored
         if symbol in ["CRUDEOIL", "GOLD", "SILVER", "NATURALGAS"]: 
             exch_list, valid_instruments = ["MCX", "NCO"], ['OPTFUT', 'OPTCOM', 'OPTENR', 'OPTBLN']
         elif symbol == "SENSEX": 
@@ -172,18 +199,23 @@ with st.sidebar:
     TGT_PTS = st.number_input("Target (Points)", 10, 500, 40)
     PAPER = st.toggle("📝 Paper Mode (Turn OFF for Real Trading)", True)
 
-    # --- DOWNLOAD BUTTON LOGIC ---
-    if st.session_state.get('trade_history'):
-        st.divider()
-        st.subheader("📊 Export Data")
+    # --- DOWNLOAD BUTTON LOGIC (FIXED) ---
+    st.divider()
+    st.subheader("📊 Export Data")
+    
+    # Always create the DataFrame so the button never disappears
+    if len(st.session_state.trade_history) > 0:
         df_history = pd.DataFrame(st.session_state.trade_history)
-        csv_data = df_history.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Trade History",
-            data=csv_data,
-            file_name=f"Algo_Trades_{dt.date.today()}.csv",
-            mime="text/csv"
-        )
+    else:
+        df_history = pd.DataFrame(columns=["Time", "Symbol", "Type", "Qty", "Entry Price", "Exit Price", "PnL (₹)"])
+        
+    csv_data = df_history.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Excel/CSV",
+        data=csv_data,
+        file_name=f"Algo_Trades_{dt.date.today()}.csv",
+        mime="text/csv"
+    )
 
 if not st.session_state.auth:
     st.title("Welcome to Pro Algo Trader")
@@ -222,12 +254,16 @@ with tab1:
             if spot:
                 df_candles = bot.get_historical_data(exch, token, interval=TIMEFRAME, minutes=300)
                 if df_candles is not None:
-                    trend, signal = bot.analyzer.calculate_volume_breakout(df_candles, vol_length=20, vol_multiplier=1.8)
+                    trend, new_signal = bot.analyzer.calculate_volume_breakout(df_candles, vol_length=20, vol_multiplier=1.8)
                     st.session_state.current_trend = trend
-                    st.session_state.current_signal = signal
+                    st.session_state.current_signal = new_signal
 
                 st.metric(f"Live {INDEX} Futures Price", spot)
+                st.metric("Market Sentiment (Trend)", st.session_state.current_trend)
                 st.metric("Algo Action", st.session_state.current_signal)
+
+                # SCOPING FIX: Safely pull signal from session state
+                signal = st.session_state.current_signal
 
                 # --- ENTRY LOGIC ---
                 if st.session_state.active_trade is None and signal in ["BUY_CE", "BUY_PE"]:
@@ -339,15 +375,16 @@ with tab2:
                     hist = bot.get_historical_data("NSE", token, "FIVE_MINUTE", 300)
                     if hist is not None and not hist.empty:
                         trend, signal = bot.analyzer.calculate_volume_breakout(hist, vol_length=20, vol_multiplier=1.8)
-                        if signal != "WAIT":
-                            suggestions.append({"Stock": stock, "Action": signal})
+                        # Display both the general trend and if there is a breakout signal
+                        if signal != "WAIT" or "BUILDUP" in trend:
+                            suggestions.append({"Stock": stock, "Trend": trend, "Action": signal})
                 time.sleep(0.4)
                 progress_bar.progress((i + 1) / len(BASKET))
             
             if suggestions:
                 st.dataframe(pd.DataFrame(suggestions))
             else:
-                st.info("No volume breakouts found right now.")
+                st.info("No volume breakouts or buildups found right now.")
         
         if was_active: 
             st.session_state.bot_active = True
