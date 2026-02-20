@@ -106,8 +106,10 @@ class SniperBot:
 # ==========================================
 st.set_page_config(page_title="Pro Algo Trader", page_icon="📈", layout="wide")
 
-for key in ['auth', 'bot_active', 'logs']:
-    if key not in st.session_state: st.session_state[key] = False if key != 'logs' else []
+# Initialize Session State Variables Safely
+for key in ['auth', 'bot_active', 'logs', 'trade_history']:
+    if key not in st.session_state: 
+        st.session_state[key] = False if key not in ['logs', 'trade_history'] else []
 if 'active_trade' not in st.session_state: st.session_state.active_trade = None
 if 'current_trend' not in st.session_state: st.session_state.current_trend = "WAIT"
 if 'current_signal' not in st.session_state: st.session_state.current_signal = "WAIT"
@@ -121,7 +123,6 @@ with st.sidebar:
     
     if not st.session_state.auth:
         st.info("Log in with your own Angel One credentials.")
-        # Notice that value defaults have been completely removed
         API_KEY = st.text_input("API Key", type="password")
         CLIENT_ID = st.text_input("Client ID")
         PIN = st.text_input("PIN", type="password")
@@ -149,6 +150,21 @@ with st.sidebar:
     TIMEFRAME = st.selectbox("Timeframe", ["ONE_MINUTE", "THREE_MINUTE", "FIVE_MINUTE"], index=2)
     PAPER = st.toggle("📝 Paper Mode", True)
 
+    # --- DOWNLOAD BUTTON LOGIC ---
+    if st.session_state.get('trade_history'):
+        st.divider()
+        st.subheader("📊 Export Data")
+        
+        df_history = pd.DataFrame(st.session_state.trade_history)
+        csv_data = df_history.to_csv(index=False).encode('utf-8')
+        
+        st.download_button(
+            label="📥 Download Trade History",
+            data=csv_data,
+            file_name=f"Algo_Trades_{dt.date.today()}.csv",
+            mime="text/csv"
+        )
+
 if not st.session_state.auth:
     st.title("Welcome to Pro Algo Trader")
     st.warning("Please connect using the sidebar with your Angel One details to begin.")
@@ -165,6 +181,7 @@ with tab1:
     if st.session_state.bot_active:
         st.info("Bot is active. Waiting for setup...")
         
+        # We MUST fetch FUTURES instead of SPOT for Indices to get Volume
         df_map = bot.token_map
         today = pd.Timestamp.today().normalize()
         
@@ -193,23 +210,48 @@ with tab1:
                 st.metric(f"Live {INDEX} Futures Price", spot)
                 st.metric("Algo Action", st.session_state.current_signal)
 
+                # Entry Logic
                 if st.session_state.active_trade is None and signal in ["BUY_CE", "BUY_PE"]:
                     strike_sym, strike_token, strike_exch = bot.get_strike(INDEX, spot, signal)
                     if strike_sym:
                         opt_ltp = bot.get_live_price(strike_exch, strike_sym, strike_token)
                         if opt_ltp:
                             log(f"📝 PAPER ENTRY: {strike_sym} @ {opt_ltp}")
-                            st.session_state.active_trade = {"symbol": strike_sym, "token": strike_token, "entry": opt_ltp}
+                            st.session_state.active_trade = {
+                                "symbol": strike_sym, 
+                                "token": strike_token, 
+                                "exch": strike_exch,
+                                "type": "CE" if "CE" in strike_sym else "PE",
+                                "entry": opt_ltp
+                            }
                 
                 elif st.session_state.active_trade is None and signal == "WAIT":
                     st.write("Looking for Volume Breakouts...")
 
+                # Exit Logic
                 elif st.session_state.active_trade is not None:
                     trade = st.session_state.active_trade
                     st.success(f"Open Trade: {trade['symbol']} | Entry: {trade['entry']}")
+                    
                     if st.button("Close Trade Manually"):
-                        log(f"Closed {trade['symbol']}")
-                        st.session_state.active_trade = None
+                        close_price = bot.get_live_price(trade['exch'], trade['symbol'], trade['token'])
+                        
+                        if close_price:
+                            final_pnl = (close_price - trade['entry']) if trade['type'] == "CE" else (trade['entry'] - close_price)
+                            
+                            st.session_state.trade_history.append({
+                                "Time": dt.datetime.now().strftime('%H:%M:%S'),
+                                "Symbol": trade['symbol'],
+                                "Type": trade['type'],
+                                "Entry Price": trade['entry'],
+                                "Exit Price": close_price,
+                                "PnL (Points)": round(final_pnl, 2)
+                            })
+                            
+                            log(f"Closed {trade['symbol']} manually. PnL: {round(final_pnl, 2)}")
+                            st.session_state.active_trade = None
+                        else:
+                            st.warning("Fetching exit price, try again...")
         else:
             st.error(f"Could not load Futures data for {INDEX}.")
 
