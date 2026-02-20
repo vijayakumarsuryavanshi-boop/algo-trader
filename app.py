@@ -324,21 +324,25 @@ class SniperBot:
                 self.log(f"Thread Error: {str(e)}")
             time.sleep(3)
 
-# ==========================================
-# 4. STREAMLIT UI 
-# ==========================================
-st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
-
-# --- INSERT THIS BLOCK HERE TO HIDE LOGOS ---
+# --- CORRECTED UI CLEANUP ---
 st.markdown("""
     <style>
-    #MainMenu {visibility: hidden;}
+    /* 1. Hide the 'Made with Streamlit' footer */
     footer {visibility: hidden;}
-    header {visibility: hidden;}
+
+    /* 2. Hide the 'Deploy' button but KEEP the header bar for the sidebar button */
     .stAppDeployButton {display:none;}
+
+    /* 3. Hide the hamburger menu (optional, keeps it even cleaner) */
+    #MainMenu {visibility: hidden;}
+
+    /* 4. Remove the 'Manage App' button for the owner view */
+    [data-testid="stStatusWidget"] {display: none;}
+    
+    /* 5. Optional: Reduce the top padding so there isn't a big empty gap */
+    .block-container {padding-top: 2rem;}
     </style>
     """, unsafe_allow_html=True)
-# --------------------------------------------
 
 if 'bot' not in st.session_state: st.session_state.bot = None
 
@@ -573,4 +577,3 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
-
