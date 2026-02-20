@@ -324,27 +324,29 @@ class SniperBot:
                 self.log(f"Thread Error: {str(e)}")
             time.sleep(3)
 
-# --- CORRECTED UI CLEANUP ---
+# --- TOTAL BRANDING REMOVAL ---
 st.markdown("""
     <style>
-    /* 1. Hide the 'Made with Streamlit' footer */
+    /* 1. Hide the standard 'Made with Streamlit' footer */
     footer {visibility: hidden;}
 
-    /* 2. Hide the 'Deploy' button but KEEP the header bar for the sidebar button */
-    .stAppDeployButton {display:none;}
+    /* 2. Hide the 'Hosted with Streamlit' popup in bottom right */
+    [data-testid="stStatusWidget"] {display: none;}
 
-    /* 3. Hide the hamburger menu (optional, keeps it even cleaner) */
+    /* 3. Hide the 'Deploy' button */
+    .stAppDeployButton {display: none;}
+
+    /* 4. Hide the Hamburger Menu */
     #MainMenu {visibility: hidden;}
 
-    /* 4. Remove the 'Manage App' button for the owner view */
-    [data-testid="stStatusWidget"] {display: none;}
-    
-    /* 5. Optional: Reduce the top padding so there isn't a big empty gap */
-    .block-container {padding-top: 2rem;}
+    /* 5. Hide the 'Manage app' viewer for you as the owner */
+    [data-testid="stConnectionStatus"] {display: none;}
+
+    /* 6. Clean up the header padding while keeping the sidebar button */
+    header {background-color: rgba(0,0,0,0);}
+    .block-container {padding-top: 1rem;}
     </style>
     """, unsafe_allow_html=True)
-
-if 'bot' not in st.session_state: st.session_state.bot = None
 
 with st.sidebar:
     st.header("🔐 Connection Setup")
@@ -577,3 +579,4 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
+
