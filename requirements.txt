@@ -9,4 +9,7 @@ requests
 logzero
 websocket-client
 scipy
-beautifulsoup4
+nsepython
+nsetools
+pandas
+requests
