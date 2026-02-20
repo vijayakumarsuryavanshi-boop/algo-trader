@@ -34,7 +34,6 @@ def save_trade(trade_record):
     else:
         df_new.to_csv(TRADE_FILE, mode='a', header=False, index=False)
 
-# Fallback lot sizes for common indices
 DEFAULT_LOTS = {"NIFTY": 75, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30}
 
 # ==========================================
@@ -48,13 +47,11 @@ class TechnicalAnalyzer:
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['date'] = df['timestamp'].dt.date
         
-        # VWAP
         df['typical_price'] = (df['high'] + df['low'] + df['close']) / 3
         df['cum_tp_vol'] = (df['typical_price'] * df['volume']).groupby(df['date']).cumsum()
         df['cum_vol'] = df['volume'].groupby(df['date']).cumsum()
         df['vwap'] = (df['cum_tp_vol'] / df['cum_vol']).ffill() 
         
-        # EMA & Volume
         df['ema'] = df['close'].ewm(span=ema_length, adjust=False).mean()
         df['avg_vol'] = df['volume'].rolling(window=vol_length).mean().shift(1)
         
@@ -124,7 +121,7 @@ class SniperBot:
         except Exception: return None
 
     def get_live_price(self, exchange, symbol, token):
-        if self.is_mock: return float(np.random.uniform(100, 200)) if "CE" in str(symbol) or "PE" in str(symbol) else float(np.random.uniform(2000, 22100))
+        if self.is_mock: return float(np.random.uniform(10, 20)) if "CE" in str(symbol) or "PE" in str(symbol) else float(np.random.uniform(2000, 22100))
         if not self.api: return None
         try:
             res = self.api.ltpData(exchange, symbol, str(token))
@@ -188,12 +185,25 @@ class SniperBot:
         subset = df[mask].copy()
         
         if subset.empty: return None, None, None
-        subset = subset[subset['expiry'] == subset['expiry'].min()]
+        
+        closest_expiry = subset['expiry'].min()
+        
+        # --- HERO/ZERO EXPIRY DAY CHECK ---
+        is_hz_mode = self.settings.get('hero_zero', False)
+        if is_hz_mode and closest_expiry.date() != pd.Timestamp.today().date() and not self.is_mock:
+            self.log(f"Hero/Zero Block: {symbol} does not expire today.")
+            return None, None, None 
+            
+        subset = subset[subset['expiry'] == closest_expiry]
+        
+        # Apply Hero/Zero cheap premium override
+        actual_max_premium = self.settings.get('hz_premium', 15) if is_hz_mode else max_premium
+        
         candidates = subset[subset['strike'] >= spot].sort_values('strike', ascending=True) if is_ce else subset[subset['strike'] <= spot].sort_values('strike', ascending=False)
             
         for _, row in candidates.head(15).iterrows():
             ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
-            if ltp and ltp <= max_premium: return row['symbol'], row['token'], row['exch_seg']
+            if ltp and ltp <= actual_max_premium: return row['symbol'], row['token'], row['exch_seg']
         return None, None, None
 
     def emergency_kill(self):
@@ -219,7 +229,8 @@ class SniperBot:
                 index, timeframe = s['index'], s['timeframe']
                 vol_mult, paper = s['vol_mult'], s['paper_mode']
                 
-                cutoff_time = dt.time(23, 15) if index in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] else dt.time(15, 15)
+                is_commodity = index in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]
+                cutoff_time = dt.time(23, 15) if is_commodity else dt.time(15, 15)
                 current_time = dt.datetime.now().time()
                 
                 spot, base_lot_size = None, 1
@@ -230,8 +241,8 @@ class SniperBot:
                     
                     if index in ["NIFTY", "BANKNIFTY"]: mask = (df_map['name'] == index) & (df_map['exch_seg'] == 'NFO') & (df_map['instrumenttype'] == 'FUTIDX')
                     elif index == "SENSEX": mask = (df_map['name'] == index) & (df_map['exch_seg'] == 'BFO') & (df_map['instrumenttype'] == 'FUTIDX')
-                    elif index in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]: mask = (df_map['name'] == index) & (df_map['exch_seg'].isin(['MCX', 'NCO'])) & (df_map['symbol'].str.contains('FUT'))
-                    else: mask = (df_map['name'] == index) & (df_map['exch_seg'] == 'NFO') & (df_map['instrumenttype'] == 'FUTSTK') # Stock Options (CE/PE) Support
+                    elif is_commodity: mask = (df_map['name'] == index) & (df_map['exch_seg'].isin(['MCX', 'NCO'])) & (df_map['symbol'].str.contains('FUT'))
+                    else: mask = (df_map['name'] == index) & (df_map['exch_seg'] == 'NFO') & (df_map['instrumenttype'] == 'FUTSTK') 
                     
                     futs = df_map[mask]
                     futs = futs[futs['expiry'] >= today]
@@ -249,6 +260,14 @@ class SniperBot:
                 if spot and df_candles is not None and not df_candles.empty:
                     self.state["spot"] = spot
                     trend, signal, vwap, ema = self.analyzer.calculate_scalp_signals(df_candles, vol_multiplier=vol_mult)
+                    
+                    # --- HERO/ZERO TIME LOCK INTERCEPT ---
+                    if s.get('hero_zero', False) and signal in ["BUY_CE", "BUY_PE"]:
+                        hz_start_time = dt.time(19, 0) if is_commodity else dt.time(13, 30)
+                        if current_time < hz_start_time:
+                            signal = "WAIT"
+                            trend = f"H/Z Locked until {hz_start_time.strftime('%I:%M %p')}"
+                            
                     self.state.update({"current_trend": trend, "current_signal": signal, "vwap": vwap, "ema": ema})
                     
                     cur_vol = int(df_candles['volume'].iloc[-1])
@@ -349,8 +368,6 @@ with st.sidebar:
 
     st.divider()
     st.header("⚙️ Scalping Settings")
-    
-    # Stock Support
     WATCHLIST_OPTIONS = ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "CUSTOM_STOCK..."]
     idx_sel = st.selectbox("Watchlist", WATCHLIST_OPTIONS)
     if idx_sel == "CUSTOM_STOCK...":
@@ -369,6 +386,11 @@ with st.sidebar:
     PAPER = st.toggle("📝 Paper Trade Execution", True, disabled=force_paper)
     
     st.divider()
+    st.header("🚀 Hero/Zero (Gamma Blast) Mode")
+    HERO_ZERO = st.toggle("Enable Hero/Zero Mode", False, help="Strictly trades on Expiry Day after 1:30 PM (Equities) or 7:00 PM (Commodities).")
+    HZ_PREMIUM = st.number_input("Max H/Z Premium (₹)", 1, 100, 15, help="Only buys cheap options under this price for the Gamma Blast.")
+
+    st.divider()
     if st.button("🚨 KILL SWITCH (CLOSE ALL)", type="primary", use_container_width=True):
         if st.session_state.bot:
             st.session_state.bot.emergency_kill()
@@ -383,7 +405,8 @@ if not st.session_state.bot:
 bot = st.session_state.bot
 bot.settings = {
     "index": INDEX, "timeframe": TIMEFRAME, "vol_mult": VOL_MULT, "lots": LOTS, 
-    "max_capital": MAX_CAPITAL, "sl_pts": SL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER or force_paper
+    "max_capital": MAX_CAPITAL, "sl_pts": SL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER or force_paper,
+    "hero_zero": HERO_ZERO, "hz_premium": HZ_PREMIUM
 }
 
 tab1, tab2, tab3 = st.tabs(["⚡ Live Dashboard", "🔎 OI Scanner", "📜 PnL Reports"])
@@ -437,15 +460,12 @@ with tab2:
     st.subheader("🔥 F&O OI Spurt Scanner")
     st.write("Scan NSE for F&O stocks with rising Open Interest to catch momentum.")
 
-    # --- 1. Basic Market Timing Check ---
     now = dt.datetime.now()
     is_weekend = now.weekday() >= 5
     is_outside_hours = now.time() < dt.time(9, 15) or now.time() > dt.time(15, 30)
 
-    # --- 2. Auto-Scan Controls ---
     c1, c2 = st.columns([1, 3])
     with c1:
-        # We use session state to keep the toggle active across re-runs
         if 'auto_scan_oi' not in st.session_state: st.session_state.auto_scan_oi = False
         st.session_state.auto_scan_oi = st.toggle("⏱️ Auto-Scan (3 Min)", st.session_state.auto_scan_oi)
     with c2:
@@ -455,77 +475,48 @@ with tab2:
     if 'oi_data_cache' not in st.session_state: st.session_state.oi_data_cache = None
 
     if is_weekend or is_outside_hours:
-        st.warning("🛑 **Market is currently CLOSED.** The OI Scanner requires live market data. Please try again during standard trading hours (Mon-Fri, 09:15 AM - 03:30 PM).")
+        st.warning("🛑 **Market is currently CLOSED.**")
     else:
-        # --- 3. Timer & Fetch Logic ---
         current_time_sec = time.time()
         time_since_last_scan = current_time_sec - st.session_state.last_oi_scan
         
-        # Trigger if manual button clicked OR (auto-scan is ON and 3 minutes have passed)
         if manual_scan or (st.session_state.auto_scan_oi and time_since_last_scan > 180):
             try:
                 from nsepython import nsefetch
                 with st.spinner("Fetching Live OI Data from NSE..."):
                     payload = nsefetch('https://www.nseindia.com/api/live-analysis-oi-spurts')
-                    
                     if not payload or 'data' not in payload or len(payload['data']) == 0:
                         st.session_state.oi_data_cache = "HOLIDAY"
                     else:
-                        # Store the RAW dataframe in cache so we can filter it multiple ways in the UI
                         df_oi = pd.DataFrame(payload.get('data', []))
                         df_oi['pChange'] = pd.to_numeric(df_oi['pChange'], errors='coerce')
                         df_oi['per_chnge_oi'] = pd.to_numeric(df_oi['per_chnge_oi'], errors='coerce')
                         st.session_state.oi_data_cache = df_oi
-                        
                     st.session_state.last_oi_scan = current_time_sec
-                    time_since_last_scan = 0 # Reset counter immediately for the UI
-            except ImportError:
-                st.error("Missing dependency. Please run: `pip install nsepython` in your terminal.")
+                    time_since_last_scan = 0
             except Exception as e:
-                st.error(f"🛑 **Scanner Stopped:** Unable to connect to NSE. Ensure today is not a Market Holiday. (System Error: {e})")
+                st.error(f"Scanner Stopped. (System Error: {e})")
 
-        # --- 4. Display Cached Data in Two Columns ---
         if st.session_state.oi_data_cache is not None:
-            if st.session_state.auto_scan_oi:
-                next_scan_in = max(0, int(180 - time_since_last_scan))
-                st.caption(f"Next automatic scan in: **{next_scan_in} seconds**.")
-
-            if isinstance(st.session_state.oi_data_cache, str) and st.session_state.oi_data_cache == "HOLIDAY":
-                st.info("⏸️ **Scanner Stopped:** NSE returned no data. Today is likely a **Market Holiday**, or the NSE servers are temporarily blocking the request.")
+            if isinstance(st.session_state.oi_data_cache, str):
+                st.info("⏸️ **Scanner Stopped:** NSE returned no data. Likely a Market Holiday.")
             elif isinstance(st.session_state.oi_data_cache, pd.DataFrame):
                 df_raw = st.session_state.oi_data_cache
-                last_updated_str = dt.datetime.fromtimestamp(st.session_state.last_oi_scan).strftime('%I:%M:%S %p')
-                st.write(f"*(Last updated: {last_updated_str})*")
-                
-                # Split the UI into two columns for Long vs Short
                 scan_col1, scan_col2 = st.columns(2)
                 
                 with scan_col1:
                     st.markdown("### 🟢 Long Buildup (Call / CE)")
-                    st.caption("Rising Price + Rising OI. Big players are buying.")
                     long_buildup = df_raw[(df_raw['pChange'] > 0.5) & (df_raw['per_chnge_oi'] > 2)].head(15)
-                    
                     if not long_buildup.empty:
-                        st.dataframe(long_buildup[['symbol', 'latest_price', 'pChange', 'per_chnge_oi']].rename(columns={
-                            "symbol": "Symbol", "latest_price": "LTP", "pChange": "Price % Chg", "per_chnge_oi": "OI % Chg"
-                        }), use_container_width=True, hide_index=True)
-                    else:
-                        st.warning("No strong Long Buildups found.")
+                        st.dataframe(long_buildup[['symbol', 'latest_price', 'pChange', 'per_chnge_oi']].rename(columns={"symbol": "Symbol", "latest_price": "LTP", "pChange": "Price % Chg", "per_chnge_oi": "OI % Chg"}), use_container_width=True, hide_index=True)
+                    else: st.warning("No strong Long Buildups.")
 
                 with scan_col2:
                     st.markdown("### 🔴 Short Buildup (Put / PE)")
-                    st.caption("Falling Price + Rising OI. Big players are shorting.")
-                    # Logic for Short Buildup: Price is dropping (less than -0.5%) and OI is rising (greater than 2%)
                     short_buildup = df_raw[(df_raw['pChange'] < -0.5) & (df_raw['per_chnge_oi'] > 2)].head(15)
-                    
                     if not short_buildup.empty:
-                        st.dataframe(short_buildup[['symbol', 'latest_price', 'pChange', 'per_chnge_oi']].rename(columns={
-                            "symbol": "Symbol", "latest_price": "LTP", "pChange": "Price % Chg", "per_chnge_oi": "OI % Chg"
-                        }), use_container_width=True, hide_index=True)
-                    else:
-                        st.warning("No strong Short Buildups found.")
-                
-                st.info("💡 **Strategy:** Find a symbol above, type it into the 'CUSTOM_STOCK' Watchlist in the sidebar, and let the scalping engine handle the entry/exit!")
+                        st.dataframe(short_buildup[['symbol', 'latest_price', 'pChange', 'per_chnge_oi']].rename(columns={"symbol": "Symbol", "latest_price": "LTP", "pChange": "Price % Chg", "per_chnge_oi": "OI % Chg"}), use_container_width=True, hide_index=True)
+                    else: st.warning("No strong Short Buildups.")
 
 with tab3:
     st.subheader("📊 Export PnL Reports")
@@ -566,4 +557,3 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
-
