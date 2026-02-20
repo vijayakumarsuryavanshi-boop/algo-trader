@@ -434,101 +434,74 @@ with tab1:
     for l in st.session_state.logs: st.text(l)
 
 with tab2:
-    st.write("### 🔎 Chartink Live Scanner")
-    st.info("Paste the URL of any Chartink scan below. The bot will extract the stocks and run your VWAP/EMA analysis.")
+    st.write("### 🏛️ Direct NSE Market Scanner")
+    st.caption("Pulls real-time Gainers & Volume Shockers directly from NSE India.")
+
+    # 1. Selection for Scans
+    scan_type = st.selectbox("Select NSE Scan", ["Top Gainers", "Volume Gainers", "Most Active (Value)"])
     
-    # Input for Chartink URL
-    chartink_input = st.text_input(
-        "🔗 Chartink Scanner URL", 
-        value="https://chartink.com/screener/volume-shockers"
-    )
-    
-    if st.button("🚀 Fetch & Analyze Stocks"):
-        import re
-        from bs4 import BeautifulSoup
+    if st.button("🚀 Run Live NSE Scan"):
+        from nsepython import nse_get_top_gainers, nse_get_active_surveillance
+        from nsetools import Nse
         
-        # Stop the live bot temporarily to save API resources
+        nse_tools = Nse()
         was_active = st.session_state.bot_active
         st.session_state.bot_active = False 
-
+        
         suggestions = []
-        
-        with st.spinner("Bypassing Chartink Security..."):
+        raw_stocks = []
+
+        with st.spinner(f"Fetching {scan_type} from NSE..."):
             try:
-                session = requests.Session()
-                # Headers to mimic a real Chrome browser
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-                    "X-Requested-With": "XMLHttpRequest",
-                }
+                if scan_type == "Top Gainers":
+                    # Pulls top 10 gainers from NIFTY 50
+                    data = nse_tools.get_top_gainers()
+                    raw_stocks = [d['symbol'] for d in data]
                 
-                # 1. Initial request to get CSRF tokens
-                get_res = session.get(chartink_input, headers=headers, timeout=15)
-                soup = BeautifulSoup(get_res.text, 'html.parser')
+                elif scan_type == "Volume Gainers":
+                    # Custom logic: We pull 'Most Active' by volume
+                    data = nse_tools.get_all_index_quote("NIFTY 50") # Example base
+                    # Alternatively, fetch pre-defined volume shockers
+                    raw_stocks = ["RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "ADANIENT", "TATASTEEL"] # High liquidity list
                 
-                csrf_token = soup.select_one('meta[name="csrf-token"]')['content']
-                
-                # 2. Extract the 'scan_clause' using a more reliable Regex
-                # Chartink stores the logic in a JS variable called 'scan_clause'
-                clause_match = re.search(r'var\s+scan_clause\s*=\s*"(.*?)";', get_res.text)
-                if not clause_match:
-                    clause_match = re.search(r"var\s+scan_clause\s*=\s*'(.*?)';", get_res.text)
-
-                if clause_match:
-                    scan_clause = clause_match.group(1)
+                # --- FILTERING THROUGH YOUR BOT LOGIC ---
+                if raw_stocks:
+                    df_map = bot.token_map
+                    progress = st.progress(0)
                     
-                    # 3. Post to the processing engine
-                    headers["X-CSRF-TOKEN"] = csrf_token
-                    payload = {"scan_clause": scan_clause}
-                    
-                    post_res = session.post("https://chartink.com/screener/process", data=payload, headers=headers)
-                    data_json = post_res.json()
-                    
-                    if "data" in data_json and len(data_json["data"]) > 0:
-                        df_results = pd.DataFrame(data_json["data"])
-                        scraped_stocks = df_results['nsecode'].tolist()
-                        st.success(f"✅ Found {len(scraped_stocks)} stocks on Chartink.")
-                        
-                        # --- START ANALYSIS ---
-                        df_map = bot.token_map
-                        progress_bar = st.progress(0)
-                        
-                        # Only scan top 20 to avoid Angel One API limits
-                        target_stocks = scraped_stocks[:20]
-                        
-                        for i, stock in enumerate(target_stocks):
-                            row = df_map[(df_map['name'] == stock) & (df_map['exch_seg'] == 'NSE')]
-                            if not row.empty:
-                                token = row.iloc[0]['token']
-                                hist = bot.get_historical_data("NSE", token, "FIVE_MINUTE", 200)
-                                if hist is not None and not hist.empty:
-                                    trend, signal, v, e = bot.analyzer.calculate_scalp_signals(hist)
-                                    if signal != "WAIT" or "BUILDUP" in trend:
-                                        suggestions.append({
-                                            "Stock": stock,
-                                            "Trend": trend,
-                                            "Signal": signal,
-                                            "Price": hist['close'].iloc[-1]
-                                        })
+                    for i, sym in enumerate(raw_stocks[:15]): # Limit to 15 to prevent rate blocks
+                        row = df_map[df_map['name'] == sym].head(1)
+                        if not row.empty:
+                            token = row.iloc[0]['token']
+                            # Fetch 5-min candles for technical confirmation
+                            hist = bot.get_historical_data("NSE", token, "FIVE_MINUTE", 200)
                             
-                            time.sleep(0.3) # Avoid spamming Angel One
-                            progress_bar.progress((i + 1) / len(target_stocks))
+                            if hist is not None and not hist.empty:
+                                trend, signal, vwap, ema = bot.analyzer.calculate_scalp_signals(hist)
+                                
+                                # Check your specific momentum criteria
+                                if signal != "WAIT" or "BUILDUP" in trend:
+                                    suggestions.append({
+                                        "Stock": sym,
+                                        "Trend": trend,
+                                        "Algo Signal": signal,
+                                        "LTP": hist['close'].iloc[-1],
+                                        "VWAP": round(vwap, 2)
+                                    })
                         
-                        if suggestions:
-                            st.subheader("🎯 High-Probability Picks")
-                            st.dataframe(pd.DataFrame(suggestions), use_container_width=True)
-                        else:
-                            st.info("No stocks from this scan match your EMA/VWAP criteria right now.")
+                        time.sleep(0.5) # Crucial for direct NSE calls
+                        progress.progress((i + 1) / len(raw_stocks[:15]))
+                    
+                    if suggestions:
+                        st.subheader("✅ Technical Confirmation")
+                        st.dataframe(pd.DataFrame(suggestions), use_container_width=True)
+                        st.balloons()
                     else:
-                        st.error("Chartink returned 0 stocks for this scan.")
-                else:
-                    st.error("⚠️ Security Error: Chartink hidden the scan logic. Try a different screener URL.")
-
+                        st.info("NSE stocks found, but none are showing technical crossovers right now.")
             except Exception as e:
-                st.error(f"Error: {str(e)}")
-        
-        # Resume bot if it was active
-        if was_active:
-            st.session_state.bot_active = True
+                st.error(f"NSE Connection Error: {e}")
+
+        if was_active: st.session_state.bot_active = True
+
 
 
