@@ -188,7 +188,6 @@ class SniperBot:
         
         closest_expiry = subset['expiry'].min()
         
-        # --- HERO/ZERO EXPIRY DAY CHECK ---
         is_hz_mode = self.settings.get('hero_zero', False)
         if is_hz_mode and closest_expiry.date() != pd.Timestamp.today().date() and not self.is_mock:
             self.log(f"Hero/Zero Block: {symbol} does not expire today.")
@@ -196,9 +195,7 @@ class SniperBot:
             
         subset = subset[subset['expiry'] == closest_expiry]
         
-        # Apply Hero/Zero cheap premium override
         actual_max_premium = self.settings.get('hz_premium', 15) if is_hz_mode else max_premium
-        
         candidates = subset[subset['strike'] >= spot].sort_values('strike', ascending=True) if is_ce else subset[subset['strike'] <= spot].sort_values('strike', ascending=False)
             
         for _, row in candidates.head(15).iterrows():
@@ -261,7 +258,6 @@ class SniperBot:
                     self.state["spot"] = spot
                     trend, signal, vwap, ema = self.analyzer.calculate_scalp_signals(df_candles, vol_multiplier=vol_mult)
                     
-                    # --- HERO/ZERO TIME LOCK INTERCEPT ---
                     if s.get('hero_zero', False) and signal in ["BUY_CE", "BUY_PE"]:
                         hz_start_time = dt.time(19, 0) if is_commodity else dt.time(13, 30)
                         if current_time < hz_start_time:
@@ -274,7 +270,6 @@ class SniperBot:
                     avg_vol = int(df_candles['volume'].rolling(20).mean().shift(1).iloc[-1]) if len(df_candles)>20 else 0
                     self.state["vol_ratio"] = f"{cur_vol}/{avg_vol}"
 
-                    # --- GHOST KILL & ENTRY LOGIC ---
                     if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and not self.state["order_in_flight"]:
                         if current_time < cutoff_time:
                             self.state["order_in_flight"] = True 
@@ -298,7 +293,6 @@ class SniperBot:
                             finally:
                                 self.state["order_in_flight"] = False 
 
-                    # --- EXIT LOGIC ---
                     elif self.state["active_trade"]:
                         trade = self.state["active_trade"]
                         ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
@@ -419,7 +413,7 @@ with tab1:
             threading.Thread(target=bot.trading_loop, daemon=True).start()
     if c2.button("🔴 STOP BOT"): bot.state["is_running"] = False
 
-  if bot.state["is_running"]:
+    if bot.state["is_running"]:
         st.success(f"{'🚀 Bot running in background.' if not bot.is_mock else '🧪 Bot running offline.'}")
         
         st.divider()
@@ -455,6 +449,8 @@ with tab1:
                 st.rerun()
         time.sleep(2)
         st.rerun()
+    else:
+        st.warning("Bot is currently stopped.")
 
 with tab2:
     st.subheader("🔥 F&O OI Spurt Scanner")
@@ -557,4 +553,3 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
-
