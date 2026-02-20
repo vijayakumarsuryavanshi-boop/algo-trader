@@ -434,36 +434,98 @@ with tab1:
         st.warning("Bot is currently stopped.")
 
 with tab2:
-    st.subheader("🔥 OI Spurt Scanner (Long Buildup)")
-    st.write("Scan NSE for F&O stocks with rising Open Interest & Price.")
-    
-    if st.button("🔍 Run Live NSE Scan"):
-        try:
-            from nsepython import nsefetch
-            with st.spinner("Fetching Live OI Data from NSE..."):
-                payload = nsefetch('https://www.nseindia.com/api/live-analysis-oi-spurts')
-                oi_data = payload.get('data', [])
-                
-                if oi_data:
-                    df_oi = pd.DataFrame(oi_data)
-                    df_oi['pChange'] = pd.to_numeric(df_oi['pChange'], errors='coerce')
-                    df_oi['per_chnge_oi'] = pd.to_numeric(df_oi['per_chnge_oi'], errors='coerce')
+    st.subheader("🔥 F&O OI Spurt Scanner")
+    st.write("Scan NSE for F&O stocks with rising Open Interest to catch momentum.")
+
+    # --- 1. Basic Market Timing Check ---
+    now = dt.datetime.now()
+    is_weekend = now.weekday() >= 5
+    is_outside_hours = now.time() < dt.time(9, 15) or now.time() > dt.time(15, 30)
+
+    # --- 2. Auto-Scan Controls ---
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        # We use session state to keep the toggle active across re-runs
+        if 'auto_scan_oi' not in st.session_state: st.session_state.auto_scan_oi = False
+        st.session_state.auto_scan_oi = st.toggle("⏱️ Auto-Scan (3 Min)", st.session_state.auto_scan_oi)
+    with c2:
+        manual_scan = st.button("🔍 Run Live NSE Scan Now")
+
+    if 'last_oi_scan' not in st.session_state: st.session_state.last_oi_scan = 0
+    if 'oi_data_cache' not in st.session_state: st.session_state.oi_data_cache = None
+
+    if is_weekend or is_outside_hours:
+        st.warning("🛑 **Market is currently CLOSED.** The OI Scanner requires live market data. Please try again during standard trading hours (Mon-Fri, 09:15 AM - 03:30 PM).")
+    else:
+        # --- 3. Timer & Fetch Logic ---
+        current_time_sec = time.time()
+        time_since_last_scan = current_time_sec - st.session_state.last_oi_scan
+        
+        # Trigger if manual button clicked OR (auto-scan is ON and 3 minutes have passed)
+        if manual_scan or (st.session_state.auto_scan_oi and time_since_last_scan > 180):
+            try:
+                from nsepython import nsefetch
+                with st.spinner("Fetching Live OI Data from NSE..."):
+                    payload = nsefetch('https://www.nseindia.com/api/live-analysis-oi-spurts')
                     
-                    long_buildup = df_oi[(df_oi['pChange'] > 0.5) & (df_oi['per_chnge_oi'] > 2)].head(15)
+                    if not payload or 'data' not in payload or len(payload['data']) == 0:
+                        st.session_state.oi_data_cache = "HOLIDAY"
+                    else:
+                        # Store the RAW dataframe in cache so we can filter it multiple ways in the UI
+                        df_oi = pd.DataFrame(payload.get('data', []))
+                        df_oi['pChange'] = pd.to_numeric(df_oi['pChange'], errors='coerce')
+                        df_oi['per_chnge_oi'] = pd.to_numeric(df_oi['per_chnge_oi'], errors='coerce')
+                        st.session_state.oi_data_cache = df_oi
+                        
+                    st.session_state.last_oi_scan = current_time_sec
+                    time_since_last_scan = 0 # Reset counter immediately for the UI
+            except ImportError:
+                st.error("Missing dependency. Please run: `pip install nsepython` in your terminal.")
+            except Exception as e:
+                st.error(f"🛑 **Scanner Stopped:** Unable to connect to NSE. Ensure today is not a Market Holiday. (System Error: {e})")
+
+        # --- 4. Display Cached Data in Two Columns ---
+        if st.session_state.oi_data_cache is not None:
+            if st.session_state.auto_scan_oi:
+                next_scan_in = max(0, int(180 - time_since_last_scan))
+                st.caption(f"Next automatic scan in: **{next_scan_in} seconds**.")
+
+            if isinstance(st.session_state.oi_data_cache, str) and st.session_state.oi_data_cache == "HOLIDAY":
+                st.info("⏸️ **Scanner Stopped:** NSE returned no data. Today is likely a **Market Holiday**, or the NSE servers are temporarily blocking the request.")
+            elif isinstance(st.session_state.oi_data_cache, pd.DataFrame):
+                df_raw = st.session_state.oi_data_cache
+                last_updated_str = dt.datetime.fromtimestamp(st.session_state.last_oi_scan).strftime('%I:%M:%S %p')
+                st.write(f"*(Last updated: {last_updated_str})*")
+                
+                # Split the UI into two columns for Long vs Short
+                scan_col1, scan_col2 = st.columns(2)
+                
+                with scan_col1:
+                    st.markdown("### 🟢 Long Buildup (Call / CE)")
+                    st.caption("Rising Price + Rising OI. Big players are buying.")
+                    long_buildup = df_raw[(df_raw['pChange'] > 0.5) & (df_raw['per_chnge_oi'] > 2)].head(15)
                     
                     if not long_buildup.empty:
-                        st.success(f"✅ Found {len(long_buildup)} stocks showing Long Buildup.")
-                        st.dataframe(long_buildup[['symbol', 'latest_price', 'pChange', 'per_chnge_oi', 'per_chnge_vol']].rename(columns={
-                            "symbol": "Symbol", "latest_price": "LTP", "pChange": "Price % Chg", 
-                            "per_chnge_oi": "OI % Chg", "per_chnge_vol": "Vol % Chg"
-                        }))
-                        st.info("💡 To trade one of these, go to the sidebar, select 'CUSTOM_STOCK', and type the symbol.")
+                        st.dataframe(long_buildup[['symbol', 'latest_price', 'pChange', 'per_chnge_oi']].rename(columns={
+                            "symbol": "Symbol", "latest_price": "LTP", "pChange": "Price % Chg", "per_chnge_oi": "OI % Chg"
+                        }), use_container_width=True, hide_index=True)
                     else:
-                        st.warning("No strong Long Buildups found right now.")
-        except ImportError:
-            st.error("Missing dependency. Please run: `pip install nsepython` in your terminal.")
-        except Exception as e:
-            st.error(f"Error fetching NSE Data: Market might be closed or NSE is blocking the request. {e}")
+                        st.warning("No strong Long Buildups found.")
+
+                with scan_col2:
+                    st.markdown("### 🔴 Short Buildup (Put / PE)")
+                    st.caption("Falling Price + Rising OI. Big players are shorting.")
+                    # Logic for Short Buildup: Price is dropping (less than -0.5%) and OI is rising (greater than 2%)
+                    short_buildup = df_raw[(df_raw['pChange'] < -0.5) & (df_raw['per_chnge_oi'] > 2)].head(15)
+                    
+                    if not short_buildup.empty:
+                        st.dataframe(short_buildup[['symbol', 'latest_price', 'pChange', 'per_chnge_oi']].rename(columns={
+                            "symbol": "Symbol", "latest_price": "LTP", "pChange": "Price % Chg", "per_chnge_oi": "OI % Chg"
+                        }), use_container_width=True, hide_index=True)
+                    else:
+                        st.warning("No strong Short Buildups found.")
+                
+                st.info("💡 **Strategy:** Find a symbol above, type it into the 'CUSTOM_STOCK' Watchlist in the sidebar, and let the scalping engine handle the entry/exit!")
 
 with tab3:
     st.subheader("📊 Export PnL Reports")
@@ -504,3 +566,4 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
+
