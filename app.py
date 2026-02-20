@@ -329,6 +329,17 @@ class SniperBot:
 # ==========================================
 st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
 
+# --- INSERT THIS BLOCK HERE TO HIDE LOGOS ---
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stAppDeployButton {display:none;}
+    </style>
+    """, unsafe_allow_html=True)
+# --------------------------------------------
+
 if 'bot' not in st.session_state: st.session_state.bot = None
 
 with st.sidebar:
@@ -562,3 +573,4 @@ with tab3:
     st.divider()
     st.subheader("System Logs")
     for l in bot.state["logs"]: st.text(l)
+
