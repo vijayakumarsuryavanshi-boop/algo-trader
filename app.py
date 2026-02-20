@@ -419,7 +419,7 @@ with tab1:
             threading.Thread(target=bot.trading_loop, daemon=True).start()
     if c2.button("🔴 STOP BOT"): bot.state["is_running"] = False
 
-    if bot.state["is_running"]:
+  if bot.state["is_running"]:
         st.success(f"{'🚀 Bot running in background.' if not bot.is_mock else '🧪 Bot running offline.'}")
         
         st.divider()
@@ -433,13 +433,12 @@ with tab1:
         c1.metric("Market Sentiment", bot.state["current_trend"])
         c2.metric("Algo Action", bot.state["current_signal"])
 
-      if bot.state["active_trade"]:
+        if bot.state["active_trade"]:
             t = bot.state["active_trade"]
             pnl = t.get('floating_pnl', 0.0)
             ltp = t.get('current_ltp', t['entry'])
             indicator = "🟢" if pnl >= 0 else "🔴"
             
-            # ---> NEW DISPLAY LOGIC:
             st.info(f"📈 Open: **{t['symbol']}** | Entry: **{t['entry']:.2f}** | LTP: **{ltp:.2f}** | PnL: {indicator} **₹{round(pnl, 2)}**")
             st.caption(f"🛑 **Stop Loss:** {t['sl']:.2f} &nbsp; | &nbsp; 🎯 **Take Profit:** {t['tgt']:.2f}")
             
@@ -456,8 +455,6 @@ with tab1:
                 st.rerun()
         time.sleep(2)
         st.rerun()
-    else:
-        st.warning("Bot is currently stopped.")
 
 with tab2:
     st.subheader("🔥 F&O OI Spurt Scanner")
