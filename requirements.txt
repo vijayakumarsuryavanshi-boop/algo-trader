@@ -11,5 +11,5 @@ websocket-client
 scipy
 nsepython
 nsetools
-pandas
-requests
+
+
