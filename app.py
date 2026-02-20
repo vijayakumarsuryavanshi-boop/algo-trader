@@ -11,36 +11,38 @@ import threading
 from SmartApi import SmartConnect
 
 # ==========================================
-# 1. SECURITY & CONFIGURATION
+# 1. SECURITY, CONFIG & STORAGE
 # ==========================================
 CRED_FILE = "secure_creds.json"
+TRADE_FILE = "persistent_trades.csv"
 
 def load_creds():
     if os.path.exists(CRED_FILE):
         try:
-            with open(CRED_FILE, 'r') as f:
-                return json.load(f)
-        except Exception:
-            pass
+            with open(CRED_FILE, 'r') as f: return json.load(f)
+        except Exception: pass
     return {"client_id": "", "pwd": "", "totp_secret": ""}
 
 def save_creds(client_id, pwd, totp_secret):
-    # API key is EXPLICITLY excluded from local storage for security
     with open(CRED_FILE, 'w') as f:
         json.dump({"client_id": client_id, "pwd": pwd, "totp_secret": totp_secret}, f)
 
-LOT_SIZES = {
-    "NIFTY": 75, "BANKNIFTY": 30, "SENSEX": 20, 
-    "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30
-}
+def save_trade(trade_record):
+    df_new = pd.DataFrame([trade_record])
+    if not os.path.exists(TRADE_FILE):
+        df_new.to_csv(TRADE_FILE, index=False)
+    else:
+        df_new.to_csv(TRADE_FILE, mode='a', header=False, index=False)
+
+# Fallback lot sizes for common indices
+DEFAULT_LOTS = {"NIFTY": 75, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30}
 
 # ==========================================
 # 2. TECHNICAL ANALYZER (VWAP + EMA SCALPING)
 # ==========================================
 class TechnicalAnalyzer:
     def calculate_scalp_signals(self, df, vol_length=20, vol_multiplier=1.5, ema_length=9):
-        if df is None or len(df) < vol_length + 1: 
-            return "WAIT", "WAIT", 0, 0
+        if df is None or len(df) < vol_length + 1: return "WAIT", "WAIT", 0, 0
             
         df = df.copy()
         df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -56,13 +58,10 @@ class TechnicalAnalyzer:
         df['ema'] = df['close'].ewm(span=ema_length, adjust=False).mean()
         df['avg_vol'] = df['volume'].rolling(window=vol_length).mean().shift(1)
         
-        current_close = df['close'].iloc[-1]
-        prev_close = df['close'].iloc[-2]
+        current_close, prev_close = df['close'].iloc[-1], df['close'].iloc[-2]
         current_open = df['open'].iloc[-1]
-        current_vol = df['volume'].iloc[-1]
-        prev_avg_vol = df['avg_vol'].iloc[-1]
-        current_vwap = df['vwap'].iloc[-1]
-        current_ema = df['ema'].iloc[-1]
+        current_vol, prev_avg_vol = df['volume'].iloc[-1], df['avg_vol'].iloc[-1]
+        current_vwap, current_ema = df['vwap'].iloc[-1], df['ema'].iloc[-1]
 
         if current_vol == 0 or pd.isna(prev_avg_vol) or prev_avg_vol == 0:
             return "WAIT", "WAIT", current_vwap, current_ema
@@ -81,23 +80,16 @@ class TechnicalAnalyzer:
         return trend, signal, current_vwap, current_ema
 
 # ==========================================
-# 3. CORE BOT ENGINE (THREAD-SAFE & MOCK CAPABLE)
+# 3. CORE BOT ENGINE
 # ==========================================
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", is_mock=False):
-        self.api_key = api_key
-        self.client_id = client_id
-        self.pwd = pwd
-        self.totp_secret = totp_secret
-        self.api = None
-        self.token_map = None
+        self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
+        self.api, self.token_map, self.is_mock = None, None, is_mock
         self.analyzer = TechnicalAnalyzer()
-        self.is_mock = is_mock
-        
-        # Shared State for cross-thread UI updating
         self.state = {
             "is_running": False, "order_in_flight": False, "active_trade": None,
-            "logs": [], "trade_history": [], "current_trend": "WAIT", "current_signal": "WAIT",
+            "logs": [], "current_trend": "WAIT", "current_signal": "WAIT",
             "spot": 0.0, "vwap": 0.0, "ema": 0.0, "vol_ratio": "0/0"
         }
         self.settings = {}
@@ -109,7 +101,7 @@ class SniperBot:
 
     def login(self):
         if self.is_mock:
-            self.log("Started in Offline Mock Mode (No credentials needed).")
+            self.log("Started in Offline Mock Mode.")
             return True
         try:
             obj = SmartConnect(api_key=self.api_key)
@@ -122,7 +114,7 @@ class SniperBot:
         except Exception: return False
 
     def fetch_master(self):
-        if self.is_mock: return pd.DataFrame() # Skip large download for mock
+        if self.is_mock: return pd.DataFrame() 
         try:
             df = pd.DataFrame(requests.get("https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json").json())
             df['expiry'] = pd.to_datetime(df['expiry'], errors='coerce')
@@ -132,7 +124,7 @@ class SniperBot:
         except Exception: return None
 
     def get_live_price(self, exchange, symbol, token):
-        if self.is_mock: return float(np.random.uniform(100, 200)) if "CE" in str(symbol) or "PE" in str(symbol) else float(np.random.uniform(22000, 22100))
+        if self.is_mock: return float(np.random.uniform(100, 200)) if "CE" in str(symbol) or "PE" in str(symbol) else float(np.random.uniform(2000, 22100))
         if not self.api: return None
         try:
             res = self.api.ltpData(exchange, symbol, str(token))
@@ -141,7 +133,6 @@ class SniperBot:
 
     def get_historical_data(self, exchange, token, interval="FIVE_MINUTE", minutes=300):
         if self.is_mock:
-            # Generate synthetic data to simulate trading environment
             now = dt.datetime.now()
             times = [now - dt.timedelta(minutes=5*i) for i in range(50)][::-1]
             base_price = 22000
@@ -151,7 +142,6 @@ class SniperBot:
                 'high': close_prices + np.random.uniform(0, 10, 50), 'low': close_prices - np.random.uniform(0, 10, 50),
                 'close': close_prices, 'volume': np.random.randint(1000, 50000, 50)
             })
-            # Occasionally pump volume to trigger a signal
             if np.random.random() > 0.7: df.at[49, 'volume'] = df['volume'].mean() * 3 
             return df
 
@@ -169,7 +159,7 @@ class SniperBot:
         return None
 
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
-        if self.is_mock: return "MOCK_ORD_" + str(np.random.randint(1000, 9999))
+        if self.is_mock: return "MOCK_" + str(np.random.randint(1000, 9999))
         try:
             orderparams = {
                 "variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token),
@@ -181,7 +171,6 @@ class SniperBot:
 
     def get_strike(self, symbol, spot, signal, max_premium):
         if self.is_mock: return f"{symbol}24JAN{int(spot)}CE", "12345", "NFO"
-        
         df = self.token_map
         if df is None or df.empty: return None, None, None
         
@@ -200,7 +189,6 @@ class SniperBot:
         
         if subset.empty: return None, None, None
         subset = subset[subset['expiry'] == subset['expiry'].min()]
-        
         candidates = subset[subset['strike'] >= spot].sort_values('strike', ascending=True) if is_ce else subset[subset['strike'] <= spot].sort_values('strike', ascending=False)
             
         for _, row in candidates.head(15).iterrows():
@@ -216,9 +204,10 @@ class SniperBot:
                 self.place_real_order(trade['symbol'], trade['token'], trade['qty'], "SELL", trade['exch'])
             
             self.log(f"🚨 KILL SWITCH: Force closed {trade['symbol']}")
-            self.state["trade_history"].append({
-                "Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": trade['symbol'], "Type": trade['type'],
-                "Qty": trade['qty'], "Entry Price": trade['entry'], "Exit Price": "KILL_EXIT", "PnL (₹)": 0.0
+            save_trade({
+                "Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), 
+                "Symbol": trade['symbol'], "Type": trade['type'], "Qty": trade['qty'], 
+                "Entry Price": trade['entry'], "Exit Price": "KILL", "PnL (₹)": 0.0
             })
             self.state["active_trade"] = None
 
@@ -233,22 +222,29 @@ class SniperBot:
                 cutoff_time = dt.time(23, 15) if index in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] else dt.time(15, 15)
                 current_time = dt.datetime.now().time()
                 
-                # Fetch Spot & Chart Logic
-                spot = self.get_live_price("NFO", index, "12345") if self.is_mock else None
+                spot, base_lot_size = None, 1
                 
                 if not self.is_mock:
                     df_map = self.token_map
                     today = pd.Timestamp.today().normalize()
-                    exch_seg = "BFO" if index == "SENSEX" else "NFO"
-                    mask = (df_map['name'] == index) & (df_map['exch_seg'] == exch_seg) & (df_map['instrumenttype'] == 'FUTIDX') if index in ["NIFTY", "BANKNIFTY", "SENSEX"] else (df_map['name'] == index) & (df_map['exch_seg'].isin(['MCX', 'NCO'])) & (df_map['symbol'].str.contains('FUT'))
+                    
+                    if index in ["NIFTY", "BANKNIFTY"]: mask = (df_map['name'] == index) & (df_map['exch_seg'] == 'NFO') & (df_map['instrumenttype'] == 'FUTIDX')
+                    elif index == "SENSEX": mask = (df_map['name'] == index) & (df_map['exch_seg'] == 'BFO') & (df_map['instrumenttype'] == 'FUTIDX')
+                    elif index in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]: mask = (df_map['name'] == index) & (df_map['exch_seg'].isin(['MCX', 'NCO'])) & (df_map['symbol'].str.contains('FUT'))
+                    else: mask = (df_map['name'] == index) & (df_map['exch_seg'] == 'NFO') & (df_map['instrumenttype'] == 'FUTSTK') # Stock Options (CE/PE) Support
+                    
                     futs = df_map[mask]
                     futs = futs[futs['expiry'] >= today]
                     if not futs.empty:
                         best_fut = futs[futs['expiry'] == futs['expiry'].min()].iloc[0]
                         spot = self.get_live_price(best_fut['exch_seg'], best_fut['symbol'], best_fut['token'])
                         df_candles = self.get_historical_data(best_fut['exch_seg'], best_fut['token'], interval=timeframe)
+                        ls = best_fut.get('lotsize', '1')
+                        base_lot_size = int(ls) if str(ls).isdigit() else DEFAULT_LOTS.get(index, 10)
                 else:
+                    spot = self.get_live_price("NFO", index, "12345")
                     df_candles = self.get_historical_data("MOCK", "12345", interval=timeframe)
+                    base_lot_size = DEFAULT_LOTS.get(index, 250)
                 
                 if spot and df_candles is not None and not df_candles.empty:
                     self.state["spot"] = spot
@@ -259,13 +255,13 @@ class SniperBot:
                     avg_vol = int(df_candles['volume'].rolling(20).mean().shift(1).iloc[-1]) if len(df_candles)>20 else 0
                     self.state["vol_ratio"] = f"{cur_vol}/{avg_vol}"
 
-                    # --- GHOST KILL (Duplicate Order Lock) ---
+                    # --- GHOST KILL & ENTRY LOGIC ---
                     if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and not self.state["order_in_flight"]:
                         if current_time < cutoff_time:
                             self.state["order_in_flight"] = True 
                             try:
-                                qty = s['lots'] * LOT_SIZES.get(index, 10)
-                                max_prem = s['max_capital'] / qty
+                                qty = s['lots'] * base_lot_size
+                                max_prem = s['max_capital'] / qty if qty > 0 else 0
                                 strike_sym, strike_token, strike_exch = self.get_strike(index, spot, signal, max_prem)
                                 
                                 if strike_sym:
@@ -295,7 +291,12 @@ class SniperBot:
                             if current_time >= cutoff_time or ltp >= trade['tgt'] or ltp <= trade['sl']:
                                 if not paper and not self.is_mock: self.place_real_order(trade['symbol'], trade['token'], trade['qty'], "SELL", trade['exch'])
                                 self.log(f"✅ AUTO EXIT {trade['symbol']} @ {ltp} | PnL: ₹{round(pnl, 2)}")
-                                self.state["trade_history"].append({"Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": trade['symbol'], "Type": trade['type'], "Qty": trade['qty'], "Entry Price": trade['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2)})
+                                
+                                save_trade({
+                                    "Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), 
+                                    "Symbol": trade['symbol'], "Type": trade['type'], "Qty": trade['qty'], 
+                                    "Entry Price": trade['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2)
+                                })
                                 self.state["active_trade"] = None
             except Exception as e:
                 self.log(f"Thread Error: {str(e)}")
@@ -310,19 +311,17 @@ if 'bot' not in st.session_state: st.session_state.bot = None
 
 with st.sidebar:
     st.header("🔐 Connection Setup")
-    
-    # --- DYNAMIC CREDENTIAL UI ---
     auth_mode = st.radio("Operating Mode", ["📝 Paper Trading (Offline Mock Data)", "⚡ Real Trading (Live API Data)"])
     
     if not st.session_state.bot:
         if auth_mode == "⚡ Real Trading (Live API Data)":
             creds = load_creds()
-            st.info("Log in with your Angel One credentials. API Key is never saved.")
+            st.info("API Key is never saved locally.")
             API_KEY = st.text_input("API Key", type="password")
             CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
             PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
             TOTP = st.text_input("TOTP secret", value=creds.get("totp_secret", ""), type="password")
-            SAVE_CREDS = st.checkbox("Remember ID & PIN (Auto-saves on connect)", value=True)
+            SAVE_CREDS = st.checkbox("Remember ID & PIN", value=True)
             
             if st.button("Connect to Live Exchange", type="primary"):
                 temp_bot = SniperBot(API_KEY, CLIENT_ID, PIN, TOTP, is_mock=False)
@@ -335,7 +334,7 @@ with st.sidebar:
                         st.rerun()
                     else: st.error("Login Failed. Check credentials.")
         else:
-            st.info("No credentials needed. The bot will generate synthetic market ticks to test UI and logic.")
+            st.info("No credentials needed. The bot will generate synthetic market ticks.")
             if st.button("Start Offline Demo Session", type="primary"):
                 temp_bot = SniperBot(is_mock=True)
                 temp_bot.login()
@@ -350,24 +349,30 @@ with st.sidebar:
 
     st.divider()
     st.header("⚙️ Scalping Settings")
-    INDEX = st.selectbox("Watchlist", ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"])
+    
+    # Stock Support
+    WATCHLIST_OPTIONS = ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "CUSTOM_STOCK..."]
+    idx_sel = st.selectbox("Watchlist", WATCHLIST_OPTIONS)
+    if idx_sel == "CUSTOM_STOCK...":
+        INDEX = st.text_input("Enter NSE Stock Symbol (e.g., RELIANCE, SBIN)", value="RELIANCE").upper()
+    else:
+        INDEX = idx_sel
+        
     TIMEFRAME = st.selectbox("Timeframe", ["ONE_MINUTE", "THREE_MINUTE", "FIVE_MINUTE"], index=2)
     VOL_MULT = st.slider("Volume Sensitivity", 1.1, 3.0, 1.5, 0.1)
-    LOTS = st.number_input("Lots", 1, 100, 2)
+    LOTS = st.number_input("Lots", 1, 100, 1)
     MAX_CAPITAL = st.number_input("Max Capital (₹)", 1000, 500000, 10000, step=1000)
     SL_PTS = st.number_input("Stop Loss (Points)", 5, 200, 20)
     TGT_PTS = st.number_input("Target (Points)", 10, 500, 40)
     
-    # Force Paper mode if Mock is active
     force_paper = True if (st.session_state.bot and st.session_state.bot.is_mock) or auth_mode == "📝 Paper Trading (Offline Mock Data)" else False
     PAPER = st.toggle("📝 Paper Trade Execution", True, disabled=force_paper)
     
     st.divider()
-    st.header("🚨 EMERGENCY")
-    if st.button("KILL SWITCH (CLOSE ALL)", type="primary", use_container_width=True):
+    if st.button("🚨 KILL SWITCH (CLOSE ALL)", type="primary", use_container_width=True):
         if st.session_state.bot:
             st.session_state.bot.emergency_kill()
-            st.success("All positions force closed and bot halted.")
+            st.success("Positions force closed.")
             st.rerun()
 
 if not st.session_state.bot:
@@ -381,24 +386,22 @@ bot.settings = {
     "max_capital": MAX_CAPITAL, "sl_pts": SL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER or force_paper
 }
 
-tab1, tab2 = st.tabs(["⚡ Live Dashboard", "📜 Trade History & Logs"])
+tab1, tab2, tab3 = st.tabs(["⚡ Live Dashboard", "🔎 OI Scanner", "📜 PnL Reports"])
 
 with tab1:
-    
     c1, c2 = st.columns(2)
     if c1.button("🟢 START BACKGROUND BOT"):
         if not bot.state["is_running"]:
             bot.state["is_running"] = True
             threading.Thread(target=bot.trading_loop, daemon=True).start()
-    if c2.button("🔴 STOP BOT"):
-        bot.state["is_running"] = False
+    if c2.button("🔴 STOP BOT"): bot.state["is_running"] = False
 
     if bot.state["is_running"]:
-        st.success("🚀 Bot is running in the background. You can minimize this window." if not bot.is_mock else "🧪 Bot is running offline with simulated data.")
+        st.success(f"{'🚀 Bot running in background.' if not bot.is_mock else '🧪 Bot running offline.'}")
         
         st.divider()
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric(f"{'Synthetic' if bot.is_mock else 'Live'} {INDEX}", round(bot.state["spot"], 2))
+        m1.metric(f"{INDEX} Spot", round(bot.state["spot"], 2))
         m2.metric("Intraday VWAP", round(bot.state["vwap"], 2))
         m3.metric("9-EMA", round(bot.state["ema"], 2))
         m4.metric("Vol/Avg Ratio", bot.state["vol_ratio"])
@@ -416,25 +419,87 @@ with tab1:
             
             if st.button("Close Manually"):
                 if not bot.settings['paper_mode'] and not bot.is_mock: bot.place_real_order(t['symbol'], t['token'], t['qty'], "SELL", t['exch'])
-                bot.state["trade_history"].append({"Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": t['symbol'], "Type": t['type'], "Qty": t['qty'], "Entry Price": t['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2)})
+                
+                save_trade({
+                    "Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), 
+                    "Symbol": t['symbol'], "Type": t['type'], "Qty": t['qty'], 
+                    "Entry Price": t['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2)
+                })
                 bot.log(f"👋 MANUALLY CLOSED | Final PnL: ₹{round(pnl, 2)}")
                 bot.state["active_trade"] = None
                 st.rerun()
-
         time.sleep(2)
         st.rerun()
     else:
         st.warning("Bot is currently stopped.")
 
 with tab2:
-    st.subheader("Daily Realized PnL")
-    total_pnl = sum([t.get("PnL (₹)", 0.0) for t in bot.state["trade_history"]])
-    st.metric("Total Profit/Loss", f"₹{round(total_pnl, 2)}")
+    st.subheader("🔥 OI Spurt Scanner (Long Buildup)")
+    st.write("Scan NSE for F&O stocks with rising Open Interest & Price.")
     
-    if len(bot.state["trade_history"]) > 0:
-        df_hist = pd.DataFrame(bot.state["trade_history"])
-        st.dataframe(df_hist)
-        st.download_button("📥 Download Excel", data=df_hist.to_csv(index=False).encode('utf-8'), file_name=f"Trades_{dt.date.today()}.csv", mime="text/csv")
+    if st.button("🔍 Run Live NSE Scan"):
+        try:
+            from nsepython import nsefetch
+            with st.spinner("Fetching Live OI Data from NSE..."):
+                payload = nsefetch('https://www.nseindia.com/api/live-analysis-oi-spurts')
+                oi_data = payload.get('data', [])
+                
+                if oi_data:
+                    df_oi = pd.DataFrame(oi_data)
+                    df_oi['pChange'] = pd.to_numeric(df_oi['pChange'], errors='coerce')
+                    df_oi['per_chnge_oi'] = pd.to_numeric(df_oi['per_chnge_oi'], errors='coerce')
+                    
+                    long_buildup = df_oi[(df_oi['pChange'] > 0.5) & (df_oi['per_chnge_oi'] > 2)].head(15)
+                    
+                    if not long_buildup.empty:
+                        st.success(f"✅ Found {len(long_buildup)} stocks showing Long Buildup.")
+                        st.dataframe(long_buildup[['symbol', 'latest_price', 'pChange', 'per_chnge_oi', 'per_chnge_vol']].rename(columns={
+                            "symbol": "Symbol", "latest_price": "LTP", "pChange": "Price % Chg", 
+                            "per_chnge_oi": "OI % Chg", "per_chnge_vol": "Vol % Chg"
+                        }))
+                        st.info("💡 To trade one of these, go to the sidebar, select 'CUSTOM_STOCK', and type the symbol.")
+                    else:
+                        st.warning("No strong Long Buildups found right now.")
+        except ImportError:
+            st.error("Missing dependency. Please run: `pip install nsepython` in your terminal.")
+        except Exception as e:
+            st.error(f"Error fetching NSE Data: Market might be closed or NSE is blocking the request. {e}")
+
+with tab3:
+    st.subheader("📊 Export PnL Reports")
+    
+    if os.path.exists(TRADE_FILE):
+        try:
+            df_all = pd.read_csv(TRADE_FILE)
+            df_all['Date'] = pd.to_datetime(df_all['Date'], errors='coerce')
+            
+            today_date = pd.Timestamp(dt.date.today())
+            last_week_date = today_date - dt.timedelta(days=7)
+            
+            df_today = df_all[df_all['Date'] == today_date]
+            df_week = df_all[df_all['Date'] >= last_week_date]
+            
+            c1, c2 = st.columns(2)
+            
+            if not df_today.empty:
+                today_pnl = df_today['PnL (₹)'].sum()
+                c1.metric("Today's Net PnL", f"₹{round(today_pnl, 2)}")
+                c1.download_button("📥 Download Today's Trades", data=df_today.to_csv(index=False).encode('utf-8'), file_name=f"Trades_{dt.date.today()}.csv", mime="text/csv")
+            else:
+                c1.info("No trades executed today.")
+                
+            if not df_week.empty:
+                week_pnl = df_week['PnL (₹)'].sum()
+                c2.metric("Last 7 Days Net PnL", f"₹{round(week_pnl, 2)}")
+                c2.download_button("📥 Download Last 7 Days Trades", data=df_week.to_csv(index=False).encode('utf-8'), file_name=f"Trades_Week_{dt.date.today()}.csv", mime="text/csv")
+
+            st.divider()
+            st.write("**Today's Execution Ledger**")
+            st.dataframe(df_today)
+        except Exception as e:
+            st.error(f"Error reading trade history: {e}")
+    else:
+        st.info("No trade history available yet.")
         
     st.divider()
     st.subheader("System Logs")
