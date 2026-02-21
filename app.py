@@ -17,6 +17,20 @@ from streamlit.runtime.scriptrunner import add_script_run_ctx
 from collections import deque
 
 # ==========================================
+# 0. DEVELOPER SIGNATURE & IP PROTECTION
+# ==========================================
+# INTERNAL_ID: SIG-VIJAY-2026-PRO-SCALPER
+# COPYRIGHT: © 2026 Vijayakumar. All Rights Reserved.
+# Unauthorized distribution or modification is strictly prohibited.
+def render_signature():
+    st.sidebar.markdown(
+        f'<div style="text-align: center; color: #38bdf8; font-size: 0.8rem; font-weight: bold; border-top: 1px solid #38bdf8; padding-top: 10px; margin-top: 10px;">'
+        f'🚀 Pro Scalper Engine<br>Developed by: Vijayakumar</div>', 
+        unsafe_allow_html=True
+    )
+    st.session_state['_dev_sig'] = "AUTH_OWNER_VIJAYAKUMAR_SECURE_ID_8844"
+
+# ==========================================
 # 1. SECURITY, CONFIG & HIGH-CONTRAST CSS
 # ==========================================
 CRED_FILE = "secure_creds.json"
@@ -31,16 +45,30 @@ st.markdown("""
     }
     [data-testid="stSidebar"] * { color: #e2e8f0 !important; }
     [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { color: #38bdf8 !important; }
-    
-    /* High Contrast for Main Area (Black Text in White Boxes) */
-    .stDataFrame, .stTable, .stDataFrame * {
+
+    /* 🔴 SAFE HIGH CONTRAST FOR INPUTS & DROPDOWNS 🔴 */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="base-input"] > input,
+    input[type="number"], input[type="password"], input[type="text"] {
         color: #000000 !important;
-        font-weight: 600 !important;
+        font-weight: 900 !important; 
+        background-color: #ffffff !important;
+        -webkit-text-fill-color: #000000 !important; 
     }
-    .stAlert { color: #000000 !important; }
+    
+    /* Pure HTML Tables (For Scanners) */
+    [data-testid="stTable"], [data-testid="stTable"] > div > table {
+        background-color: #ffffff !important;
+        width: 100% !important;
+    }
+    [data-testid="stTable"] th, [data-testid="stTable"] td {
+        color: #000000 !important;
+        font-weight: 800 !important;
+        border: 1px solid #000000 !important;
+    }
     
     /* Pad the bottom of the app so you can scroll past the bottom dock */
-    .main .block-container { padding-bottom: 100px; }
+    .main .block-container { padding-bottom: 120px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,15 +89,17 @@ def save_trade(trade_record):
     else: df_new.to_csv(TRADE_FILE, mode='a', header=False, index=False)
 
 DEFAULT_LOTS = {"NIFTY": 75, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30}
-YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN"}
+# Added exact real-world tickers for commodities
+YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", "GOLD": "GC=F", "SILVER": "SI=F"}
 
 # ==========================================
-# 2. MARKET STATUS & TECHNICALS (WITH ATR)
+# 2. MARKET STATUS & TECHNICALS 
 # ==========================================
 def get_market_status():
     now_ist = dt.datetime.utcnow() + dt.timedelta(hours=5, minutes=30)
     if now_ist.weekday() >= 5: return False, "Market Closed (Weekend)"
     if dt.time(9, 15) <= now_ist.time() <= dt.time(15, 30): return True, "Market Live 🟢"
+    if dt.time(17, 00) <= now_ist.time() <= dt.time(23, 30): return True, "Commodity Live 🟠"
     return False, "Market Closed (After Hours)"
 
 def check_btst_stbt(df):
@@ -79,10 +109,8 @@ def check_btst_stbt(df):
     df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
     last = df.iloc[-1]
     
-    if last['close'] > last['ema9'] > last['ema21'] and (last['high'] - last['close']) < (last['close'] - last['open']):
-        return "🔥 BTST Suggested"
-    elif last['close'] < last['ema9'] < last['ema21'] and (last['close'] - last['low']) < (last['open'] - last['close']):
-        return "🩸 STBT Suggested"
+    if last['close'] > last['ema9'] > last['ema21'] and (last['high'] - last['close']) < (last['close'] - last['open']): return "🔥 BTST Suggested"
+    elif last['close'] < last['ema9'] < last['ema21'] and (last['close'] - last['low']) < (last['open'] - last['close']): return "🩸 STBT Suggested"
     return "⚖️ Neutral (No Hold)"
 
 class TechnicalAnalyzer:
@@ -103,11 +131,8 @@ class TechnicalAnalyzer:
         atr = self.get_atr(df)
         
         signal, trend = "WAIT", "FLAT"
-        if df['ema_short'].iloc[-1] > df['ema_long'].iloc[-1] and df['close'].iloc[-1] > df['vwap'].iloc[-1]:
-            signal, trend = "BUY_CE", "BULLISH 🟢"
-        elif df['ema_short'].iloc[-1] < df['ema_long'].iloc[-1] and df['close'].iloc[-1] < df['vwap'].iloc[-1]:
-            signal, trend = "BUY_PE", "BEARISH 🔴"
-            
+        if df['ema_short'].iloc[-1] > df['ema_long'].iloc[-1] and df['close'].iloc[-1] > df['vwap'].iloc[-1]: signal, trend = "BUY_CE", "BULLISH 🟢"
+        elif df['ema_short'].iloc[-1] < df['ema_long'].iloc[-1] and df['close'].iloc[-1] < df['vwap'].iloc[-1]: signal, trend = "BUY_PE", "BEARISH 🔴"
         return trend, signal, df['vwap'].iloc[-1], df['ema_short'].iloc[-1], df, atr
 
     def apply_fvg_strategy(self, df, momentum_mult=1.5):
@@ -127,7 +152,6 @@ class TechnicalAnalyzer:
         signal, trend = "WAIT", "CONSOLIDATING"
         if (bullish_fvg & strong_disp).iloc[-1]: signal, trend = "BUY_CE", "FVG BULLISH 🟢"
         elif (bearish_fvg & strong_disp).iloc[-1]: signal, trend = "BUY_PE", "FVG BEARISH 🔴"
-            
         return trend, signal, df['vwap'].iloc[-1], df['ema_short'].iloc[-1], df, atr
 
 # ==========================================
@@ -137,13 +161,13 @@ class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", is_mock=False):
         self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
         self.api, self.token_map, self.is_mock = None, None, is_mock
+        self.client_name = "Offline User"
         self.analyzer = TechnicalAnalyzer()
         self.state = {
             "is_running": False, "order_in_flight": False, "active_trade": None,
             "logs": deque(maxlen=50), "current_trend": "WAIT", "current_signal": "WAIT",
             "spot": 0.0, "vwap": 0.0, "ema": 0.0, "atr": 0.0, "latest_data": None,
-            "global_alerts": deque(maxlen=5), 
-            "loop_count": 0
+            "global_alerts": deque(maxlen=5), "loop_count": 0
         }
         self.settings = {}
 
@@ -152,13 +176,17 @@ class SniperBot:
         self.state["logs"].appendleft(f"[{ts}] {msg}")
 
     def login(self):
-        if self.is_mock: return True
+        if self.is_mock: 
+            self.client_name = "Paper Trading User"
+            return True
         try:
             obj = SmartConnect(api_key=self.api_key)
             token = pyotp.TOTP(self.totp_secret).now()
             res = obj.generateSession(self.client_id, self.pwd, token)
             if res['status']:
                 self.api = obj
+                # Extract the real owner name from Angel One API
+                self.client_name = res['data'].get('name', self.client_id)
                 return True
             return False
         except Exception: return False
@@ -234,7 +262,7 @@ class SniperBot:
         
         is_ce = "BUY_CE" in signal
         opt_type = "CE" if is_ce else "PE"
-        exch_list, valid_instruments = ["NFO"], ['OPTIDX', 'OPTSTK']
+        exch_list, valid_instruments = ["NFO", "MCX"], ['OPTIDX', 'OPTSTK', 'OPTFUT', 'OPTCOM']
         
         today = pd.Timestamp.today().normalize()
         mask = (df['name'] == symbol) & (df['exch_seg'].isin(exch_list)) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type)) & (df['instrumenttype'].isin(valid_instruments))
@@ -266,15 +294,6 @@ class SniperBot:
                     icon = "🚀" if "CE" in sig else "🩸"
                     self.state["global_alerts"].append(f"{icon} **FOMO ALERT:** {sym} is showing a {trend} signal!")
 
-    def emergency_kill(self):
-        self.state["is_running"] = False
-        trade = self.state["active_trade"]
-        if trade:
-            if not self.settings.get("paper_mode", True) and not self.is_mock:
-                self.place_real_order(trade['symbol'], trade['token'], trade['qty'], "SELL", trade['exch'])
-            save_trade({"Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": trade['symbol'], "Type": trade['type'], "Qty": trade['qty'], "Entry Price": trade['entry'], "Exit Price": "KILL", "PnL (₹)": 0.0})
-            self.state["active_trade"] = None
-
     def trading_loop(self):
         self.log("Background scalping thread started.")
         while self.state["is_running"]:
@@ -293,7 +312,7 @@ class SniperBot:
                 
                 if self.state["loop_count"] % 15 == 0: self.check_global_spikes()
 
-                cutoff_time = dt.time(15, 15)
+                cutoff_time = dt.time(15, 15) if index not in ["CRUDEOIL", "GOLD", "SILVER"] else dt.time(23, 15)
                 if self.is_mock: cutoff_time = dt.time(23, 59) 
                 
                 spot, base_lot_size = None, 1
@@ -301,7 +320,10 @@ class SniperBot:
                 if not self.is_mock:
                     df_map = self.token_map
                     today = pd.Timestamp.today().normalize()
-                    futs = df_map[(df_map['name'] == index) & (df_map['exch_seg'] == 'NFO') & (df_map['instrumenttype'] == 'FUTIDX') & (df_map['expiry'] >= today)]
+                    exch = 'NFO' if index not in ["CRUDEOIL", "GOLD", "SILVER"] else 'MCX'
+                    inst = 'FUTIDX' if index in ["NIFTY", "BANKNIFTY"] else ('FUTCOM' if exch == 'MCX' else 'FUTSTK')
+                    
+                    futs = df_map[(df_map['name'] == index) & (df_map['exch_seg'] == exch) & (df_map['instrumenttype'] == inst) & (df_map['expiry'] >= today)]
                     if not futs.empty:
                         best_fut = futs[futs['expiry'] == futs['expiry'].min()].iloc[0]
                         spot = self.get_live_price(best_fut['exch_seg'], best_fut['symbol'], best_fut['token'])
@@ -384,7 +406,9 @@ class SniperBot:
 st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
 is_mkt_open, mkt_status_msg = get_market_status()
 
+# Init Session states
 if 'bot' not in st.session_state: st.session_state.bot = None
+if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
 
 if st.session_state.bot and st.session_state.bot.state["global_alerts"]:
     while st.session_state.bot.state["global_alerts"]:
@@ -397,27 +421,21 @@ with st.sidebar:
     if not st.session_state.bot:
         if auth_mode == "⚡ Real Trading":
             creds = load_creds()
-            st.info("API Key is never saved locally.")
-            # Restored inputs with 'Remember' logic
             API_KEY = st.text_input("SmartAPI Key", value=creds.get("api_key", ""), type="password")
             CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
             PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
             TOTP = st.text_input("TOTP secret", value=creds.get("totp_secret", ""), type="password")
-            
             SAVE_CREDS = st.checkbox("Remember ID & PIN", value=True)
             
             if st.button("Connect to Live Exchange", type="primary"):
                 temp_bot = SniperBot(API_KEY, CLIENT_ID, PIN, TOTP, is_mock=False)
                 with st.spinner("Authenticating..."):
                     if temp_bot.login():
-                        # Save credentials if checkbox is checked
-                        if SAVE_CREDS: 
-                            save_creds(CLIENT_ID, PIN, TOTP, API_KEY)
+                        if SAVE_CREDS: save_creds(CLIENT_ID, PIN, TOTP, API_KEY)
                         st.session_state.bot = temp_bot
                         temp_bot.fetch_master()
                         st.rerun()
-                    else:
-                        st.error("Login Failed. Check credentials.")
+                    else: st.error("Login Failed. Check credentials.")
         else:
             if st.button("Start Paper Session", type="primary"):
                 temp_bot = SniperBot(is_mock=True)
@@ -425,7 +443,8 @@ with st.sidebar:
                 st.session_state.bot = temp_bot
                 st.rerun()
     else:
-        st.success(f"Connected: {'Paper Mode' if st.session_state.bot.is_mock else st.session_state.bot.client_id}")
+        st.success(f"👤 Owner: **{st.session_state.bot.client_name}**")
+        st.info(f"Connected: {'Paper Mode' if st.session_state.bot.is_mock else 'Live API'}")
         if st.button("Logout & Clear"):
             st.session_state.bot.state["is_running"] = False
             st.session_state.clear()
@@ -449,12 +468,20 @@ with st.sidebar:
     HERO_ZERO = st.toggle("Enable Hero/Zero", False)
     HZ_PREMIUM = st.number_input("Max H/Z Premium (₹)", 1, 100, 15)
 
+    render_signature()
+
 if not st.session_state.bot:
     st.title("Welcome to Pro Scalper Bot ⚡")
     st.warning("Please configure your connection in the sidebar to begin.")
 else:
     bot = st.session_state.bot
     bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_capital": MAX_CAPITAL, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "hero_zero": HERO_ZERO, "hz_premium": HZ_PREMIUM}
+
+    # Detect context switch to instantly clear chart
+    if st.session_state.prev_index != INDEX:
+        st.session_state.prev_index = INDEX
+        bot.state['latest_data'] = None
+        bot.state['spot'] = 0.0
 
     if not is_mkt_open: st.error(f"😴 {mkt_status_msg}")
         
@@ -534,23 +561,67 @@ else:
     with tab2:
         colA, colB = st.columns(2)
         with colA:
-            st.subheader("🔥 F&O OI Spurt Scanner")
-            if st.button("🔍 Run Live NSE Scan Now"):
-                try:
-                    from nsepython import nsefetch
-                    with st.spinner("Fetching Live OI Data from NSE..."):
-                        payload = nsefetch('https://www.nseindia.com/api/live-analysis-oi-spurts')
-                        if payload and 'data' in payload:
-                            df_oi = pd.DataFrame(payload.get('data', []))
-                            df_oi['pChange'] = pd.to_numeric(df_oi['pChange'], errors='coerce')
-                            df_oi['per_chnge_oi'] = pd.to_numeric(df_oi['per_chnge_oi'], errors='coerce')
+           with colA:
+            st.subheader("📊 52W High/Low & Intraday Scanner")
+            st.write("Scans top NIFTY 50 stocks for breakouts and intraday momentum.")
+            
+            if st.button("🔍 Scan Top NSE Stocks"):
+                with st.spinner("Analyzing Volatility and Price Action..."):
+                    try:
+                        # High-liquidity NSE stocks to scan
+                        watch_list = ["RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "M&M.NS"]
+                        
+                        scan_results = []
+                        for ticker in watch_list:
+                            tk = yf.Ticker(ticker)
                             
-                            st.markdown("#### 🟢 Long Buildups")
-                            longs = df_oi[(df_oi['pChange'] > 0.5) & (df_oi['per_chnge_oi'] > 2)].head(10)
-                            st.dataframe(longs[['symbol', 'latest_price', 'pChange', 'per_chnge_oi']], use_container_width=True, hide_index=True)
-                except Exception as e:
-                    st.error(f"Scanner Failed. Ensure 'nsepython' is installed or try during market hours.")
+                            # 1. Fetch 1-Year Data for 52-Week High/Low
+                            hist_1y = tk.history(period="1y")
+                            if hist_1y.empty: continue
+                            
+                            high_52 = hist_1y['High'].max()
+                            low_52 = hist_1y['Low'].min()
+                            ltp = hist_1y['Close'].iloc[-1]
+                            
+                            # 2. Fetch Intraday 5m Data for Buy/Sell Rating
+                            intra = tk.history(period="5d", interval="5m")
+                            rating = "Neutral ⚖️"
+                            
+                            if not intra.empty:
+                                df_intra = intra.copy()
+                                df_intra['vwap'] = (df_intra['Close'] * df_intra['Volume']).cumsum() / df_intra['Volume'].cumsum()
+                                df_intra['ema9'] = df_intra['Close'].ewm(span=9).mean()
+                                df_intra['ema21'] = df_intra['Close'].ewm(span=21).mean()
+                                
+                                c = df_intra['Close'].iloc[-1]
+                                v = df_intra['vwap'].iloc[-1]
+                                e9 = df_intra['ema9'].iloc[-1]
+                                e21 = df_intra['ema21'].iloc[-1]
+                                
+                                # Intraday Momentum Logic
+                                if c > e9 > e21 and c > v: 
+                                    rating = "Strong Buy 🚀"
+                                elif c > v and c > e21: 
+                                    rating = "Buy 🟢"
+                                elif c < e9 < e21 and c < v: 
+                                    rating = "Strong Sell 🩸"
+                                elif c < v and c < e21: 
+                                    rating = "Sell 🔴"
 
+                            scan_results.append({
+                                "Stock": ticker.replace(".NS", ""),
+                                "LTP": round(ltp, 2),
+                                "52W High": round(high_52, 2),
+                                "52W Low": round(low_52, 2),
+                                "Intraday Signal": rating
+                            })
+                            
+                        # Render Dataframe
+                        res_df = pd.DataFrame(scan_results)
+                        st.dataframe(res_df, use_container_width=True, hide_index=True)
+                        
+                    except Exception as e:
+                        st.error(f"Scanner Failed. Error: {e}")
         with colB:
             st.subheader(f"📡 Multi-Stock BTST Scanner")
             if st.button("🔄 Scan Market"):
