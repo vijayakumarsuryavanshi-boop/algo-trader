@@ -11,5 +11,6 @@ websocket-client
 scipy
 nsepython
 nsetools
+yfinance
 
 
