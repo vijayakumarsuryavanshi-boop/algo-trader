@@ -15,6 +15,7 @@ lxml
 cryptography
 python-dotenv
 pyarrow
+plotly
 
 
 
