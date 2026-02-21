@@ -15,13 +15,12 @@ import plotly.graph_objects as go
 from SmartApi import SmartConnect
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 from collections import deque
+from streamlit_lightweight_charts import renderLightweightCharts
 
 # ==========================================
 # 0. DEVELOPER SIGNATURE & IP PROTECTION
 # ==========================================
 # INTERNAL_ID: SIG-VIJAY-2026-PRO-SCALPER
-# COPYRIGHT: © 2026 Vijayakumar. All Rights Reserved.
-# Unauthorized distribution or modification is strictly prohibited.
 def render_signature():
     st.sidebar.markdown(
         f'<div style="text-align: center; color: #38bdf8; font-size: 0.8rem; font-weight: bold; border-top: 1px solid #38bdf8; padding-top: 10px; margin-top: 10px;">'
@@ -46,7 +45,7 @@ st.markdown("""
     [data-testid="stSidebar"] * { color: #e2e8f0 !important; }
     [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { color: #38bdf8 !important; }
 
-    /* 🔴 SAFE HIGH CONTRAST FOR INPUTS & DROPDOWNS 🔴 */
+    /* SAFE HIGH CONTRAST FOR INPUTS & DROPDOWNS */
     div[data-baseweb="select"] > div,
     div[data-baseweb="base-input"] > input,
     input[type="number"], input[type="password"], input[type="text"] {
@@ -89,8 +88,16 @@ def save_trade(trade_record):
     else: df_new.to_csv(TRADE_FILE, mode='a', header=False, index=False)
 
 DEFAULT_LOTS = {"NIFTY": 75, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30}
-# Added exact real-world tickers for commodities
 YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", "GOLD": "GC=F", "SILVER": "SI=F"}
+STRAT_LIST = ["VWAP + EMA", "Institutional FVG + SMC", "Combined (Convergence)"]
+
+# ==========================================
+# Session State Init for Dock Syncing
+# ==========================================
+if 'sb_index' not in st.session_state: st.session_state.sb_index = list(DEFAULT_LOTS.keys())[0]
+if 'sb_strat' not in st.session_state: st.session_state.sb_strat = STRAT_LIST[0]
+if 'bot' not in st.session_state: st.session_state.bot = None
+if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
 
 # ==========================================
 # 2. MARKET STATUS & TECHNICALS 
@@ -185,7 +192,6 @@ class SniperBot:
             res = obj.generateSession(self.client_id, self.pwd, token)
             if res['status']:
                 self.api = obj
-                # Extract the real owner name from Angel One API
                 self.client_name = res['data'].get('name', self.client_id)
                 return True
             return False
@@ -406,10 +412,6 @@ class SniperBot:
 st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
 is_mkt_open, mkt_status_msg = get_market_status()
 
-# Init Session states
-if 'bot' not in st.session_state: st.session_state.bot = None
-if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
-
 if st.session_state.bot and st.session_state.bot.state["global_alerts"]:
     while st.session_state.bot.state["global_alerts"]:
         st.toast(st.session_state.bot.state["global_alerts"].popleft(), icon="🔥")
@@ -452,8 +454,9 @@ with st.sidebar:
 
     st.divider()
     st.header("⚙️ Strategy & Setup")
-    STRATEGY = st.selectbox("Trading Strategy", ["VWAP + EMA", "Institutional FVG + SMC", "Combined (Convergence)"])
-    INDEX = st.selectbox("Watchlist", list(DEFAULT_LOTS.keys()))
+    
+    STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, key="sb_strat")
+    INDEX = st.selectbox("Watchlist", list(DEFAULT_LOTS.keys()), key="sb_index")
     TIMEFRAME = st.selectbox("Timeframe", ["1m", "3m", "5m"], index=2)
     
     st.header("🛡️ Risk Management")
@@ -477,7 +480,6 @@ else:
     bot = st.session_state.bot
     bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_capital": MAX_CAPITAL, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "hero_zero": HERO_ZERO, "hz_premium": HZ_PREMIUM}
 
-    # Detect context switch to instantly clear chart
     if st.session_state.prev_index != INDEX:
         st.session_state.prev_index = INDEX
         bot.state['latest_data'] = None
@@ -487,9 +489,6 @@ else:
         
     tab1, tab2, tab3 = st.tabs(["⚡ Live Dashboard", "🔎 Scanners", "📜 PnL Reports"])
 
-    # ==========================================
-    # TAB 1: LIVE DASHBOARD
-    # ==========================================
     with tab1:
         st.subheader(f"Trading Terminal: {INDEX}")
         
@@ -520,15 +519,91 @@ else:
             m4.metric("Market Sentiment", bot.state["current_trend"])
             
             chart_col, trade_col = st.columns([3, 1])
+
             with chart_col:
+                tf_selection = st.radio(
+                    "Select Timeframe", 
+                    ["1m", "3m", "5m", "15m"], 
+                    index=["1m", "3m", "5m", "15m"].index(bot.settings.get('timeframe', '5m')),
+                    horizontal=True,
+                    label_visibility="collapsed"
+                )
+                
+                if tf_selection != bot.settings.get('timeframe'):
+                    bot.settings['timeframe'] = tf_selection
+                    bot.state['latest_data'] = None 
+                    st.rerun()
+
                 df = bot.state["latest_data"]
-                if df is not None:
-                    fig = go.Figure()
-                    fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'], low=df['low'], close=df['close'], name='Candles'))
-                    if 'vwap' in df.columns: fig.add_trace(go.Scatter(x=df.index, y=df['vwap'], name='VWAP', line=dict(color='orange', dash='dash')))
-                    if 'ema_short' in df.columns: fig.add_trace(go.Scatter(x=df.index, y=df['ema_short'], name='EMA 9', line=dict(color='green')))
-                    fig.update_layout(margin=dict(l=0, r=0, t=20, b=0), height=400, xaxis_rangeslider_visible=False)
-                    st.plotly_chart(fig, use_container_width=True)
+                if df is not None and not df.empty:
+                    chart_df = df.copy()
+                    
+                    chart_df = chart_df.sort_index()
+                    for col in ['open', 'high', 'low', 'close']:
+                        chart_df[col] = pd.to_numeric(chart_df[col], errors='coerce')
+                    chart_df = chart_df.dropna(subset=['open', 'high', 'low', 'close'])
+                    chart_df['time'] = (pd.to_datetime(chart_df.index).astype('int64') // 10**9) - 19800
+                    
+                    candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
+                    
+                    chartOptions = {
+                        "height": 450,
+                        "layout": {
+                            "textColor": '#d1d5db',
+                            "background": { "type": 'solid', "color": '#0b0f19' }
+                        },
+                        "grid": {
+                            "vertLines": { "color": 'rgba(42, 46, 57, 0.5)' },
+                            "horzLines": { "color": 'rgba(42, 46, 57, 0.5)' }
+                        },
+                        "crosshair": { "mode": 0 }, 
+                        "timeScale": {
+                            "timeVisible": True, 
+                            "secondsVisible": False,
+                        }
+                    }
+                    
+                    chart_series = [{
+                        "type": 'Candlestick',
+                        "data": candles,
+                        "options": {
+                            "upColor": '#26a69a',
+                            "downColor": '#ef5350',
+                            "borderVisible": False,
+                            "wickUpColor": '#26a69a',
+                            "wickDownColor": '#ef5350'
+                        }
+                    }]
+                    
+                    if 'vwap' in chart_df.columns:
+                        chart_df['vwap'] = pd.to_numeric(chart_df['vwap'], errors='coerce')
+                        vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
+                        if vwap_data:
+                            chart_series.append({
+                                "type": 'Line',
+                                "data": vwap_data,
+                                "options": { "color": '#ff9800', "lineWidth": 2, "title": 'VWAP' }
+                            })
+                        
+                    if 'ema_short' in chart_df.columns:
+                        chart_df['ema_short'] = pd.to_numeric(chart_df['ema_short'], errors='coerce')
+                        ema_data = chart_df[['time', 'ema_short']].dropna().rename(columns={'ema_short': 'value'}).to_dict('records')
+                        if ema_data:
+                            chart_series.append({
+                                "type": 'Line',
+                                "data": ema_data,
+                                "options": { "color": '#2962ff', "lineWidth": 2, "title": 'EMA 9' }
+                            })
+
+                    renderLightweightCharts([
+                        {
+                            "chart": chartOptions,
+                            "series": chart_series
+                        }
+                    ], 'tv_chart')
+                else:
+                    # Helpful fallback message if the bot isn't fetching data yet
+                    st.info(f"💡 Click **▶️ START ENGINE** above to load the live chart data for **{INDEX}**.")
 
             with trade_col:
                 st.markdown("### Open Position")
@@ -555,27 +630,19 @@ else:
         else:
             st.warning("Engine is currently stopped. Click Start to begin tracking.")
 
-    # ==========================================
-    # TAB 2: SCANNERS & BTST SUGGESTIONS
-    # ==========================================
     with tab2:
         colA, colB = st.columns(2)
         with colA:
-           with colA:
             st.subheader("📊 52W High/Low & Intraday Scanner")
             st.write("Scans top NIFTY 50 stocks for breakouts and intraday momentum.")
             
             if st.button("🔍 Scan Top NSE Stocks"):
                 with st.spinner("Analyzing Volatility and Price Action..."):
                     try:
-                        # High-liquidity NSE stocks to scan
                         watch_list = ["RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "M&M.NS"]
-                        
                         scan_results = []
                         for ticker in watch_list:
                             tk = yf.Ticker(ticker)
-                            
-                            # 1. Fetch 1-Year Data for 52-Week High/Low
                             hist_1y = tk.history(period="1y")
                             if hist_1y.empty: continue
                             
@@ -583,7 +650,6 @@ else:
                             low_52 = hist_1y['Low'].min()
                             ltp = hist_1y['Close'].iloc[-1]
                             
-                            # 2. Fetch Intraday 5m Data for Buy/Sell Rating
                             intra = tk.history(period="5d", interval="5m")
                             rating = "Neutral ⚖️"
                             
@@ -598,15 +664,10 @@ else:
                                 e9 = df_intra['ema9'].iloc[-1]
                                 e21 = df_intra['ema21'].iloc[-1]
                                 
-                                # Intraday Momentum Logic
-                                if c > e9 > e21 and c > v: 
-                                    rating = "Strong Buy 🚀"
-                                elif c > v and c > e21: 
-                                    rating = "Buy 🟢"
-                                elif c < e9 < e21 and c < v: 
-                                    rating = "Strong Sell 🩸"
-                                elif c < v and c < e21: 
-                                    rating = "Sell 🔴"
+                                if c > e9 > e21 and c > v: rating = "Strong Buy 🚀"
+                                elif c > v and c > e21: rating = "Buy 🟢"
+                                elif c < e9 < e21 and c < v: rating = "Strong Sell 🩸"
+                                elif c < v and c < e21: rating = "Sell 🔴"
 
                             scan_results.append({
                                 "Stock": ticker.replace(".NS", ""),
@@ -616,7 +677,6 @@ else:
                                 "Intraday Signal": rating
                             })
                             
-                        # Render Dataframe
                         res_df = pd.DataFrame(scan_results)
                         st.dataframe(res_df, use_container_width=True, hide_index=True)
                         
@@ -635,9 +695,6 @@ else:
                             scan_results.append({"Symbol": sym, "LTP": round(df['close'].iloc[-1], 2), "Trend": trend, "BTST/STBT": btst_sig})
                     st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
 
-    # ==========================================
-    # TAB 3: PNL & LOGS
-    # ==========================================
     with tab3:
         log_col, pnl_col = st.columns([1, 2])
         with log_col:
@@ -655,13 +712,30 @@ else:
                 st.info("No trade history available.")
 
 # ==========================================
-# FULL-WIDTH BOTTOM NAVIGATION DOCK
+# FULL-WIDTH BOTTOM NAVIGATION DOCK 
 # ==========================================
-c1, c2, c3 = st.columns([1, 2, 1])
-with c2:
-    btn1, btn2 = st.columns(2)
-    if btn1.button("🏠 Home", use_container_width=True): st.rerun()
-    if btn2.button("👆 Quick Login", use_container_width=True):
+
+def cycle_asset():
+    assets = list(DEFAULT_LOTS.keys())
+    current_idx = assets.index(st.session_state.sb_index)
+    st.session_state.sb_index = assets[(current_idx + 1) % len(assets)]
+
+def cycle_strat():
+    current_idx = STRAT_LIST.index(st.session_state.sb_strat)
+    st.session_state.sb_strat = STRAT_LIST[(current_idx + 1) % len(STRAT_LIST)]
+
+dock_c1, dock_c2, dock_c3 = st.columns(3)
+
+with dock_c1:
+    # Adding a static key tells Streamlit this is the exact same button, even if the label changes!
+    st.button(f"🔄 Switch: {st.session_state.sb_index}", key="btn_asset_switch", on_click=cycle_asset, use_container_width=True)
+
+with dock_c2:
+    display_strat = st.session_state.sb_strat.split(" ")[0] 
+    st.button(f"🧠 Strat: {display_strat}", key="btn_strat_switch", on_click=cycle_strat, use_container_width=True)
+
+with dock_c3:
+    if st.button("👆 Quick Login", use_container_width=True):
         if not st.session_state.bot:
             st.toast("Simulating biometric login...", icon="🔓")
             creds = load_creds()
