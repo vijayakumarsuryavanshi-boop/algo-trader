@@ -16,6 +16,7 @@ cryptography
 python-dotenv
 pyarrow
 plotly
+streamlit-lightweight-charts
 
 
 
