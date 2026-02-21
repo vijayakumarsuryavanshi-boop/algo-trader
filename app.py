@@ -6,150 +6,52 @@ import os
 import datetime
 import pandas_ta as ta
 import pyotp
-import random # For simulating ML probability
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 
-# --- Configuration & Aggressive UI Setup ---
-st.set_page_config(page_title="PRO SCALPER X", layout="wide", initial_sidebar_state="expanded")
+# --- Aggressive UI Setup ---
+st.set_page_config(page_title="PRO SCALPER X - SMC Edition", layout="wide", initial_sidebar_state="expanded")
 
-# Custom CSS for a dark, aggressive, mobile-like sidebar
 st.markdown("""
 <style>
-    [data-testid="stSidebar"] {
-        background-color: #0d1117;
-        color: #00ffcc;
-        border-right: 2px solid #ff003c;
-    }
-    [data-testid="stSidebar"] h1, h2, h3 {
-        color: #ff003c !important;
-        font-family: 'Courier New', Courier, monospace;
-        text-transform: uppercase;
-    }
-    div.stButton > button:first-child {
-        background: linear-gradient(90deg, #ff003c 0%, #cc0033 100%);
-        color: white;
-        font-weight: 900;
-        border-radius: 8px;
-        border: none;
-        width: 100%;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    div.stButton > button:first-child:hover {
-        background: linear-gradient(90deg, #cc0033 0%, #990022 100%);
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: transparent;
-        border-radius: 4px 4px 0px 0px;
-        gap: 1px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        font-weight: bold;
-        color: #ffffff;
-    }
-    .stTabs [aria-selected="true"] {
-        border-bottom: 3px solid #ff003c;
-        color: #ff003c !important;
-    }
+    [data-testid="stSidebar"] { background-color: #0d1117; color: #00ffcc; border-right: 2px solid #ff003c; }
+    [data-testid="stSidebar"] h1, h2, h3 { color: #ff003c !important; font-family: 'Courier New', monospace; text-transform: uppercase; }
+    div.stButton > button:first-child { background: linear-gradient(90deg, #ff003c 0%, #cc0033 100%); color: white; font-weight: 900; border-radius: 8px; width: 100%; }
+    .stMetric { background-color: #161b22; padding: 15px; border-radius: 8px; border-left: 4px solid #00ffcc; }
 </style>
 """, unsafe_allow_html=True)
-
-# --- State Management ---
-if 'bot_running' not in st.session_state:
-    st.session_state.bot_running = False
-if 'ghost_kill_lock' not in st.session_state:
-    st.session_state.ghost_kill_lock = False
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'trade_history' not in st.session_state:
-    st.session_state.trade_history = pd.DataFrame(columns=["Time", "Symbol", "Type", "Strategy", "Entry", "SL", "TP", "Status", "PnL"])
-if 'live_prices' not in st.session_state:
-    st.session_state.live_prices = {}
 
 TRADE_LOG_FILE = "trade_history.csv"
 MAX_CAPITAL = 10000
 
+# --- Persistent Engine State (Survives Browser Disconnects) ---
+@st.cache_resource
+def get_engine_state():
+    """Global state that persists even if the Streamlit browser tab is closed."""
+    return {
+        "bot_running": False,
+        "ghost_kill_lock": False,
+        "live_prices": {},
+        "target_token": "26000",
+        "api_client": None,
+        "sl_pct": 5.0,
+        "tp_pct": 10.0
+    }
+
+engine_state = get_engine_state()
+
+# Load persistent history
 if os.path.exists(TRADE_LOG_FILE):
-    st.session_state.trade_history = pd.read_csv(TRADE_LOG_FILE)
-
-# --- Angel One WebSocket Callbacks ---
-def on_data(wsapp, message):
-    try:
-        token = message.get('token')
-        ltp = message.get('last_traded_price', 0) / 100.0
-        if token and ltp > 0:
-            st.session_state.live_prices[token] = ltp
-    except Exception as e:
-        pass
-
-def on_error(wsapp, error):
-    pass
-
-# --- Machine Learning Engine (Placeholder Interface) ---
-def ml_predict_signal(token, current_price, model_type):
-    """
-    Mock interface for Machine Learning integration.
-    You will replace the random probability with actual inference from Scikit-learn/TensorFlow.
-    """
-    # Simulate processing time for ML inference
-    prob_buy = random.uniform(0.1, 0.9)
-    
-    if model_type == "Random Forest":
-        threshold = 0.75
-    elif model_type == "LSTM (Deep Learning)":
-        threshold = 0.80
-    else:
-        threshold = 0.70
-
-    if prob_buy > threshold:
-        return "BUY", prob_buy
-    elif prob_buy < (1 - threshold):
-        return "SELL", (1 - prob_buy)
-    
-    return "NEUTRAL", prob_buy
-
-# --- Core Trading Logic & End-of-Day Logic ---
-def technical_analyzer(token, api_client, use_ml, ml_model):
-    """Evaluates standard VWAP/EMA and intercepts End-of-Day for BTST/STBT"""
-    
-    now = datetime.datetime.now().time()
-    current_price = st.session_state.live_prices.get(token, 0)
-    
-    # 1. BTST / STBT End-of-Season Logic (3:15 PM - 3:25 PM IST)
-    is_eod = datetime.time(15, 15) <= now <= datetime.time(15, 25)
-    
-    signal = "NEUTRAL"
-    strategy_tag = "VWAP_EMA"
-    
-    # 2. Machine Learning Override
-    if use_ml and current_price > 0:
-        ml_signal, confidence = ml_predict_signal(token, current_price, ml_model)
-        if ml_signal != "NEUTRAL":
-            signal = ml_signal
-            strategy_tag = f"AI_{ml_model}"
-            
-    # 3. Standard Technical Fallback (Simulated due to missing live history in demo)
-    if signal == "NEUTRAL" and current_price > 0:
-        # Simplified standard logic for paper trading script
-        signal = random.choice(["BUY", "SELL", "NEUTRAL", "NEUTRAL", "NEUTRAL"])
-    
-    # Tag BTST/STBT if in the specific time window
-    if is_eod and signal == "BUY":
-        strategy_tag = "BTST"
-    elif is_eod and signal == "SELL":
-        strategy_tag = "STBT"
-        
-    return signal, strategy_tag
+    trade_history = pd.read_csv(TRADE_LOG_FILE)
+else:
+    trade_history = pd.DataFrame(columns=["Date", "Time", "Symbol", "Type", "Strategy", "Entry", "SL", "TP", "Status", "PnL"])
+    trade_history.to_csv(TRADE_LOG_FILE, index=False)
 
 def log_trade(symbol, trade_type, strategy, entry, sl, tp, status, pnl=0.0):
+    now = datetime.datetime.now()
     new_trade = pd.DataFrame([{
-        "Time": datetime.datetime.now().strftime("%H:%M:%S"),
+        "Date": now.strftime("%Y-%m-%d"),
+        "Time": now.strftime("%H:%M:%S"),
         "Symbol": symbol,
         "Type": trade_type,
         "Strategy": strategy,
@@ -159,114 +61,164 @@ def log_trade(symbol, trade_type, strategy, entry, sl, tp, status, pnl=0.0):
         "Status": status,
         "PnL": pnl
     }])
-    st.session_state.trade_history = pd.concat([st.session_state.trade_history, new_trade], ignore_index=True)
-    st.session_state.trade_history.to_csv(TRADE_LOG_FILE, index=False)
+    # Append directly to CSV to ensure data isn't lost if UI drops
+    new_trade.to_csv(TRADE_LOG_FILE, mode='a', header=not os.path.exists(TRADE_LOG_FILE), index=False)
 
-# --- Background Bot Thread ---
-def bot_loop(api_client, target_token, sl_pct, tp_pct, use_ml, ml_model):
-    while getattr(threading.current_thread(), "do_run", True):
-        if not st.session_state.bot_running:
-            break
+# --- Smart Money Concepts (SMC) & FVG Analyzer ---
+def smc_fvg_analyzer(token, api_client):
+    """
+    Identifies Institutional Volume Displacement and 3-Candle Fair Value Gaps.
+    Returns the Limit Order Type and the Exact FVG Boundary Price.
+    """
+    try:
+        # Mocking historic Angel One OHLCV fetch for the example
+        # In production, replace with: api_client.getCandleData(historic_param)
+        current_spot = engine_state["live_prices"].get(token, 0)
+        
+        # Simulated Data for SMC Calculation
+        df = pd.DataFrame({
+            "Open": [100]*25, "High": [105]*25, "Low": [95]*25, "Close": [102]*25, 
+            "Volume": [1000]*24 + [5000] # Simulated institutional volume spike
+        })
+        df.at[df.index[-1], 'Close'] = current_spot
+        
+        # 1. Institutional Volume Check (Volume > 2x 20-period Moving Average)
+        df['Vol_MA'] = df['Volume'].rolling(20).mean()
+        df['Inst_Vol'] = df['Volume'] > (df['Vol_MA'] * 2)
+        
+        # 2. Fair Value Gap (3-Candle Imbalance)
+        df['Bull_FVG'] = (df['Low'] > df['High'].shift(2)) & df['Inst_Vol'].shift(1)
+        df['Bear_FVG'] = (df['High'] < df['Low'].shift(2)) & df['Inst_Vol'].shift(1)
+        
+        last_row = df.iloc[-1]
+        
+        if last_row['Bull_FVG'] and current_spot > 0:
+            # Bullish: Place Limit Order at the top boundary of the gap
+            fvg_top = df['High'].shift(2).iloc[-1]
+            return "BUY_LIMIT", fvg_top, "SMC_Bull_FVG"
             
-        try:
-            current_spot = st.session_state.live_prices.get(target_token)
+        elif last_row['Bear_FVG'] and current_spot > 0:
+            # Bearish: Place Limit Order at the bottom boundary of the gap
+            fvg_bottom = df['Low'].shift(2).iloc[-1]
+            return "SELL_LIMIT", fvg_bottom, "SMC_Bear_FVG"
             
-            if current_spot:
-                signal, strategy_tag = technical_analyzer(target_token, api_client, use_ml, ml_model)
+    except Exception as e:
+        pass
+        
+    return "NEUTRAL", 0, "NONE"
+
+# --- Resilient Background Daemon ---
+def resilient_bot_loop():
+    """Runs indefinitely in the background, fully decoupled from the browser."""
+    while True:
+        if engine_state["bot_running"]:
+            now = datetime.datetime.now().time()
+            is_market_open = datetime.time(9, 15) <= now <= datetime.time(15, 30)
+            
+            if is_market_open:
+                target_token = engine_state["target_token"]
+                current_spot = engine_state["live_prices"].get(target_token)
                 
-                if signal == "BUY" and not st.session_state.ghost_kill_lock:
-                    if current_spot * 50 <= MAX_CAPITAL: 
-                        st.session_state.ghost_kill_lock = True 
-                        sl = current_spot * (1 - (sl_pct / 100))
-                        tp = current_spot * (1 + (tp_pct / 100))
-                        
-                        log_trade(target_token, "BUY", strategy_tag, current_spot, sl, tp, "OPEN")
+                if current_spot:
+                    signal, limit_price, strategy_tag = smc_fvg_analyzer(target_token, engine_state["api_client"])
                     
-                elif signal == "SELL" and st.session_state.ghost_kill_lock:
-                    st.session_state.ghost_kill_lock = False 
-                    open_trades = st.session_state.trade_history[st.session_state.trade_history['Status'] == 'OPEN']
-                    if not open_trades.empty:
-                        entry_price = open_trades.iloc[-1]['Entry']
-                        pnl = (current_spot - entry_price) * 50 
+                    # Entry Execution
+                    if "LIMIT" in signal and not engine_state["ghost_kill_lock"]:
+                        # Ensure capital safety
+                        if limit_price * 50 <= MAX_CAPITAL: 
+                            engine_state["ghost_kill_lock"] = True 
+                            
+                            sl = limit_price * (1 - (engine_state["sl_pct"] / 100))
+                            tp = limit_price * (1 + (engine_state["tp_pct"] / 100))
+                            
+                            log_trade(target_token, signal, strategy_tag, limit_price, sl, tp, "OPEN")
+                            
+                    # Exit Execution (Simplified TP/SL check)
+                    elif engine_state["ghost_kill_lock"]:
+                        df = pd.read_csv(TRADE_LOG_FILE)
+                        open_trades = df[df['Status'] == 'OPEN']
                         
-                        st.session_state.trade_history.loc[st.session_state.trade_history.index[-1], 'Status'] = 'CLOSED'
-                        log_trade(target_token, "SELL", strategy_tag, current_spot, 0, 0, "CLOSED", pnl)
-            
-            time.sleep(2) 
-        except Exception as e:
-            time.sleep(5)
+                        if not open_trades.empty:
+                            entry_price = open_trades.iloc[-1]['Entry']
+                            tp_price = open_trades.iloc[-1]['TP']
+                            
+                            if current_spot >= tp_price:
+                                engine_state["ghost_kill_lock"] = False
+                                pnl = (tp_price - entry_price) * 50 
+                                log_trade(target_token, "SELL_LIMIT", strategy_tag, current_spot, 0, 0, "CLOSED_TP", pnl)
+            else:
+                # Market is closed, naturally pause executions
+                engine_state["ghost_kill_lock"] = False
+                
+        time.sleep(3)
 
-# --- Sidebar UI (Mobile App Vibe) ---
+# Start the daemon only once per server lifetime
+@st.cache_resource
+def start_daemon():
+    worker = threading.Thread(target=resilient_bot_loop, daemon=True)
+    worker.start()
+    return worker
+
+start_daemon()
+
+# --- Sidebar Controls ---
 with st.sidebar:
     st.markdown("### ⚡ PRO SCALPER X")
-    st.caption("v2.1 API LINK SECURE")
+    st.caption("SMC LIMIT-ORDER ENGINE")
     
-    api_key = st.text_input("🔑 API Key", type="password")
-    client_code = st.text_input("👤 Client ID")
-    pin = st.text_input("🔒 MPIN", type="password")
-    totp_secret = st.text_input("⏱️ TOTP Secret", type="password")
-    
-    if st.button("CONNECT NODE"):
-        if api_key and client_code and pin and totp_secret:
-            try:
-                obj = SmartConnect(api_key=api_key)
-                totp = pyotp.TOTP(totp_secret).now()
-                data = obj.generateSession(client_code, pin, totp)
-                
-                if data['status']:
-                    st.session_state.api_client = obj
-                    st.session_state.jwt_token = data['data']['jwtToken']
-                    st.session_state.feed_token = obj.getfeedToken()
-                    st.session_state.logged_in = True
-                    st.success("✅ BROKER NODE CONNECTED")
-                else:
-                    st.error("❌ AUTH FAILED")
-            except Exception as e:
-                st.error("❌ CONNECTION ERROR")
-        else:
-            st.warning("⚠️ FILL ALL FIELDS")
-            
-    st.divider()
-    st.markdown("### ⚙️ SYSTEM STATUS")
-    if st.session_state.bot_running:
-        st.success("🟢 ENGINE ONLINE")
+    # Engine status directly reads from the persistent global state
+    if engine_state["bot_running"]:
+        st.success("🟢 ENGINE ONLINE (Headless)")
+        if st.button("🛑 EMERGENCY KILL SWITCH"):
+            engine_state["bot_running"] = False
+            st.rerun()
     else:
         st.error("🔴 ENGINE OFFLINE")
+        if st.button("▶️ IGNITE SCALPER"):
+            engine_state["bot_running"] = True
+            engine_state["ghost_kill_lock"] = False
+            engine_state["target_token"] = st.session_state.get('ui_target', '26000')
+            engine_state["sl_pct"] = st.session_state.get('ui_sl', 5.0)
+            engine_state["tp_pct"] = st.session_state.get('ui_tp', 10.0)
+            st.rerun()
+            
+    st.divider()
+    target = st.text_input("Target Options Token", value=engine_state["target_token"], key="ui_target")
+    st.number_input("Stop Loss (%)", value=engine_state["sl_pct"], key="ui_sl")
+    st.number_input("Take Profit (%)", value=engine_state["tp_pct"], key="ui_tp")
 
-# --- Main Interface ---
-if st.session_state.logged_in:
+# --- Main Dashboard ---
+st.title("📊 Daily Operations Dashboard")
+
+# Read the freshest data directly from the CSV
+df_history = pd.read_csv(TRADE_LOG_FILE)
+
+# Calculate Daily Metrics
+today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+daily_trades = df_history[df_history['Date'] == today_str]
+
+if not daily_trades.empty:
+    daily_pnl = daily_trades['PnL'].sum()
+    tp_hits = len(daily_trades[daily_trades['Status'] == 'CLOSED_TP'])
     
-    tab1, tab2, tab3 = st.tabs(["🚀 LIVE TERMINAL", "🧠 AI ENGINE & EOD", "📜 TRADE LEDGER"])
-    
-    # ---------------- TAB 1: LIVE TERMINAL ----------------
-    with tab1:
-        st.markdown("### 🎯 Execution Dashboard")
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            target_token = st.text_input("Target Options Token", value="26000")
-            current_live_price = st.session_state.live_prices.get(target_token, "Awaiting Data...")
-            
-            st.metric(label="LIVE MARKET PRICE", value=current_live_price)
-            
-        with col2:
-            if st.session_state.bot_running:
-                if st.button("🛑 EMERGENCY KILL SWITCH"):
-                    st.session_state.bot_running = False
-                    st.rerun()
-            else:
-                if st.button("▶️ IGNITE SCALPER"):
-                    st.session_state.bot_running = True
-                    st.session_state.ghost_kill_lock = False
-                    
-                    # Assume settings pulled from Tab 2
-                    use_ml = st.session_state.get('use_ml', False)
-                    ml_model = st.session_state.get('ml_model', "Random Forest")
-                    sl_pct = st.session_state.get('sl_pct', 5.0)
-                    tp_pct = st.session_state.get('tp_pct', 10.0)
-                    
-                    # Start WebSockets & Bot Threads
-                    sws = SmartWebSocketV2(st.session_state.jwt_token, api_key, client_code, st.session_state.feed_token)
+    # Extract winning symbols
+    winning_trades = daily_trades[daily_trades['PnL'] > 0]
+    win_symbols = ", ".join(winning_trades['Symbol'].astype(str).unique()) if not winning_trades.empty else "None yet"
+else:
+    daily_pnl = 0.0
+    tp_hits = 0
+    win_symbols = "Awaiting executions..."
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Daily Net PnL", f"₹ {daily_pnl:.2f}")
+col2.metric("TP Target Hits", tp_hits)
+col3.metric("Winning Symbols", win_symbols)
+
+st.divider()
+st.subheader("📜 Live Trade Ledger")
+st.dataframe(df_history.iloc[::-1], use_container_width=True)
+if st.button("🔄 Refresh Ledger"):
+    st.rerun()SocketV2(st.session_state.jwt_token, api_key, client_code, st.session_state.feed_token)
                     def on_open(wsapp):
                         sws.subscribe("stream_1", 1, [{"exchangeType": 2, "tokens": [target_token]}])
                     sws.on_open = on_open
@@ -321,3 +273,4 @@ if st.session_state.logged_in:
 
 else:
     st.info("Awaiting secure connection. Please initialize via the sidebar.")
+
