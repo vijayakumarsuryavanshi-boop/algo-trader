@@ -316,12 +316,15 @@ class SniperBot:
         self.settings = {}
 
     def push_notify(self, title, message):
+        # 1. Native Windows 11 Notification (Works when running locally)
         if HAS_NOTIFY:
             try: notification.notify(title=title, message=message, app_name="Pro Scalper", timeout=5)
             except: pass
+        # 2. Telegram Alert
         if self.tg_token and self.tg_chat:
             try: requests.post(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", json={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
             except: pass
+        # 3. WhatsApp Alert
         if self.wa_phone and self.wa_api:
             try: requests.get(f"https://api.callmebot.com/whatsapp.php?phone={self.wa_phone}&text={urllib.parse.quote(f'*{title}* %0A {message}')}&apikey={self.wa_api}", timeout=3)
             except: pass
@@ -658,8 +661,20 @@ class SniperBot:
 st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
 is_mkt_open, mkt_status_msg = get_market_status()
 
-# Toasts
+# 👉 NEW: App Notification Audio Trigger Function
+def play_sound():
+    components.html(
+        """
+        <audio autoplay>
+            <source src="https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3" type="audio/mpeg">
+        </audio>
+        """,
+        height=0,
+    )
+
+# 👉 NEW: Triggers App Audio Beep + On-Screen Toast
 if st.session_state.bot and st.session_state.bot.state.get("ui_popups"):
+    play_sound() # Triggers the browser audio alert
     while st.session_state.bot.state["ui_popups"]:
         msg = st.session_state.bot.state["ui_popups"].popleft()
         st.toast(msg, icon="🔔")
@@ -818,12 +833,10 @@ else:
 
         with chart_col:
             
-            # 🔥 FIX: Enable / Disable Chart functionality
             c_header_col1, c_header_col2 = st.columns([3, 1])
             with c_header_col2:
                 SHOW_CHART = st.toggle("📊 Enable Chart", True)
                 
-            # 🔥 FIX: Explicit Strike Display vs Index Display
             if bot.state["active_trade"]:
                 active_sym = bot.state["active_trade"]["symbol"]
                 with c_header_col1:
@@ -1045,7 +1058,6 @@ else:
 # FULL-WIDTH BOTTOM NAVIGATION DOCK 
 # ==========================================
 
-# 🔥 FIX: Crash resolution. References dynamic 'asset_options' session state so custom stocks and commodities cycle cleanly without crashing!
 def cycle_asset():
     assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
     if st.session_state.sb_index_input in assets:
