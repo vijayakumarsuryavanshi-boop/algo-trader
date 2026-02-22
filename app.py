@@ -82,7 +82,6 @@ INDEX_TOKENS = {
 
 STRAT_LIST = ["Momentum Breakout + S&R", "Institutional FVG + SMC", "Combined Convergence"]
 
-# Stronger State Management
 if 'sb_index_input' not in st.session_state: st.session_state.sb_index_input = list(DEFAULT_LOTS.keys())[0]
 if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
 if 'bot' not in st.session_state: st.session_state.bot = None
@@ -316,12 +315,18 @@ class SniperBot:
         self.settings = {}
 
     def push_notify(self, title, message):
+        # 1. ALWAYS push to the web interface queue first
+        self.state["ui_popups"].append({"title": title, "message": message})
+        
+        # 2. Native Windows 11 Notification (Works when running locally)
         if HAS_NOTIFY:
             try: notification.notify(title=title, message=message, app_name="Pro Scalper", timeout=5)
             except: pass
+        # 3. Telegram Alert
         if self.tg_token and self.tg_chat:
             try: requests.post(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", json={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
             except: pass
+        # 4. WhatsApp Alert
         if self.wa_phone and self.wa_api:
             try: requests.get(f"https://api.callmebot.com/whatsapp.php?phone={self.wa_phone}&text={urllib.parse.quote(f'*{title}* %0A {message}')}&apikey={self.wa_api}", timeout=3)
             except: pass
@@ -332,6 +337,7 @@ class SniperBot:
     def login(self):
         if self.is_mock: 
             self.client_name = "Paper Trading User"
+            self.push_notify("🟢 Session Started", "Simulating offline login for Paper Trading.")
             return True
         try:
             obj = SmartConnect(api_key=self.api_key)
@@ -340,7 +346,7 @@ class SniperBot:
                 self.api = obj
                 self.client_name = res['data'].get('name', self.client_id)
                 self.log("✅ Exchange Connected Successfully")
-                self.push_notify("🟢 Bot Online", f"Logged in as {self.client_name}")
+                self.push_notify("🟢 Exchange Connected", f"Live session started for user: {self.client_name}")
                 return True
             self.log(f"❌ Login failed: {res.get('message', 'Check credentials or TOTP')}")
             return False
@@ -364,13 +370,10 @@ class SniperBot:
             today_date = pd.Timestamp(dt.datetime.utcnow() + dt.timedelta(hours=5, minutes=30)).normalize()
             futs = df_map[(df_map['name'] == index_name) & (df_map['instrumenttype'].isin(['FUTCOM', 'FUTIDX', 'FUTSTK', 'EQ']))]
             if not futs.empty:
-                # If equity
                 eqs = futs[futs['instrumenttype'] == 'EQ']
                 if not eqs.empty:
                     best_eq = eqs.iloc[0]
                     return best_eq['exch_seg'], best_eq['token']
-                    
-                # If Futures
                 futs = futs[futs['expiry'] >= today_date]
                 if not futs.empty:
                     best_fut = futs[futs['expiry'] == futs['expiry'].min()].iloc[0]
@@ -506,11 +509,10 @@ class SniperBot:
                 trend, sig, _, _, _, _, _ = self.analyzer.apply_vwap_ema_strategy(df_bg, sym)
                 if sig != "WAIT":
                     icon = "🚀" if "CE" in sig else "🩸"
-                    msg = f"{icon} FOMO ALERT: Strong {sig} setup detected on {sym}!"
+                    msg = f"Strong {sig} setup detected on {sym}!"
                     if msg not in self.state["global_alerts"]:
                         self.state["global_alerts"].append(msg)
-                        self.push_notify("Cross-Market Scanner", msg)
-                        self.state["ui_popups"].append(msg)
+                        self.push_notify(f"{icon} FOMO ALERT", msg)
 
     def get_higher_timeframe(self, tf):
         if tf == "1m": return "5m"
@@ -598,18 +600,14 @@ class SniperBot:
 
                                     trade_type = "REAL" if not paper and not self.is_mock else "PAPER"
                                     
-                                    alert_msg = f"🟢 {trade_type} ENTRY: {strike_sym} @ ₹{entry_ltp}"
-                                    
                                     if trade_type == "REAL":
                                         order_id = self.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
                                         if order_id: 
-                                            self.log(alert_msg)
-                                            self.state["ui_popups"].append(alert_msg)
+                                            self.log(f"🟢 REAL ENTRY: {strike_sym} @ ₹{entry_ltp}")
                                             self.push_notify("🟢 Trade Executed", f"Bought {qty}x {strike_sym}\nEntry: ₹{entry_ltp}\nSL: ₹{round(dynamic_sl, 2)}")
                                             self.state["active_trade"] = {"symbol": strike_sym, "token": strike_token, "exch": strike_exch, "type": "CE" if "CE" in strike_sym else "PE", "entry": entry_ltp, "highest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, "tgt": dynamic_tgt}
                                     else:
-                                        self.log(alert_msg)
-                                        self.state["ui_popups"].append(alert_msg)
+                                        self.log(f"🟢 PAPER ENTRY: {strike_sym} @ ₹{entry_ltp}")
                                         self.push_notify("📝 Paper Trade", f"Entered {strike_sym}\nEntry: ₹{entry_ltp}\nSL: ₹{round(dynamic_sl, 2)}")
                                         self.state["active_trade"] = {"symbol": strike_sym, "token": strike_token, "exch": strike_exch, "type": "CE" if "CE" in strike_sym else "PE", "entry": entry_ltp, "highest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, "tgt": dynamic_tgt}
                             finally:
@@ -637,9 +635,7 @@ class SniperBot:
                                 if not paper and not self.is_mock: self.place_real_order(trade['symbol'], trade['token'], trade['qty'], "SELL", trade['exch'])
                                 exit_msg = f"PnL: ₹{round(pnl, 2)} @ ₹{ltp:.2f}"
                                 
-                                alert_msg = f"🛑 EXIT {trade['symbol']} | {exit_msg}"
-                                self.log(alert_msg)
-                                self.state["ui_popups"].append(alert_msg)
+                                self.log(f"🛑 EXIT {trade['symbol']} | {exit_msg}")
                                 self.push_notify("🛑 Trade Closed", f"{trade['symbol']} exited.\n{exit_msg}")
                                 
                                 save_trade({"Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": trade['symbol'], "Type": trade['type'], "Qty": trade['qty'], "Entry Price": trade['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2)})
@@ -661,43 +657,49 @@ is_mkt_open, mkt_status_msg = get_market_status()
 # 👉 Audio Notification Function (Beep)
 def play_sound():
     components.html(
-        """
-        <audio autoplay>
-            <source src="https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3" type="audio/mpeg">
-        </audio>
-        """,
-        height=0,
+        """<audio autoplay><source src="https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3" type="audio/mpeg"></audio>""", height=0
     )
 
-# 👉 Native Chrome Browser Notification Injection
-def show_chrome_notification(title, body):
-    safe_title = title.replace('"', '\\"').replace("'", "\\'")
-    safe_body = body.replace('"', '\\"').replace("'", "\\'").replace('\n', ' ')
-    js = f"""
-    <script>
-    const title = "{safe_title}";
-    const options = {{ body: "{safe_body}", icon: "https://cdn-icons-png.flaticon.com/512/2952/2952865.png" }};
-    try {{
-        const targetWindow = window.parent || window;
-        if (targetWindow.Notification && targetWindow.Notification.permission === "granted") {{
-            new targetWindow.Notification(title, options);
-        }} else if (targetWindow.Notification && targetWindow.Notification.permission !== "denied") {{
-            targetWindow.Notification.requestPermission().then(function(permission) {{
-                if (permission === "granted") {{ new targetWindow.Notification(title, options); }}
-            }});
-        }}
-    }} catch(e) {{ console.error("Chrome Notification Error: ", e); }}
-    </script>
-    """
-    components.html(js, height=0)
-
-# Process UI Popups (Toast + Sound + Chrome Desktop Alert)
+# 👉 BATCH PROCESS ALL PENDING UI POPUPS
 if st.session_state.bot and st.session_state.bot.state.get("ui_popups"):
     play_sound() 
+    
+    js_notifications = []
+    
+    # Process the entire queue so we don't drop multiple alerts
     while st.session_state.bot.state["ui_popups"]:
-        msg = st.session_state.bot.state["ui_popups"].popleft()
-        st.toast(msg, icon="🔔")
-        show_chrome_notification("Pro Scalper Alert ⚡", msg)
+        alert = st.session_state.bot.state["ui_popups"].popleft()
+        
+        # Parse title and message securely
+        if isinstance(alert, dict):
+            raw_title = alert.get("title", "Pro Scalper")
+            raw_msg = alert.get("message", "")
+        else:
+            raw_title = "Pro Scalper Alert ⚡"
+            raw_msg = str(alert)
+            
+        st.toast(raw_msg, icon="🔔")
+        
+        # Escape characters for JavaScript rendering
+        safe_title = raw_title.replace('"', '\\"').replace("'", "\\'")
+        safe_body = raw_msg.replace('"', '\\"').replace("'", "\\'").replace('\n', ' ')
+        
+        js_notifications.append(f"""
+            if (targetWindow.Notification && targetWindow.Notification.permission === "granted") {{
+                new targetWindow.Notification("{safe_title}", {{ body: "{safe_body}", icon: "https://cdn-icons-png.flaticon.com/512/2952/2952865.png" }});
+            }}
+        """)
+        
+    if js_notifications:
+        final_js = f"""
+        <script>
+        try {{
+            const targetWindow = window.parent || window;
+            {' '.join(js_notifications)}
+        }} catch(e) {{ console.error("Chrome Notification Error: ", e); }}
+        </script>
+        """
+        components.html(final_js, height=0)
 
 with st.sidebar:
     st.header("🔐 Connection Setup")
@@ -748,8 +750,17 @@ with st.sidebar:
 
     st.markdown("**🌐 Browser Desktop Notifications**")
     if st.button("🔔 Enable Web Notifications", use_container_width=True):
-        show_chrome_notification("Success!", "Browser notifications are enabled. You will receive trade alerts here.")
+        if st.session_state.bot:
+            st.session_state.bot.push_notify("Notifications Active!", "Browser alerts are properly connected.")
         st.success("Please click 'Allow' if your browser prompts you at the top left.")
+        components.html("""
+        <script>
+            const targetWindow = window.parent || window;
+            if (targetWindow.Notification && targetWindow.Notification.permission !== "denied") {
+                targetWindow.Notification.requestPermission();
+            }
+        </script>
+        """, height=0)
         
     st.divider()
 
@@ -869,7 +880,6 @@ else:
                 with c_header_col1:
                     st.markdown(f"### 🎯 Tracking Option Strike: **{active_sym}**")
                 
-                # Dynamic Historical Data replacement for the Strike
                 if SHOW_CHART:
                     opt_df = bot.get_historical_data(bot.state["active_trade"]["exch"], bot.state["active_trade"]["token"], symbol=active_sym, interval=TIMEFRAME)
                     df_to_plot = opt_df if opt_df is not None and not opt_df.empty else bot.state["latest_data"]
@@ -890,7 +900,7 @@ else:
                 candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
                 
                 fib_lines = []
-                if not bot.state["active_trade"]: # Only show fib levels on index
+                if not bot.state["active_trade"]:
                     fib_data = bot.state.get('fib_data', {})
                     if fib_data:
                         fib_lines = [
@@ -971,10 +981,6 @@ else:
                     st.markdown("*Waiting for next entry setup...*")
                 else:
                     st.info("No active positions. Engine will open trades automatically based on Strategy.")
-
-        if is_mkt_open and bot.state["is_running"]: 
-            time.sleep(2)
-            st.rerun()
 
     with tab2:
         colA, colB = st.columns(2)
@@ -1084,6 +1090,11 @@ else:
 # ==========================================
 # FULL-WIDTH BOTTOM NAVIGATION DOCK 
 # ==========================================
+
+# 👉 GLOBALLY REFRESH UI FOR BACKGROUND ALERTS
+if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
+    time.sleep(2)
+    st.rerun()
 
 def cycle_asset():
     assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
