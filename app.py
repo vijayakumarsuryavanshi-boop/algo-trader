@@ -18,7 +18,7 @@ from streamlit.runtime.scriptrunner import add_script_run_ctx
 from collections import deque
 from streamlit_lightweight_charts import renderLightweightCharts
 
-# Windows 11 Native Notifications
+# Windows 11 Native Notifications (Works only when running locally via CMD)
 try:
     from plyer import notification
     HAS_NOTIFY = True
@@ -316,15 +316,12 @@ class SniperBot:
         self.settings = {}
 
     def push_notify(self, title, message):
-        # 1. Native Windows 11 Notification (Works when running locally)
         if HAS_NOTIFY:
             try: notification.notify(title=title, message=message, app_name="Pro Scalper", timeout=5)
             except: pass
-        # 2. Telegram Alert
         if self.tg_token and self.tg_chat:
             try: requests.post(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", json={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
             except: pass
-        # 3. WhatsApp Alert
         if self.wa_phone and self.wa_api:
             try: requests.get(f"https://api.callmebot.com/whatsapp.php?phone={self.wa_phone}&text={urllib.parse.quote(f'*{title}* %0A {message}')}&apikey={self.wa_api}", timeout=3)
             except: pass
@@ -661,7 +658,7 @@ class SniperBot:
 st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
 is_mkt_open, mkt_status_msg = get_market_status()
 
-# 👉 NEW: App Notification Audio Trigger Function
+# 👉 Audio Notification Function (Beep)
 def play_sound():
     components.html(
         """
@@ -672,12 +669,35 @@ def play_sound():
         height=0,
     )
 
-# 👉 NEW: Triggers App Audio Beep + On-Screen Toast
+# 👉 Native Chrome Browser Notification Injection
+def show_chrome_notification(title, body):
+    safe_title = title.replace('"', '\\"').replace("'", "\\'")
+    safe_body = body.replace('"', '\\"').replace("'", "\\'").replace('\n', ' ')
+    js = f"""
+    <script>
+    const title = "{safe_title}";
+    const options = {{ body: "{safe_body}", icon: "https://cdn-icons-png.flaticon.com/512/2952/2952865.png" }};
+    try {{
+        const targetWindow = window.parent || window;
+        if (targetWindow.Notification && targetWindow.Notification.permission === "granted") {{
+            new targetWindow.Notification(title, options);
+        }} else if (targetWindow.Notification && targetWindow.Notification.permission !== "denied") {{
+            targetWindow.Notification.requestPermission().then(function(permission) {{
+                if (permission === "granted") {{ new targetWindow.Notification(title, options); }}
+            }});
+        }}
+    }} catch(e) {{ console.error("Chrome Notification Error: ", e); }}
+    </script>
+    """
+    components.html(js, height=0)
+
+# Process UI Popups (Toast + Sound + Chrome Desktop Alert)
 if st.session_state.bot and st.session_state.bot.state.get("ui_popups"):
-    play_sound() # Triggers the browser audio alert
+    play_sound() 
     while st.session_state.bot.state["ui_popups"]:
         msg = st.session_state.bot.state["ui_popups"].popleft()
         st.toast(msg, icon="🔔")
+        show_chrome_notification("Pro Scalper Alert ⚡", msg)
 
 with st.sidebar:
     st.header("🔐 Connection Setup")
@@ -724,6 +744,13 @@ with st.sidebar:
             st.session_state.clear()
             st.rerun()
 
+    st.divider()
+
+    st.markdown("**🌐 Browser Desktop Notifications**")
+    if st.button("🔔 Enable Web Notifications", use_container_width=True):
+        show_chrome_notification("Success!", "Browser notifications are enabled. You will receive trade alerts here.")
+        st.success("Please click 'Allow' if your browser prompts you at the top left.")
+        
     st.divider()
 
     # DYNAMIC ASSET LIST CONFIG
