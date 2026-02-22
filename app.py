@@ -1091,11 +1091,6 @@ else:
 # FULL-WIDTH BOTTOM NAVIGATION DOCK 
 # ==========================================
 
-# 👉 GLOBALLY REFRESH UI FOR BACKGROUND ALERTS
-if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
-    time.sleep(2)
-    st.rerun()
-
 def cycle_asset():
     assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
     if st.session_state.sb_index_input in assets:
@@ -1141,3 +1136,9 @@ components.html(
         }
     }
     </script>""", height=0)
+
+# 👉 GLOBALLY REFRESH UI FOR BACKGROUND ALERTS (MUST BE AT THE VERY END)
+if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
+    time.sleep(2)
+    st.rerun()
+
