@@ -71,12 +71,14 @@ def save_trade(trade_record):
     if not os.path.exists(TRADE_FILE): df_new.to_csv(TRADE_FILE, index=False)
     else: df_new.to_csv(TRADE_FILE, mode='a', header=False, index=False)
 
-DEFAULT_LOTS = {"NIFTY": 75, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30}
-YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", "GOLD": "GC=F", "SILVER": "SI=F"}
+DEFAULT_LOTS = {"NIFTY": 25, "BANKNIFTY": 15, "FINNIFTY": 25, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30, "INDIA VIX": 1}
+YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "FINNIFTY": "NIFTY_FIN_SERVICE.NS", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", "GOLD": "GC=F", "SILVER": "SI=F", "INDIA VIX": "^INDIAVIX"}
 
 INDEX_TOKENS = {
     "NIFTY": ("NSE", "26000"),
     "BANKNIFTY": ("NSE", "26009"),
+    "FINNIFTY": ("NSE", "26037"),
+    "INDIA VIX": ("NSE", "26017"),
     "SENSEX": ("BSE", "99919000")
 }
 
@@ -185,13 +187,20 @@ class TechnicalAnalyzer:
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
         df['is_sideways'] = (df['rsi'].between(45, 55)) & (abs(df['close'] - df['ema21']) < (atr * 0.5))
 
-        # CIT ANCHORED VALUE (Anchored VWAP Daily) -> Also calculated at plotting stage for safety
+        # INSIDE BAR DETECTION
+        df['inside_bar'] = (df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1))
+
+        # CIT ANCHORED VALUE (Anchored VWAP Daily) 
         try:
             df['date'] = df.index.date
-            df['vol_price'] = df['close'] * df['volume']
-            df['avwap'] = df.groupby('date')['vol_price'].cumsum() / df.groupby('date')['volume'].cumsum()
+            if 'volume' in df.columns and df['volume'].sum() > 0:
+                df['vol_price'] = df['close'] * df['volume']
+                df['avwap'] = df.groupby('date')['vol_price'].cumsum() / df.groupby('date')['volume'].cumsum()
+            else:
+                # Time-weighted average fallback for indices lacking volume
+                df['avwap'] = df.groupby('date')['close'].transform(lambda x: x.expanding().mean())
         except:
-            df['avwap'] = df['close'] # Fallback
+            df['avwap'] = df['close'] # Ultimate fallback
             
         return df
 
@@ -224,7 +233,7 @@ class TechnicalAnalyzer:
     def apply_vwap_ema_strategy(self, df, index_name="NIFTY", short_ema=9, long_ema=21):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         
-        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX"]
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = self.calculate_indicators(df, is_index)
         df['psar'] = self.calculate_psar(df)
         df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
@@ -257,7 +266,7 @@ class TechnicalAnalyzer:
     def apply_fvg_strategy(self, df, index_name="NIFTY", momentum_mult=1.5):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         
-        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX"]
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = self.calculate_indicators(df, is_index)
         df['psar'] = self.calculate_psar(df)
         df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
@@ -476,6 +485,9 @@ class SniperBot:
 
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
         if self.is_mock: return "MOCK_" + uuid.uuid4().hex[:6].upper()
+        if "INDIA VIX" in symbol:
+            self.log("⚠️ INDIA VIX is not tradable directly. Skipping order.")
+            return None
         try:
             return self.api.placeOrder({"variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token), "transactiontype": side, "exchange": exchange, "ordertype": "MARKET", "producttype": "INTRADAY", "duration": "DAY", "quantity": str(qty)})
         except Exception as e: 
@@ -483,6 +495,7 @@ class SniperBot:
             return None
 
     def get_strike(self, symbol, spot, signal, max_premium):
+        if symbol == "INDIA VIX": return None, None, None, 0.0 # Prevent trading on VIX
         if self.is_mock: 
             opt_type = "CE" if "BUY_CE" in signal else "PE"
             mock_expiry = (pd.Timestamp.today() + pd.Timedelta(days=2)).strftime('%d%b').upper()
@@ -525,7 +538,7 @@ class SniperBot:
         return None, None, None, 0.0
 
     def check_fomo_alerts(self, current_index):
-        watchlist = ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL"]
+        watchlist = ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "CRUDEOIL"]
         for sym in watchlist:
             if sym == current_index: continue
             
@@ -611,6 +624,10 @@ class SniperBot:
                     else:
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
 
+                    # 🚨 INSIDE BAR BADGE ON DASHBOARD
+                    if df_chart['inside_bar'].iloc[-1]:
+                        trend = f"🟡 Inside Bar Formed | " + trend
+
                     # 🚨 FOMO AUTO ENTRY LOGIC (Extreme Momentum Override)
                     if s.get("fomo_entry"):
                         body = abs(last_candle['close'] - last_candle['open'])
@@ -646,7 +663,7 @@ class SniperBot:
 
                     current_time = dt.datetime.now().time()
                     if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and not self.state["order_in_flight"]:
-                        if current_time < cutoff_time:
+                        if current_time < cutoff_time and index != "INDIA VIX":
                             self.state["order_in_flight"] = True 
                             try:
                                 qty = s['lots'] * base_lot_size
@@ -902,20 +919,25 @@ else:
     bot = st.session_state.bot
     bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "fomo_entry": FOMO_ENTRY, "hero_zero": HERO_ZERO, "hz_premium": HZ_PREMIUM, "mtf_confirm": MTF_CONFIRM}
 
+    # FIX FOR LOADING FREEZE: Skip blocking preload if Engine is already running.
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
         st.session_state.prev_index = INDEX
-        with st.spinner(f"Fetching Previous Closing Data for {INDEX}..."):
-            exch, token = bot.get_token_info(INDEX)
-            df_preload = bot.get_historical_data(exch, token, symbol=INDEX, interval=TIMEFRAME)
-            if df_preload is not None and not df_preload.empty:
-                bot.state["spot"] = df_preload['close'].iloc[-1]
-                if "Institutional FVG" in STRATEGY or "ICT" in STRATEGY:
-                    t, s, v, e, df_c, atr, fib = bot.analyzer.apply_fvg_strategy(df_preload, INDEX)
-                elif "Combined" in STRATEGY or "All in One" in STRATEGY:
-                    t, s, v, e, df_c, atr, fib = bot.analyzer.apply_combined_strategy(df_preload, INDEX)
-                else:
-                    t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
-                bot.state.update({"current_trend": t, "current_signal": s, "vwap": v, "ema": e, "atr": atr, "fib_data": fib, "latest_data": df_c})
+        if bot.state.get("is_running"):
+            st.toast(f"Switched to {INDEX}. Background engine is adjusting...", icon="🔄")
+            bot.state["spot"] = 0.0 # Clear temporary spot to force immediate fresh fetch
+        else:
+            with st.spinner(f"Fetching Previous Closing Data for {INDEX}..."):
+                exch, token = bot.get_token_info(INDEX)
+                df_preload = bot.get_historical_data(exch, token, symbol=INDEX, interval=TIMEFRAME)
+                if df_preload is not None and not df_preload.empty:
+                    bot.state["spot"] = df_preload['close'].iloc[-1]
+                    if "Institutional FVG" in STRATEGY or "ICT" in STRATEGY:
+                        t, s, v, e, df_c, atr, fib = bot.analyzer.apply_fvg_strategy(df_preload, INDEX)
+                    elif "Combined" in STRATEGY or "All in One" in STRATEGY:
+                        t, s, v, e, df_c, atr, fib = bot.analyzer.apply_combined_strategy(df_preload, INDEX)
+                    else:
+                        t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
+                    bot.state.update({"current_trend": t, "current_signal": s, "vwap": v, "ema": e, "atr": atr, "fib_data": fib, "latest_data": df_c})
 
     if not is_mkt_open: st.error(f"😴 {mkt_status_msg}")
         
@@ -999,16 +1021,17 @@ else:
                 chart_df = chart_df.dropna(subset=['open', 'high', 'low', 'close'])
                 chart_df['time'] = (pd.to_datetime(chart_df.index).astype('int64') // 10**9) - 19800
                 
-                # --- FORCED ICT ANCHORED VWAP (CIT) FOR CHART ---
-                if 'volume' in chart_df.columns:
+                # --- FORCED ICT ANCHORED VWAP (CIT) FOR CHART DISPLAY (Fix for indices lacking volume) ---
+                chart_df['date'] = chart_df.index.date
+                if 'volume' in chart_df.columns and chart_df['volume'].sum() > 0:
                     try:
-                        chart_df['date'] = chart_df.index.date
                         chart_df['vol_price'] = chart_df['close'] * chart_df['volume']
                         chart_df['avwap'] = chart_df.groupby('date')['vol_price'].cumsum() / chart_df.groupby('date')['volume'].cumsum()
                     except:
                         chart_df['avwap'] = chart_df['close']
                 else:
-                    chart_df['avwap'] = chart_df['close']
+                    # TWAP fallback for indices like Nifty/BankNifty which have no spot volume
+                    chart_df['avwap'] = chart_df.groupby('date')['close'].transform(lambda x: x.expanding().mean())
 
                 candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
                 
@@ -1175,17 +1198,26 @@ else:
                         st.error(f"Scanner Failed. Error: {e}")
                         
         with colB:
-            st.subheader(f"📡 Multi-Stock BTST")
-            st.write("Scan default watchlist for Hold setups.")
+            st.subheader(f"📡 Multi-Stock & Inside Bar")
+            st.write("Scan watchlists for Inside Bars & Hold setups.")
             if st.button("🔄 Scan Market"):
                 with st.spinner("Analyzing Watchlist..."):
                     scan_results = []
                     for sym in list(DEFAULT_LOTS.keys()):
                         df = bot.get_historical_data("NSE", "99926000", symbol=sym, interval="1d" if not is_mkt_open else "5m")
-                        if df is not None and not df.empty:
+                        if df is not None and len(df) > 2:
                             trend, sig, v, e, _, _, _ = bot.analyzer.apply_vwap_ema_strategy(df, sym)
                             btst_sig = check_btst_stbt(df) if not is_mkt_open else "N/A"
-                            scan_results.append({"Symbol": sym, "LTP": round(df['close'].iloc[-1], 2), "BTST/STBT": btst_sig})
+                            
+                            # Add Inside bar check
+                            inside_bar = "Yes 🟡" if (df['high'].iloc[-1] <= df['high'].iloc[-2] and df['low'].iloc[-1] >= df['low'].iloc[-2]) else "No"
+                            
+                            scan_results.append({
+                                "Symbol": sym, 
+                                "LTP": round(df['close'].iloc[-1], 2), 
+                                "Inside Bar": inside_bar,
+                                "BTST/STBT": btst_sig
+                            })
                     st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
 
         with colC:
@@ -1216,6 +1248,7 @@ else:
                             })
                         except: pass
                     st.dataframe(pd.DataFrame(p_results), use_container_width=True, hide_index=True)
+
 
     with tab3:
         log_col, pnl_col = st.columns([1, 2])
