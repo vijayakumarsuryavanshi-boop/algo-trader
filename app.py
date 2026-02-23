@@ -34,7 +34,7 @@ def render_signature():
         f'🚀 Pro Scalper Engine<br>Developed by: Vijayakumar</div>', 
         unsafe_allow_html=True
     )
-    st.session_state['_dev_sig'] = "AUTH_OWNER_VIJAYAKUMAR"
+    st.session_state['_dev_sig'] = "AUTH_OWNER_VIJAYAKUMAR SURYAVANSHI"
 
 # ==========================================
 # 1. SECURITY & CONFIG
@@ -1343,3 +1343,4 @@ components.html(
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
