@@ -31,7 +31,7 @@ except ImportError:
 def render_signature():
     st.sidebar.markdown(
         f'<div style="text-align: center; color: #38bdf8; font-size: 0.8rem; font-weight: bold; border-top: 1px solid #38bdf8; padding-top: 10px; margin-top: 10px;">'
-        f'🚀 Pro Scalper Engine<br>Developed by: Vijayakumar</div>', 
+        f'🚀 Algo trade<br>Developed by: Vijayakumar Suryavanshi</div>', 
         unsafe_allow_html=True
     )
     st.session_state['_dev_sig'] = "AUTH_OWNER_VIJAYAKUMAR SURYAVANSHI"
@@ -1343,4 +1343,5 @@ components.html(
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
