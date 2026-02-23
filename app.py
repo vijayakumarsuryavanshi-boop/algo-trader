@@ -80,7 +80,8 @@ INDEX_TOKENS = {
     "SENSEX": ("BSE", "99919000")
 }
 
-STRAT_LIST = ["Momentum Breakout + S&R", "Institutional FVG + SMC", "Combined Convergence"]
+# ALL IN ONE AS FIRST, ICT RESTORED
+STRAT_LIST = ["All in One", "ICT", "Momentum Breakout + S&R", "Institutional FVG + SMC", "Combined Convergence"]
 
 if 'sb_index_input' not in st.session_state: st.session_state.sb_index_input = list(DEFAULT_LOTS.keys())[0]
 if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
@@ -183,6 +184,15 @@ class TechnicalAnalyzer:
         atr = self.get_atr(df, 14)
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
         df['is_sideways'] = (df['rsi'].between(45, 55)) & (abs(df['close'] - df['ema21']) < (atr * 0.5))
+
+        # CIT ANCHORED VALUE (Anchored VWAP Daily) -> Also calculated at plotting stage for safety
+        try:
+            df['date'] = df.index.date
+            df['vol_price'] = df['close'] * df['volume']
+            df['avwap'] = df.groupby('date')['vol_price'].cumsum() / df.groupby('date')['volume'].cumsum()
+        except:
+            df['avwap'] = df['close'] # Fallback
+            
         return df
 
     def calculate_fib_zones(self, df, lookback=100):
@@ -310,7 +320,8 @@ class SniperBot:
             "is_running": False, "order_in_flight": False, "active_trade": None, "last_trade": None,
             "logs": deque(maxlen=50), "current_trend": "WAIT", "current_signal": "WAIT",
             "spot": 0.0, "vwap": 0.0, "ema": 0.0, "atr": 0.0, "fib_data": {}, "latest_data": None,
-            "global_alerts": deque(maxlen=5), "ui_popups": deque(maxlen=10), "loop_count": 0
+            "global_alerts": deque(maxlen=5), "ui_popups": deque(maxlen=10), "loop_count": 0,
+            "daily_pnl": 0.0, "trades_today": 0
         }
         self.settings = {}
 
@@ -379,6 +390,21 @@ class SniperBot:
                     best_fut = futs[futs['expiry'] == futs['expiry'].min()].iloc[0]
                     return best_fut['exch_seg'], best_fut['token']
         return "NSE", "12345"
+
+    def get_market_data_oi(self, exchange, token):
+        if self.is_mock: return np.random.randint(50000, 150000), np.random.randint(1000, 10000)
+        if not self.api: return 0, 0
+        try:
+            params = {
+                "mode": "FULL",
+                "exchangeTokens": { exchange: [str(token)] }
+            }
+            res = self.api.marketData(params)
+            if res and res.get('status') and res.get('data'):
+                m_data = res['data']['fetched'][0]
+                return m_data.get('opnInterest', 0), m_data.get('totMacVal', 0)
+        except: pass
+        return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
         if self.is_mock:
@@ -524,13 +550,28 @@ class SniperBot:
         self.log("▶️ Engine thread started.")
         while self.state["is_running"]:
             try:
+                s = self.settings
+                
+                # Max Trades Per Day Check
+                if self.state["trades_today"] >= s['max_trades']:
+                    self.log(f"🛑 Max Trades Limit Reached ({s['max_trades']}). Engine Stopping.")
+                    self.push_notify("🛑 Trade Limit Hit", f"You have reached your maximum of {s['max_trades']} trades today. Taking a break!")
+                    self.state["is_running"] = False
+                    break
+                
+                # Capital Protection Check
+                if self.state.get("daily_pnl", 0.0) <= -s.get("capital_protect", 999999):
+                    self.log("🛑 Capital Protection Hit! Stopping Engine.")
+                    self.push_notify("🛡️ Capital Protection", f"Max daily loss limit reached (₹{round(self.state['daily_pnl'], 2)}). Trading engine automatically stopped.")
+                    self.state["is_running"] = False
+                    break
+
                 is_open, mkt_msg = get_market_status()
                 if not is_open:
                     time.sleep(10)
                     continue
 
                 self.state["loop_count"] += 1
-                s = self.settings
                 index, timeframe = s['index'], s['timeframe']
                 paper = s['paper_mode']
                 strategy = s['strategy']
@@ -561,13 +602,31 @@ class SniperBot:
                 
                 if spot and df_candles is not None and not df_candles.empty:
                     self.state["spot"] = spot
+                    last_candle = df_candles.iloc[-1]
                     
-                    if "Institutional FVG" in strategy:
+                    if "Institutional FVG" in strategy or "ICT" in strategy:
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_fvg_strategy(df_candles, index)
-                    elif "Combined" in strategy:
+                    elif "Combined" in strategy or "All in One" in strategy:
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_combined_strategy(df_candles, index)
                     else:
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
+
+                    # 🚨 FOMO AUTO ENTRY LOGIC (Extreme Momentum Override)
+                    if s.get("fomo_entry"):
+                        body = abs(last_candle['close'] - last_candle['open'])
+                        avg_body = df_candles['close'].diff().abs().rolling(14).mean().iloc[-1]
+                        if body > (avg_body * 3) and last_candle.get('vol_spike', False):
+                            signal = "BUY_CE" if last_candle['close'] > last_candle['open'] else "BUY_PE"
+                            trend = "🚨 FOMO BREAKOUT ACTIVE"
+
+                    # HERO ZERO BUY BOTTOM / SELL TOP LOGIC
+                    if s.get("hero_zero") and signal != "WAIT":
+                        if signal == "BUY_CE" and last_candle.get('rsi', 50) > 35:
+                            signal = "WAIT"
+                            trend = "Waiting for Exact Bottom (Hero Zero)"
+                        elif signal == "BUY_PE" and last_candle.get('rsi', 50) < 65:
+                            signal = "WAIT"
+                            trend = "Waiting for Exact Top (Hero Zero)"
 
                     if mtf_confirm and signal != "WAIT":
                         htf = self.get_higher_timeframe(timeframe)
@@ -595,26 +654,41 @@ class SniperBot:
                                 strike_sym, strike_token, strike_exch, entry_ltp = self.get_strike(index, spot, signal, max_prem)
                                 
                                 if strike_sym and entry_ltp:
-                                    dynamic_sl = entry_ltp - (current_atr * 1.5) if (current_atr * 1.5) > s['sl_pts'] else entry_ltp - s['sl_pts']
-                                    dynamic_tgt = entry_ltp + (current_atr * 3.0) if (current_atr * 3.0) > s['tgt_pts'] else entry_ltp + s['tgt_pts']
+                                    dynamic_sl = entry_ltp - s['sl_pts'] # Flat SL points below entry for option premium
+                                    tp1 = entry_ltp + s['tgt_pts']
+                                    tp2 = entry_ltp + (s['tgt_pts'] * 2)
+                                    tp3 = entry_ltp + (s['tgt_pts'] * 3)
+                                    dynamic_tgt = tp3 # Absolute max target for auto-exit
 
                                     trade_type = "REAL" if not paper and not self.is_mock else "PAPER"
                                     
+                                    new_trade = {
+                                        "symbol": strike_sym, "token": strike_token, "exch": strike_exch, 
+                                        "type": "CE" if "CE" in strike_sym else "PE", "entry": entry_ltp, 
+                                        "highest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, 
+                                        "tp1": tp1, "tp2": tp2, "tp3": tp3, "tgt": dynamic_tgt
+                                    }
+
                                     if trade_type == "REAL":
                                         order_id = self.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
                                         if order_id: 
                                             self.log(f"🟢 REAL ENTRY: {strike_sym} @ ₹{entry_ltp}")
                                             self.push_notify("🟢 Trade Executed", f"Bought {qty}x {strike_sym}\nEntry: ₹{entry_ltp}\nSL: ₹{round(dynamic_sl, 2)}")
-                                            self.state["active_trade"] = {"symbol": strike_sym, "token": strike_token, "exch": strike_exch, "type": "CE" if "CE" in strike_sym else "PE", "entry": entry_ltp, "highest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, "tgt": dynamic_tgt}
+                                            self.state["active_trade"] = new_trade
+                                            self.state["trades_today"] += 1
                                     else:
                                         self.log(f"🟢 PAPER ENTRY: {strike_sym} @ ₹{entry_ltp}")
                                         self.push_notify("📝 Paper Trade", f"Entered {strike_sym}\nEntry: ₹{entry_ltp}\nSL: ₹{round(dynamic_sl, 2)}")
-                                        self.state["active_trade"] = {"symbol": strike_sym, "token": strike_token, "exch": strike_exch, "type": "CE" if "CE" in strike_sym else "PE", "entry": entry_ltp, "highest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, "tgt": dynamic_tgt}
+                                        self.state["active_trade"] = new_trade
+                                        self.state["trades_today"] += 1
                             finally:
                                 self.state["order_in_flight"] = False 
 
                     elif self.state["active_trade"]:
                         trade = self.state["active_trade"]
+                        
+                        live_oi, live_vol = self.get_market_data_oi(trade['exch'], trade['token'])
+                        
                         if self.is_mock: 
                             delta = (spot - self.state["spot"]) * (0.5 if trade['type'] == "CE" else -0.5) 
                             ltp = trade['entry'] + delta + np.random.uniform(-1, 2)
@@ -626,23 +700,43 @@ class SniperBot:
                             self.state["active_trade"]["current_ltp"] = ltp
                             self.state["active_trade"]["floating_pnl"] = pnl
                             
+                            # TRAILING SL & HIGHEST PRICE TRACKING
                             if ltp > trade.get('highest_price', trade['entry']):
                                 trade['highest_price'] = ltp
                                 new_sl = ltp - s['tsl_pts']
                                 if new_sl > trade['sl']: trade['sl'] = new_sl
                             
-                            if current_time >= cutoff_time or ltp >= trade['tgt'] or ltp <= trade['sl']:
+                            is_reversal = (trade['type'] == 'CE' and signal == 'BUY_PE') or (trade['type'] == 'PE' and signal == 'BUY_CE')
+                            low_liquidity = live_vol < 1000 and not self.is_mock
+                            
+                            if current_time >= cutoff_time or ltp >= trade['tgt'] or ltp <= trade['sl'] or is_reversal or low_liquidity:
                                 if not paper and not self.is_mock: self.place_real_order(trade['symbol'], trade['token'], trade['qty'], "SELL", trade['exch'])
-                                exit_msg = f"PnL: ₹{round(pnl, 2)} @ ₹{ltp:.2f}"
                                 
-                                self.log(f"🛑 EXIT {trade['symbol']} | {exit_msg}")
+                                # DETERMINE WIN TEXT (TP1, TP2, TP3, PROFIT, OR SL)
+                                highest_reached = trade['highest_price']
+                                if highest_reached >= trade['tp3']: win_text = "tp3❤"
+                                elif highest_reached >= trade['tp2']: win_text = "tp2✔✔"
+                                elif highest_reached >= trade['tp1']: win_text = "tp1✔"
+                                elif pnl > 0: win_text = "profit👍"
+                                else: win_text = "sl hit 🛑"
+
+                                exit_reason = "Target/SL Hit"
+                                if is_reversal: exit_reason = "Trend Reversal Detected"
+                                elif low_liquidity: exit_reason = "Low Liquidity / Stagnant Volume"
+                                elif current_time >= cutoff_time: exit_reason = "Market Cutoff Time"
+                                
+                                exit_msg = f"PnL: ₹{round(pnl, 2)} @ ₹{ltp:.2f} [{win_text}]"
+                                
+                                self.log(f"🛑 EXIT {trade['symbol']} | {exit_msg} | {exit_reason}")
                                 self.push_notify("🛑 Trade Closed", f"{trade['symbol']} exited.\n{exit_msg}")
                                 
-                                save_trade({"Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": trade['symbol'], "Type": trade['type'], "Qty": trade['qty'], "Entry Price": trade['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2)})
+                                save_trade({"Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": trade['symbol'], "Type": trade['type'], "Qty": trade['qty'], "Entry Price": trade['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2), "Result": win_text})
                                 
                                 self.state["last_trade"] = trade.copy()
                                 self.state["last_trade"]["exit_price"] = ltp
                                 self.state["last_trade"]["final_pnl"] = pnl
+                                self.state["last_trade"]["win_text"] = win_text
+                                self.state["daily_pnl"] += pnl
                                 self.state["active_trade"] = None
             except Exception as e:
                 self.log(f"⚠️ Loop Error: {str(e)}")
@@ -654,7 +748,7 @@ class SniperBot:
 st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
 is_mkt_open, mkt_status_msg = get_market_status()
 
-# 👉 Audio Notification Function (Beep)
+# 👉 Audio Notification Function (Beep) - EXACTLY AS ORIGINALLY PROVIDED
 def play_sound():
     components.html(
         """<audio autoplay><source src="https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3" type="audio/mpeg"></audio>""", height=0
@@ -662,7 +756,7 @@ def play_sound():
 
 # 👉 BATCH PROCESS ALL PENDING UI POPUPS
 if st.session_state.bot and st.session_state.bot.state.get("ui_popups"):
-    play_sound() 
+    play_sound()
     
     js_notifications = []
     
@@ -785,14 +879,17 @@ with st.sidebar:
     
     st.header("🛡️ Risk Management")
     LOTS = st.number_input("Base Lots", 1, 100, 1)
+    MAX_TRADES = st.number_input("Max Trades / Day", 1, 50, 5)
     MAX_CAPITAL = st.number_input("Max Capital / Trade (₹)", 1000, 500000, 15000, step=1000)
+    CAPITAL_PROTECT = st.number_input("Capital Protection (Max Loss/Day ₹)", 500, 500000, 2000, step=500, help="If daily PnL drops below this, the engine auto-stops.")
     SL_PTS = st.number_input("Fallback Stop Loss (Pts)", 5, 200, 20)
     TSL_PTS = st.number_input("Trailing Stop Loss (Pts)", 5, 200, 15)
-    TGT_PTS = st.number_input("Fallback Target (Points)", 10, 500, 40)
+    TGT_PTS = st.number_input("Target Points (Step for TP1, TP2, TP3)", 5, 500, 15)
     
     st.header("⚙️ Advanced Execution")
     PAPER = st.toggle("📝 Paper Trade Execution", True, disabled=True if (st.session_state.bot and st.session_state.bot.is_mock) else False)
     MTF_CONFIRM = st.toggle("🔍 Multi-Timeframe Confirmation", False, help="Checks the next higher timeframe to ensure trend alignment before entering.")
+    FOMO_ENTRY = st.toggle("🚨 Auto-Enter on FOMO Alerts", False, help="Force aggressive market entries if a massive momentum spike occurs.")
     HERO_ZERO = st.toggle("🚀 Enable Hero/Zero", False)
     HZ_PREMIUM = st.number_input("Max H/Z Premium (₹)", 1, 100, 15)
     
@@ -803,7 +900,7 @@ if not st.session_state.bot:
     st.warning("Please configure your connection in the sidebar to begin.")
 else:
     bot = st.session_state.bot
-    bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_capital": MAX_CAPITAL, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "hero_zero": HERO_ZERO, "hz_premium": HZ_PREMIUM, "mtf_confirm": MTF_CONFIRM}
+    bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "fomo_entry": FOMO_ENTRY, "hero_zero": HERO_ZERO, "hz_premium": HZ_PREMIUM, "mtf_confirm": MTF_CONFIRM}
 
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
         st.session_state.prev_index = INDEX
@@ -812,9 +909,9 @@ else:
             df_preload = bot.get_historical_data(exch, token, symbol=INDEX, interval=TIMEFRAME)
             if df_preload is not None and not df_preload.empty:
                 bot.state["spot"] = df_preload['close'].iloc[-1]
-                if "Institutional FVG" in STRATEGY:
+                if "Institutional FVG" in STRATEGY or "ICT" in STRATEGY:
                     t, s, v, e, df_c, atr, fib = bot.analyzer.apply_fvg_strategy(df_preload, INDEX)
-                elif "Combined" in STRATEGY:
+                elif "Combined" in STRATEGY or "All in One" in STRATEGY:
                     t, s, v, e, df_c, atr, fib = bot.analyzer.apply_combined_strategy(df_preload, INDEX)
                 else:
                     t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
@@ -843,7 +940,7 @@ else:
                 st.rerun()
         with c3:
             if is_running:
-                st.success("🟢 **ENGINE IS RUNNING** - Scanning Market for Entries...")
+                st.success(f"🟢 **ENGINE IS RUNNING** - Scanning {INDEX} for Entries... (Trades Today: {bot.state['trades_today']}/{MAX_TRADES})")
             else:
                 st.error("🛑 **ENGINE STOPPED** - Click Start to begin trading.")
 
@@ -860,7 +957,7 @@ else:
         if "SIDEWAYS" in bot.state["current_trend"]:
             m3.metric("Volatility (ATR)", f"{round(bot.state['atr'], 2)}", "Low Volatility")
             m4.error(f"Sentiment: {bot.state['current_trend']}")
-        elif "MTF" in bot.state["current_trend"]:
+        elif "MTF" in bot.state["current_trend"] or "Wait" in bot.state["current_trend"]:
             m3.metric("Volatility (ATR)", f"{round(bot.state['atr'], 2)}")
             m4.warning(f"Sentiment: {bot.state['current_trend']}")
         else:
@@ -871,9 +968,11 @@ else:
 
         with chart_col:
             
-            c_header_col1, c_header_col2 = st.columns([3, 1])
+            c_header_col1, c_header_col2, c_header_col3 = st.columns([2, 1, 1])
             with c_header_col2:
                 SHOW_CHART = st.toggle("📊 Enable Chart", True)
+            with c_header_col3:
+                FULL_CHART = st.toggle("⛶ Large Mode", False)
                 
             if bot.state["active_trade"]:
                 active_sym = bot.state["active_trade"]["symbol"]
@@ -893,10 +992,24 @@ else:
             if SHOW_CHART and df_to_plot is not None and not df_to_plot.empty:
                 chart_df = df_to_plot.copy()
                 chart_df = chart_df.sort_index()
-                for col in ['open', 'high', 'low', 'close']: chart_df[col] = pd.to_numeric(chart_df[col], errors='coerce')
+                for col in ['open', 'high', 'low', 'close', 'volume']: 
+                    if col in chart_df.columns:
+                        chart_df[col] = pd.to_numeric(chart_df[col], errors='coerce')
+                
                 chart_df = chart_df.dropna(subset=['open', 'high', 'low', 'close'])
                 chart_df['time'] = (pd.to_datetime(chart_df.index).astype('int64') // 10**9) - 19800
                 
+                # --- FORCED ICT ANCHORED VWAP (CIT) FOR CHART ---
+                if 'volume' in chart_df.columns:
+                    try:
+                        chart_df['date'] = chart_df.index.date
+                        chart_df['vol_price'] = chart_df['close'] * chart_df['volume']
+                        chart_df['avwap'] = chart_df.groupby('date')['vol_price'].cumsum() / chart_df.groupby('date')['volume'].cumsum()
+                    except:
+                        chart_df['avwap'] = chart_df['close']
+                else:
+                    chart_df['avwap'] = chart_df['close']
+
                 candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
                 
                 fib_lines = []
@@ -911,7 +1024,7 @@ else:
                         ]
                 
                 chartOptions = {
-                    "height": 450,
+                    "height": 800 if FULL_CHART else 450,
                     "layout": { "textColor": '#d1d5db', "background": { "type": 'solid', "color": '#0b0f19' } },
                     "grid": { "vertLines": { "color": 'rgba(42, 46, 57, 0.5)' }, "horzLines": { "color": 'rgba(42, 46, 57, 0.5)' } },
                     "crosshair": { "mode": 0 }, "timeScale": { "timeVisible": True, "secondsVisible": False }
@@ -927,6 +1040,17 @@ else:
                             "type": 'Line',
                             "data": ema_data,
                             "options": { "color": '#2962ff', "lineWidth": 2, "title": 'EMA 9' }
+                        })
+
+                # PLOTTING CIT ANCHORED VWAP
+                if 'avwap' in chart_df.columns:
+                    chart_df['avwap'] = pd.to_numeric(chart_df['avwap'], errors='coerce')
+                    avwap_data = chart_df[['time', 'avwap']].dropna().rename(columns={'avwap': 'value'}).to_dict('records')
+                    if avwap_data:
+                        chart_series.append({
+                            "type": 'Line',
+                            "data": avwap_data,
+                            "options": { "color": '#ff9800', "lineWidth": 2, "title": 'ICT Anchored VWAP (CIT)' }
                         })
                         
                 if 'psar' in chart_df.columns:
@@ -948,6 +1072,11 @@ else:
         with trade_col:
             st.markdown("### 🎯 Order Info")
             
+            # Show daily PnL
+            daily_pnl = bot.state.get("daily_pnl", 0.0)
+            pnl_color = "🟢" if daily_pnl >= 0 else "🔴"
+            st.markdown(f"**Daily PnL Tracker:** {pnl_color} ₹{round(daily_pnl, 2)}")
+            
             if bot.state["active_trade"]:
                 t = bot.state["active_trade"]
                 pnl = t.get('floating_pnl', 0.0)
@@ -960,36 +1089,48 @@ else:
                 cA.metric("Entry", f"₹{t['entry']:.2f}")
                 cB.metric("LTP", f"₹{ltp:.2f}", f"{indicator} ₹{round(pnl, 2)}")
                 
-                st.info(f"🛑 **Stop Loss:** `₹{t['sl']:.2f}` (Dynamic)\n\n🎯 **Target:** `₹{t['tgt']:.2f}`")
+                # SL, Entry and TP Texts explicit representation
+                st.info(f"🛑 **SL (Trailing):** `₹{t['sl']:.2f}`\n\n🎯 **TP1:** `₹{t['tp1']:.2f}`\n\n🎯 **TP2:** `₹{t['tp2']:.2f}`\n\n🎯 **TP3:** `₹{t['tp3']:.2f}`")
                 
                 if st.button("Close Trade Manually", use_container_width=True):
                     if not bot.settings['paper_mode'] and not bot.is_mock: bot.place_real_order(t['symbol'], t['token'], t['qty'], "SELL", t['exch'])
-                    save_trade({"Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": t['symbol'], "Type": t['type'], "Qty": t['qty'], "Entry Price": t['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2)})
+                    
+                    highest_reached = t['highest_price']
+                    if highest_reached >= t['tp3']: win_text = "tp3❤"
+                    elif highest_reached >= t['tp2']: win_text = "tp2✔✔"
+                    elif highest_reached >= t['tp1']: win_text = "tp1✔"
+                    elif pnl > 0: win_text = "profit👍"
+                    else: win_text = "sl hit 🛑"
+
+                    save_trade({"Date": dt.date.today().strftime('%Y-%m-%d'), "Time": dt.datetime.now().strftime('%H:%M:%S'), "Symbol": t['symbol'], "Type": t['type'], "Qty": t['qty'], "Entry Price": t['entry'], "Exit Price": ltp, "PnL (₹)": round(pnl, 2), "Result": win_text})
                     bot.state["last_trade"] = t.copy()
                     bot.state["last_trade"]["exit_price"] = ltp
                     bot.state["last_trade"]["final_pnl"] = pnl
+                    bot.state["last_trade"]["win_text"] = win_text
+                    bot.state["daily_pnl"] += pnl
                     bot.state["active_trade"] = None
                     st.rerun()
             else:
                 if bot.state.get("last_trade"):
                     lt = bot.state["last_trade"]
                     indicator = "🟢" if lt['final_pnl'] >= 0 else "🔴"
+                    win_tag = lt.get("win_text", "")
                     st.warning(f"**🛑 LAST CLOSED TRADE**\n\n**Strike:** `{lt['symbol']}`")
                     cA, cB = st.columns(2)
                     cA.metric("Entry", f"₹{lt['entry']:.2f}")
-                    cB.metric("Exit", f"₹{lt['exit_price']:.2f}", f"{indicator} ₹{round(lt['final_pnl'], 2)}")
+                    cB.metric(f"Exit [{win_tag}]", f"₹{lt['exit_price']:.2f}", f"{indicator} ₹{round(lt['final_pnl'], 2)}")
                     st.markdown("*Waiting for next entry setup...*")
                 else:
                     st.info("No active positions. Engine will open trades automatically based on Strategy.")
 
     with tab2:
-        colA, colB = st.columns(2)
+        colA, colB, colC = st.columns(3)
         with colA:
-            st.subheader("📊 52W High/Low & Intraday Scanner")
-            st.write("Scans top NIFTY 50 stocks for breakouts and intraday momentum.")
+            st.subheader("📊 52W High/Low & Intraday")
+            st.write("Scans top NIFTY 50 stocks for breakouts.")
             
             if st.button("🔍 Scan Top NSE Stocks"):
-                with st.spinner("Analyzing Volatility and Price Action..."):
+                with st.spinner("Analyzing Volatility..."):
                     try:
                         watch_list = ["RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "M&M.NS"]
                         scan_results = []
@@ -1024,9 +1165,7 @@ else:
                             scan_results.append({
                                 "Stock": ticker.replace(".NS", ""),
                                 "LTP": round(ltp, 2),
-                                "52W High": round(high_52, 2),
-                                "52W Low": round(low_52, 2),
-                                "Intraday Signal": rating
+                                "Signal": rating
                             })
                             
                         res_df = pd.DataFrame(scan_results)
@@ -1036,7 +1175,8 @@ else:
                         st.error(f"Scanner Failed. Error: {e}")
                         
         with colB:
-            st.subheader(f"📡 Multi-Stock BTST Scanner")
+            st.subheader(f"📡 Multi-Stock BTST")
+            st.write("Scan default watchlist for Hold setups.")
             if st.button("🔄 Scan Market"):
                 with st.spinner("Analyzing Watchlist..."):
                     scan_results = []
@@ -1045,8 +1185,37 @@ else:
                         if df is not None and not df.empty:
                             trend, sig, v, e, _, _, _ = bot.analyzer.apply_vwap_ema_strategy(df, sym)
                             btst_sig = check_btst_stbt(df) if not is_mkt_open else "N/A"
-                            scan_results.append({"Symbol": sym, "LTP": round(df['close'].iloc[-1], 2), "Trend": trend, "BTST/STBT": btst_sig})
+                            scan_results.append({"Symbol": sym, "LTP": round(df['close'].iloc[-1], 2), "BTST/STBT": btst_sig})
                     st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
+
+        with colC:
+            st.subheader("🪙 Low Cap / Penny Stocks")
+            st.write("Scans high volume penny stocks for breakouts.")
+            if st.button("🚀 Scan Penny Stocks"):
+                with st.spinner("Scanning penny stocks..."):
+                    penny_list = ["SUZLON.NS", "YESBANK.NS", "IDEA.NS", "JPPOWER.NS", "RPOWER.NS", "GTLINFRA.NS", "SOUTHBANK.NS", "UCOBANK.NS"]
+                    p_results = []
+                    for pt in penny_list:
+                        try:
+                            ptk = yf.Ticker(pt)
+                            phist = ptk.history(period="5d", interval="5m")
+                            if phist.empty: continue
+                            phist['vwap'] = (phist['Close'] * phist['Volume']).cumsum() / phist['Volume'].cumsum()
+                            c = phist['Close'].iloc[-1]
+                            v = phist['vwap'].iloc[-1]
+                            e9 = phist['Close'].ewm(span=9).mean().iloc[-1]
+                            
+                            sig = "Neutral ⚖️"
+                            if c > v and c > e9: sig = "Bullish 🟢"
+                            elif c < v and c < e9: sig = "Bearish 🔴"
+                            
+                            p_results.append({
+                                "Stock": pt.replace(".NS", ""),
+                                "LTP": round(c, 2),
+                                "Signal": sig
+                            })
+                        except: pass
+                    st.dataframe(pd.DataFrame(p_results), use_container_width=True, hide_index=True)
 
     with tab3:
         log_col, pnl_col = st.columns([1, 2])
@@ -1141,4 +1310,3 @@ components.html(
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
-
