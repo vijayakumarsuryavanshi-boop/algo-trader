@@ -58,12 +58,11 @@ def get_client_ip():
     return "Unknown IP"
 
 def render_signature():
-    st.sidebar.markdown(
-        f'<div style="text-align: center; color: #ffffff; font-size: 0.75rem; font-weight: bold; border-top: 1px solid #bae6fd; padding-top: 5px; margin-top: 5px; padding-bottom: 20px;">'
-        f'🚀 Algo trade<br>Developed by: Vijayakumar Suryavanshi</div>', 
+    st.markdown(
+        f'<div style="text-align: center; color: #94a3b8; font-size: 0.75rem; font-weight: bold; padding-top: 15px; margin-top: 20px;">'
+        f'🚀 Algo trade • Developed by: Vijayakumar Suryavanshi</div>', 
         unsafe_allow_html=True
     )
-    st.session_state['_dev_sig'] = "AUTH_OWNER_VIJAYAKUMAR SURYAVANSHI"
 
 def check_btst_stbt(df):
     if df is None or len(df) < 5: return "NO DATA"
@@ -82,14 +81,14 @@ def get_user_hash(api_key):
     if not api_key: return "guest"
     return hashlib.md5(api_key.encode()).hexdigest()[:8]
 
-def load_creds(api_key):
-    if not api_key: return {}
+def get_default_creds():
+    """Fetches the last saved credentials automatically to avoid re-typing."""
     if HAS_DB:
         try:
-            res = supabase.table("user_credentials").select("*").eq("api_key", api_key).execute()
+            res = supabase.table("user_credentials").select("*").limit(1).execute()
             if res.data: return res.data[0]
         except: pass
-    return {"client_id": "", "pwd": "", "totp_secret": "", "api_key": api_key, "tg_token": "", "tg_chat": "", "wa_phone": "", "wa_api": ""}
+    return {"client_id": "", "pwd": "", "totp_secret": "", "api_key": "", "tg_token": "", "tg_chat": "", "wa_phone": "", "wa_api": ""}
 
 def save_creds(client_id, pwd, totp_secret, api_key, tg_token, tg_chat, wa_phone, wa_api):
     if HAS_DB:
@@ -104,9 +103,9 @@ def save_trade(api_key, trade_date, trade_time, symbol, t_type, qty, entry, exit
         except: pass
 
 # ==========================================
-# 2. UI & CONFIG (Ultra Compact CSS)
+# 2. UI & CONFIG
 # ==========================================
-st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide")
 
 st.markdown("""
 <style>
@@ -114,44 +113,30 @@ st.markdown("""
     [data-testid="stHeader"] { background-color: #0284c7 !important; border-bottom: 2px solid #0369a1; }
     [data-testid="stHeader"] * { color: #ffffff !important; }
     
-    /* Compact Sidebar Styling */
-    [data-testid="stSidebar"] { background-color: #0284c7 !important; transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); }
-    [data-testid="stSidebar"] .block-container { padding-top: 1rem !important; padding-bottom: 0.5rem !important; gap: 0.2rem !important; }
-    [data-testid="stSidebar"]::-webkit-scrollbar { width: 4px; }
-    [data-testid="stSidebar"]::-webkit-scrollbar-thumb { background-color: #0369a1; border-radius: 10px; }
-    [data-testid="stSidebar"] * { color: #ffffff !important; }
-    
-    /* Force Dark Black Text in White Input Boxes */
-    div[data-baseweb="select"] span { color: #000000 !important; font-weight: 900 !important; }
+    /* Top Bar Controls - Force Dark Black Text & Clean Inputs */
+    div[data-baseweb="select"] span { color: #000000 !important; font-weight: 800 !important; font-size: 0.9rem !important;}
     div[data-baseweb="select"] > div, div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
-        color: #000000 !important; font-weight: 800 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 6px !important; min-height: 32px !important; padding: 2px 8px !important;
+        color: #000000 !important; font-weight: 800 !important; background-color: #f8fafc !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important; min-height: 38px !important; padding: 4px 10px !important;
     }
     
-    /* Smaller Labels */
-    .stSelectbox label, .stNumberInput label, .stTextInput label { font-size: 0.8rem !important; font-weight: 700 !important; margin-bottom: -5px !important; }
-    hr { margin: 0.5em 0 !important; }
-    
+    hr { margin: 1em 0 !important; }
     [data-testid="metric-container"] { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     [data-testid="metric-container"] label { color: #64748b !important; font-weight: 600 !important; font-size: 0.85rem !important; }
     [data-testid="metric-container"] div { color: #0f111a !important; font-size: 1.2rem !important; }
-    .main .block-container { padding-bottom: 80px; }
+    .main .block-container { padding-bottom: 80px; padding-top: 1rem; }
     
     /* Android Nav Dock Styling */
     .android-nav-btn { display: flex; justify-content: space-around; padding: 2px; }
-    .android-nav-btn button { font-size: 0.9rem !important; padding: 5px 10px !important; border-radius: 8px !important; background-color: #f1f5f9 !important; border: 1px solid #cbd5e1 !important; color: #0f111a !important; font-weight: bold !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;}
+    .android-nav-btn button { font-size: 1.1rem !important; padding: 8px !important; border-radius: 10px !important; background-color: #f1f5f9 !important; border: 1px solid #cbd5e1 !important; color: #0f111a !important; font-weight: bold !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;}
     .android-nav-btn button:hover { background-color: #e2e8f0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-DEFAULT_LOTS = {"NIFTY": 25, "BANKNIFTY": 15, "FINNIFTY": 25, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30, "INDIA VIX": 1, "EURUSD": 100000}
-YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "FINNIFTY": "NIFTY_FIN_SERVICE.NS", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", "GOLD": "GC=F", "SILVER": "SI=F", "INDIA VIX": "^INDIAVIX"}
-INDEX_SYMBOLS = {"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank", "FINNIFTY": "Nifty Fin Service", "SENSEX": "BSE SENSEX", "INDIA VIX": "INDIA VIX"}
-INDEX_TOKENS = {"NIFTY": ("NSE", "26000"), "BANKNIFTY": ("NSE", "26009"), "FINNIFTY": ("NSE", "26037"), "INDIA VIX": ("NSE", "26017"), "SENSEX": ("BSE", "99919000")}
+DEFAULT_LOTS = {"NIFTY": 25, "BANKNIFTY": 15, "FINNIFTY": 25, "SENSEX": 20, "CRUDEOIL": 100, "GOLD": 100, "INDIA VIX": 1}
+FOREX_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "XAGUSD", "US30", "NAS100"]
 
 STRAT_LIST = ["Intraday Trend Rider", "All in One", "ICT", "Momentum Breakout + S&R", "Institutional FVG + SMC"]
 
-if 'sb_index_input' not in st.session_state: st.session_state.sb_index_input = list(DEFAULT_LOTS.keys())[0]
-if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
 if 'bot' not in st.session_state: st.session_state.bot = None
 if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
 if 'custom_stock' not in st.session_state: st.session_state.custom_stock = ""
@@ -314,24 +299,21 @@ class SniperBot:
             "logs": deque(maxlen=50), "current_trend": "WAIT", "current_signal": "WAIT",
             "spot": 0.0, "vwap": 0.0, "ema": 0.0, "atr": 0.0, "fib_data": {}, "latest_data": None,
             "ui_popups": deque(maxlen=10), "loop_count": 0, "daily_pnl": 0.0, "trades_today": 0,
-            "balance": 0.0, "charges": 0.0
+            "balance": None, "leverage": None, "stop_out": None, "charges": 0.0
         }
         self.settings = {}
 
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
         
-        # Windows Native Notification Restored & Prioritized
         if HAS_NOTIFY:
             try: notification.notify(title=title, message=message, app_name="Pro Scalper", timeout=5)
             except: pass
             
-        # Telegram
         if self.tg_token and self.tg_chat:
             try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
             except: pass
             
-        # WhatsApp
         if self.wa_phone and self.wa_api:
             try: requests.get("https://api.callmebot.com/whatsapp.php", params={"phone": self.wa_phone, "text": f"{title}\n{message}", "apikey": self.wa_api}, timeout=3)
             except: pass
@@ -343,7 +325,7 @@ class SniperBot:
         if self.is_mock: 
             self.client_name, self.api_key = "Paper Trading User", "mock_key_123"
             self.user_hash = get_user_hash(self.api_key)
-            self.state["balance"] = 100000.0 # Mock Balance
+            self.state["balance"] = None # Hide false balance
             self.push_notify("🟢 Session Started", f"Paper Trading from IP: {self.client_ip}")
             return True
             
@@ -357,7 +339,10 @@ class SniperBot:
                     if authorized:
                         acc_info = mt5.account_info()
                         self.client_name = acc_info.name if acc_info else f"MT5 ID: {self.client_id}"
-                        self.state["balance"] = float(acc_info.balance) if acc_info else 0.0
+                        if acc_info:
+                            self.state["balance"] = float(acc_info.balance)
+                            self.state["leverage"] = int(acc_info.leverage)
+                            self.state["stop_out"] = float(acc_info.margin_so_so)
                         self.log("✅ Forex MT5 Connected successfully")
                         self.push_notify("🟢 Forex Connected", f"Live MT5 Session for: {self.client_name}")
                         return True
@@ -369,7 +354,7 @@ class SniperBot:
             else:
                 self.log("⚠️ MetaTrader5 module not installed. Falling back to Mock Forex Session.")
                 self.client_name = "Mock Forex User"
-                self.state["balance"] = 5000.0
+                self.state["balance"] = None
                 self.push_notify("🟢 Mock Forex", "Running simulated MT5 connection.")
                 return True
 
@@ -382,12 +367,12 @@ class SniperBot:
                 self.client_name = res['data'].get('name', self.client_id)
                 self.log(f"✅ Exchange Connected | IP: {self.client_ip}")
                 
-                # Automatically Fetch Account Balance
                 try:
                     rms = self.api.rmsLimit()
                     if rms and rms.get('status'):
                         self.state["balance"] = float(rms['data'].get('netmargin', 0.0))
                 except Exception as e:
+                    self.state["balance"] = None
                     self.log(f"⚠️ Could not fetch balance: {e}")
                     
                 self.push_notify("🟢 Exchange Connected", f"Live session started for user: {self.client_name}")
@@ -427,8 +412,8 @@ class SniperBot:
 
     def get_live_price(self, exchange, symbol, token):
         if self.is_mock: 
-            base = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "EURUSD": 1.08}.get(symbol, 500)
-            return float(np.random.uniform(base - 10, base + 10)) if symbol != "EURUSD" else float(np.random.uniform(1.07, 1.09))
+            base = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "EURUSD": 1.08, "XAUUSD": 2045}.get(symbol, 500)
+            return float(np.random.uniform(base - 10, base + 10)) if symbol not in ["EURUSD", "GBPUSD"] else float(np.random.uniform(1.07, 1.09))
             
         if self.is_forex and HAS_MT5:
             try: return mt5.symbol_info_tick(symbol).ask
@@ -462,7 +447,7 @@ class SniperBot:
             
     def _fallback_yfinance(self, symbol, interval):
         yf_int = interval if interval in ["1m", "5m", "15m"] else "5m" 
-        yf_ticker = YF_TICKERS.get(symbol, "EURUSD=X" if self.is_forex else symbol)
+        yf_ticker = YF_TICKERS.get(symbol, f"{symbol}=X" if self.is_forex else symbol)
         if yf_ticker:
             try:
                 df = yf.Ticker(yf_ticker).history(period="5d" if interval == "1m" else "10d", interval=yf_int)
@@ -537,7 +522,7 @@ class SniperBot:
                 df_candles = self.get_historical_data(exch, token, symbol=index, interval=timeframe) if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval=timeframe)
                 
                 user_lots_dict = s.get('user_lots', DEFAULT_LOTS)
-                base_lot_size = user_lots_dict.get(index, 25)
+                base_lot_size = user_lots_dict.get(index, 25) if not self.is_forex else 1
                 
                 if spot and df_candles is not None and not df_candles.empty:
                     self.state["spot"] = spot
@@ -573,13 +558,13 @@ class SniperBot:
                             
                             new_trade = {
                                 "symbol": strike_sym, "token": strike_token, "exch": strike_exch, 
-                                "type": "CE" if "CE" in strike_sym else "PE", "entry": entry_ltp, 
+                                "type": "BUY" if "BUY_CE" in signal else "SELL", "entry": entry_ltp, 
                                 "highest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, 
                                 "tp1": tp1, "tp2": tp2, "tp3": tp3, "tgt": tp3
                             }
                             if not paper and not self.is_mock: self.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
-                            self.log(f"🟢 ENTRY: {strike_sym} @ ₹{entry_ltp}")
-                            self.push_notify("Trade Entered", f"Bought {qty} {strike_sym} @ {entry_ltp}")
+                            self.log(f"🟢 ENTRY: {strike_sym} @ {entry_ltp}")
+                            self.push_notify("Trade Entered", f"Entered {qty} {strike_sym} @ {entry_ltp}")
                             self.state["active_trade"] = new_trade
                             self.state["trades_today"] += 1
 
@@ -588,11 +573,11 @@ class SniperBot:
                         
                         if not self.is_mock: ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
                         else:
-                            delta = (spot - self.state["spot"]) * (0.5 if trade['type'] == "CE" else -0.5) 
+                            delta = (spot - self.state["spot"]) * (0.5 if trade['type'] == "BUY" else -0.5) 
                             ltp = trade['entry'] + delta + np.random.uniform(-1, 2)
                             
                         if ltp:
-                            pnl = (ltp - trade['entry']) * trade['qty'] if trade['type'] == "CE" else (trade['entry'] - ltp) * trade['qty']
+                            pnl = (ltp - trade['entry']) * trade['qty'] if trade['type'] == "BUY" else (trade['entry'] - ltp) * trade['qty']
                             self.state["active_trade"]["current_ltp"] = ltp
                             self.state["active_trade"]["floating_pnl"] = pnl
                             
@@ -618,11 +603,10 @@ class SniperBot:
                                 
                                 if market_close: win_text += " (Auto Sq-off)"
                                 
-                                # Add trading charges to the dashboard
-                                self.state["charges"] += 50.0 
+                                self.state["charges"] += 50.0 if not self.is_forex else 0.50
                                 
-                                self.log(f"🛑 EXIT {trade['symbol']} | PnL: ₹{round(pnl, 2)} [{win_text}]")
-                                self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: ₹{round(pnl, 2)}")
+                                self.log(f"🛑 EXIT {trade['symbol']} | PnL: {round(pnl, 2)} [{win_text}]")
+                                self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: {round(pnl, 2)}")
                                 
                                 if not self.is_mock and not self.is_forex:
                                     save_trade(self.api_key, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
@@ -630,8 +614,8 @@ class SniperBot:
                                     if "paper_history" not in self.state: self.state["paper_history"] = []
                                     self.state["paper_history"].append({
                                         "Date": today_date, "Time": time_str, "Symbol": trade['symbol'],
-                                        "Type": trade['type'], "Qty": trade['qty'], "Entry Price": trade['entry'],
-                                        "Exit Price": ltp, "PnL (₹)": round(pnl, 2), "Result": win_text
+                                        "Type": trade['type'], "Qty": trade['qty'], "Entry": trade['entry'],
+                                        "Exit": ltp, "PnL": round(pnl, 2), "Result": win_text
                                     })
                                 
                                 self.state["last_trade"] = trade.copy()
@@ -643,7 +627,7 @@ class SniperBot:
             time.sleep(2)
 
 # ==========================================
-# 5. STREAMLIT UI (MOBILE/TOP-BAR STYLE)
+# 5. STREAMLIT UI (TOP BAR STYLE)
 # ==========================================
 is_mkt_open, mkt_status_msg = get_market_status()
 
@@ -674,19 +658,21 @@ if not st.session_state.bot:
             auth_mode = st.radio("Operating Mode", ["📝 Paper Trading", "⚡ Real Trading", "🌍 Forex (MT5)"], horizontal=True, label_visibility="collapsed")
             st.divider()
             
+            # Fetch Last Saved Credentials
+            saved_creds = get_default_creds()
+            
             if auth_mode == "⚡ Real Trading":
-                API_KEY = st.text_input("SmartAPI Key", type="password", placeholder="Enter Angel One API Key")
-                creds = load_creds(API_KEY) if API_KEY else {}
+                API_KEY = st.text_input("SmartAPI Key", type="password", value=saved_creds.get("api_key", ""), placeholder="Enter Angel One API Key")
                 col_id, col_pin = st.columns(2)
-                with col_id: CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
-                with col_pin: PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
-                TOTP = st.text_input("TOTP Secret", value=creds.get("totp_secret", ""), type="password")
+                with col_id: CLIENT_ID = st.text_input("Client ID", value=saved_creds.get("client_id", ""))
+                with col_pin: PIN = st.text_input("PIN", value=saved_creds.get("pwd", ""), type="password")
+                TOTP = st.text_input("TOTP Secret", value=saved_creds.get("totp_secret", ""), type="password")
                 
                 with st.expander("📱 Notification Settings"):
-                    TG_TOKEN = st.text_input("Telegram Bot Token", value=creds.get("tg_token", ""))
-                    TG_CHAT = st.text_input("Telegram Chat ID", value=creds.get("tg_chat", ""))
-                    WA_PHONE = st.text_input("WhatsApp Phone (+91...)", value=creds.get("wa_phone", ""))
-                    WA_API = st.text_input("WhatsApp API Key", value=creds.get("wa_api", ""))
+                    TG_TOKEN = st.text_input("Telegram Bot Token", value=saved_creds.get("tg_token", ""))
+                    TG_CHAT = st.text_input("Telegram Chat ID", value=saved_creds.get("tg_chat", ""))
+                    WA_PHONE = st.text_input("WhatsApp Phone (+91...)", value=saved_creds.get("wa_phone", ""))
+                    WA_API = st.text_input("WhatsApp API Key", value=saved_creds.get("wa_api", ""))
 
                 SAVE_CREDS = st.checkbox("Remember Credentials Securely", value=True)
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -701,14 +687,16 @@ if not st.session_state.bot:
             
             elif auth_mode == "🌍 Forex (MT5)":
                 st.info("Forex Login Window: Connects natively to MetaTrader 5 Terminal")
-                MT5_ID = st.text_input("MT5 Account ID (Login)", value="")
-                MT5_PASS = st.text_input("MT5 Password", type="password", value="")
+                MT5_ID = st.text_input("MT5 Account ID (Login)", value=saved_creds.get("client_id", ""))
+                MT5_PASS = st.text_input("MT5 Password", type="password", value=saved_creds.get("pwd", ""))
                 MT5_SERVER = st.text_input("Broker Server Name", value="MetaQuotes-Demo")
                 
                 if st.button("CONNECT FOREX 🚀", type="primary", use_container_width=True):
                     temp_bot = SniperBot(api_key=MT5_SERVER, client_id=MT5_ID, pwd=MT5_PASS, is_mock=False, is_forex=True)
                     with st.spinner("Connecting to MetaTrader 5 Terminal..."):
                         if temp_bot.login():
+                            # Save MT5 Details as well
+                            save_creds(MT5_ID, MT5_PASS, "", MT5_SERVER, "", "", "", "")
                             st.session_state.bot = temp_bot
                             st.rerun()
                         else: st.error("MT5 Connection Failed. Ensure terminal is open and credentials are correct.")
@@ -726,60 +714,60 @@ if not st.session_state.bot:
 else:
     bot = st.session_state.bot
     
-    head_c1, head_c2 = st.columns([3, 1])
-    with head_c1: st.markdown(f"**👤 Owner:** `{bot.client_name}` | **🔒 Session:** `{bot.user_hash}`")
+    # Header Info & Logout
+    head_c1, head_c2 = st.columns([4, 1])
+    with head_c1: st.markdown(f"👤 `{bot.client_name}` | 🔒 `{bot.user_hash}`")
     with head_c2:
-        if st.button("Logout & Terminate", use_container_width=True):
+        if st.button("Logout", use_container_width=True):
             bot.state["is_running"] = False
             st.session_state.clear()
             st.rerun()
 
-    # --- SIDEBAR SETTINGS (COMPACT) ---
-    with st.sidebar:
-        st.header("⚙️ CONFIGURATION")
-        if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
-        
-        CUSTOM_STOCK = st.text_input("Add Custom Symbol", value=st.session_state.custom_stock, placeholder="RELIANCE / EURUSD").upper().strip()
-        st.session_state.custom_stock = CUSTOM_STOCK
-        
-        asset_list = list(st.session_state.user_lots.keys())
-        if CUSTOM_STOCK and CUSTOM_STOCK not in asset_list:
-            asset_list.append(CUSTOM_STOCK)
-            st.session_state.user_lots[CUSTOM_STOCK] = 1 
-        
-        st.session_state.asset_options = asset_list
-        if st.session_state.sb_index_input not in asset_list: st.session_state.sb_index_input = asset_list[0]
-        
-        INDEX = st.selectbox("Watchlist Asset", asset_list, index=asset_list.index(st.session_state.sb_index_input), key="sb_index_input")
-        STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
-        TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
-        
-        st.divider()
-        col_r1, col_r2 = st.columns(2)
-        with col_r1:
-            LOTS = st.number_input("Lots", 1, 100, 1)
-            MAX_TRADES = st.number_input("Max Trades", 1, 50, 5)
-            MAX_CAPITAL = st.number_input("Max Cap (₹)", 1000, 500000, 15000, step=1000)
-        with col_r2:
-            SL_PTS = st.number_input("SL Pts", 5, 200, 20)
-            TSL_PTS = st.number_input("Trail SL", 5, 200, 15)
-            TGT_PTS = st.number_input("Target Pts", 5, 500, 15)
-        CAPITAL_PROTECT = st.number_input("Max Loss/Day (₹)", 500, 500000, 2000, step=500)
-        
-        st.divider()
-        PAPER = st.toggle("📝 Paper Mode", True, disabled=True if bot.is_mock else False)
-        HERO_ZERO = st.toggle("🚀 Hero/Zero", False)
-        FOMO_ENTRY = st.toggle("🚨 FOMO Momentum", False)
-        
-        render_signature()
+    # --- TOP BAR CONTROLS (NO SIDEBAR) ---
+    st.markdown("### ⚙️ Quick Controls")
+    
+    # Asset List Logic (Dynamic)
+    if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
+    asset_list = FOREX_PAIRS if bot.is_forex else list(st.session_state.user_lots.keys())
+    if st.session_state.custom_stock and st.session_state.custom_stock not in asset_list: asset_list.append(st.session_state.custom_stock)
+    st.session_state.asset_options = asset_list
+    if st.session_state.sb_index_input not in asset_list: st.session_state.sb_index_input = asset_list[0]
+    if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
 
-    bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, "user_lots": st.session_state.user_lots.copy()}
+    # Row 1: Dropdowns & Lots
+    ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 2, 1, 1])
+    with ctrl_c1: INDEX = st.selectbox("Asset", asset_list, index=asset_list.index(st.session_state.sb_index_input), key="sb_index_input", label_visibility="collapsed")
+    with ctrl_c2: STRATEGY = st.selectbox("Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input", label_visibility="collapsed")
+    with ctrl_c3: TIMEFRAME = st.selectbox("Timeframe", ["1m", "3m", "5m", "15m"], index=2, label_visibility="collapsed")
+    with ctrl_c4: 
+        if bot.is_forex: LOTS = st.number_input("Lots", min_value=0.01, step=0.01, format="%.2f", value=0.01, label_visibility="collapsed")
+        else: LOTS = st.number_input("Lots", min_value=1, step=1, value=1, label_visibility="collapsed")
+        
+    # Row 2: Advanced Risk Settings (Inside Expander to save space)
+    with st.expander("🛠️ Advanced Settings & Risk Management"):
+        st.markdown("**1. Risk Profile**")
+        r_c1, r_c2, r_c3 = st.columns(3)
+        with r_c1: MAX_TRADES = st.number_input("Max Trades", 1, 50, 5)
+        with r_c2: MAX_CAPITAL = st.number_input("Max Cap", 1000, 500000, 15000, step=1000)
+        with r_c3: CAPITAL_PROTECT = st.number_input("Max Loss/Day", 500, 500000, 2000, step=500)
+        
+        st.markdown("**2. Target & Stops**")
+        t_c1, t_c2, t_c3 = st.columns(3)
+        with t_c1: SL_PTS = st.number_input("SL Pts", 5, 200, 20)
+        with t_c2: TSL_PTS = st.number_input("Trail SL", 5, 200, 15)
+        with t_c3: TGT_PTS = st.number_input("Target Pts", 5, 500, 15)
+        
+        PAPER = st.toggle("📝 Paper Mode", True, disabled=True if bot.is_mock else False)
+        CUSTOM_STOCK = st.text_input("Add Custom Symbol", value=st.session_state.custom_stock, placeholder="Add Custom Symbol (RELIANCE / EURUSD)").upper().strip()
+        st.session_state.custom_stock = CUSTOM_STOCK
+
+    bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "hero_zero": False, "fomo_entry": False, "user_lots": st.session_state.user_lots.copy()}
 
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
         st.session_state.prev_index = INDEX
         if bot.state.get("is_running"): bot.state["spot"] = 0.0 
         else:
-            with st.spinner(f"Fetching Live Market Data for {INDEX}..."):
+            with st.spinner(f"Fetching Live Data for {INDEX}..."):
                 exch, token = bot.get_token_info(INDEX)
                 df_preload = bot.get_historical_data(exch, token, symbol=INDEX, interval=TIMEFRAME) if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval=TIMEFRAME)
                 if df_preload is not None and not df_preload.empty:
@@ -789,12 +777,13 @@ else:
                     else: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
                     bot.state.update({"current_trend": t, "current_signal": s, "vwap": v, "ema": e, "atr": atr, "fib_data": fib, "latest_data": df_c})
 
+    st.divider()
+
     if not is_mkt_open and not bot.is_forex: st.error(f"😴 {mkt_status_msg}")
         
     tab1, tab2, tab3 = st.tabs(["⚡ Live Dashboard", "🔎 Scanners", "📜 PnL Reports"])
 
     with tab1:
-        st.subheader(f"Trading Terminal: {INDEX}")
         c1, c2, c3 = st.columns([1, 1, 3])
         is_running = bot.state["is_running"]
         
@@ -810,16 +799,31 @@ else:
                 bot.state["is_running"] = False
                 st.rerun()
         with c3:
-            if is_running: st.success(f"🟢 **ENGINE IS RUNNING** (Trades Today: {bot.state['trades_today']}/{MAX_TRADES})")
-            else: st.error("🛑 **ENGINE STOPPED**")
+            if is_running: st.success(f"🟢 **ENGINE IS RUNNING** ({INDEX} - Trades: {bot.state['trades_today']}/{MAX_TRADES})")
+            else: st.error(f"🛑 **ENGINE STOPPED** ({INDEX})")
 
-        # NEW: Display Fetched Balance and Estimated Trading Charges Separate from Gross PnL
+        # Dynamic Metrics based on Market Type
         m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Balance", f"₹ {round(bot.state['balance'], 2)}")
-        m2.metric(f"LTP", f"₹ {round(bot.state['spot'], 2)}")
-        m3.metric("Gross PnL", f"₹ {round(bot.state.get('daily_pnl', 0.0), 2)}")
-        m4.metric("Est. Charges", f"₹ {round(bot.state.get('charges', 0.0), 2)}")
-        m5.info(f"Trend: {bot.state['current_trend']}")
+        
+        # Display Accurate Balance / Hide if unavailable
+        bal_val = bot.state.get('balance')
+        if bal_val is None: bal_str = "N/A"
+        else: bal_str = f"₹ {round(bal_val, 2)}" if not bot.is_forex else f"$ {round(bal_val, 2)}"
+            
+        m1.metric("Balance", bal_str)
+        
+        if bot.is_forex:
+            lev = bot.state.get('leverage')
+            stop_out = bot.state.get('stop_out')
+            m2.metric("Leverage", f"1:{lev}" if lev else "N/A")
+            m3.metric("Stop Out", f"{stop_out}%" if stop_out else "N/A")
+        else:
+            m2.metric("SMC Filter", "Active" if bot.state.get('fib_data') else "Wait")
+            m3.metric("Est. Charges", f"₹ {round(bot.state.get('charges', 0.0), 2)}")
+            
+        currency = "$" if bot.is_forex else "₹"
+        m4.metric(f"LTP", f"{round(bot.state['spot'], 4)}")
+        m5.metric("Gross PnL", f"{currency} {round(bot.state.get('daily_pnl', 0.0), 2)}")
         
         chart_col, trade_col = st.columns([3, 1])
 
@@ -869,13 +873,13 @@ else:
                 pnl = t.get('floating_pnl', 0.0)
                 indicator = "🟢" if pnl >= 0 else "🔴"
                 
-                st.success(f"**🟢 ACTIVE**\n`{t['symbol']}`\nQty: {t['qty']}")
+                st.success(f"**🟢 ACTIVE**\n`{t['symbol']}`\nLots: {t['qty']}")
                 
                 cA, cB = st.columns(2)
-                cA.metric("Entry", f"₹{t['entry']:.2f}")
-                cB.metric("LTP", f"₹{ltp:.2f}", f"{indicator} ₹{round(pnl, 2)}")
+                cA.metric("Entry", f"{t['entry']:.4f}")
+                cB.metric("LTP", f"{ltp:.4f}", f"{indicator} {currency}{round(pnl, 2)}")
                 
-                st.info(f"🛑 **SL (Trailing):** `₹{t['sl']:.2f}`\n\n🎯 **TP1:** `₹{t.get('tp1', 0):.2f}`\n\n🎯 **TP2:** `₹{t.get('tp2', 0):.2f}`\n\n🎯 **TP3:** `₹{t.get('tp3', 0):.2f}`")
+                st.info(f"🛑 **SL (Trailing):** `{t['sl']:.4f}`\n\n🎯 **TP1:** `{t.get('tp1', 0):.4f}`\n\n🎯 **TP2:** `{t.get('tp2', 0):.4f}`\n\n🎯 **TP3:** `{t.get('tp3', 0):.4f}`")
             else: st.info("Waiting for entry setup...")
 
     with tab2:
@@ -965,9 +969,11 @@ else:
                         else: st.info("No real trades recorded yet.")
                     except Exception as e: st.error(f"Could not load trades: {e}")
                 else: st.error("Cloud DB not connected.")
+    
+    render_signature()
 
 def cycle_asset():
-    assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
+    assets = st.session_state.get('asset_options', FOREX_PAIRS if bot.is_forex else list(DEFAULT_LOTS.keys()))
     if st.session_state.sb_index_input in assets: st.session_state.sb_index_input = assets[(assets.index(st.session_state.sb_index_input) + 1) % len(assets)]
     else: st.session_state.sb_index_input = assets[0]
 
