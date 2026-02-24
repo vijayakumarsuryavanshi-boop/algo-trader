@@ -123,12 +123,16 @@ st.markdown("""
     /* Base Streamlit overrides */
     [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #0f111a; font-family: 'Inter', sans-serif; }
     
-  /* Hide Streamlit Header ONLY on mobile screens (for Appliix), keep it normal on Desktop Web */
+/* Hide Streamlit Header for Appliix, but keep it active for swipe/JS */
     @media (max-width: 850px) {
         header[data-testid="stHeader"] { 
             visibility: hidden !important; 
             height: 0px !important; 
-            min-height: 0px !important; 
+        }
+        /* This forces the sidebar to be accessible via swipe on Android */
+        section[data-testid="stSidebar"] {
+            visibility: visible !important;
+            display: block !important;
         }
     }
     
@@ -930,7 +934,7 @@ if not getattr(st.session_state, "bot", None):
 else:
     bot = st.session_state.bot
     
-    # --- TOP HEADER (OWNER & LOGOUT) ---
+    # 1. Top Bar (Logout & User)
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
         st.markdown(f"**👤 User:** `{bot.client_name}`")
@@ -940,9 +944,10 @@ else:
             st.session_state.clear()
             st.rerun()
 
-    # Hidden sidebar for desktop view, easily toggled by Appliix navigation drawer
+    # 2. Sidebar (Settings) - Make sure this is NOT indented under the columns!
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
+        
 
    
 
@@ -1356,6 +1361,7 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
 
 
