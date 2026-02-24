@@ -17,6 +17,13 @@ from collections import deque
 from streamlit_lightweight_charts import renderLightweightCharts
 from supabase import create_client, Client
 
+# Windows 11 Native Notifications
+try:
+    from plyer import notification
+    HAS_NOTIFY = True
+except ImportError:
+    HAS_NOTIFY = False
+
 # ==========================================
 # 0. DATABASE & GLOBAL HELPERS
 # ==========================================
@@ -109,15 +116,11 @@ st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide",
 
 st.markdown("""
 <style>
-    /* Main Backgrounds */
     [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #0f111a; font-family: 'Inter', sans-serif; }
-    
-    /* Top Header & Sidebar Blue Theme */
     [data-testid="stHeader"] { background-color: #0284c7 !important; border-bottom: 2px solid #0369a1; }
     [data-testid="stHeader"] * { color: #ffffff !important; }
     [data-testid="stSidebar"] { background-color: #0284c7 !important; }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
-
     div[data-baseweb="select"] > div, div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important;
     }
@@ -125,8 +128,6 @@ st.markdown("""
     [data-testid="metric-container"] label { color: #64748b !important; font-weight: 600 !important; }
     [data-testid="metric-container"] div { color: #0f111a !important; }
     [data-testid="stTable"] th { background-color: #f1f5f9 !important; color: #0284c7 !important; border: 1px solid #e2e8f0 !important; }
-    
-    /* Ensure dock doesn't overlap content */
     .main .block-container { padding-bottom: 120px; }
 </style>
 """, unsafe_allow_html=True)
@@ -328,7 +329,7 @@ class TechnicalAnalyzer:
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", is_mock=False):
         self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
-        self.tg_token, self.tg_chat, self.wa_phone, wa_api = tg_token, tg_chat, wa_phone, wa_api
+        self.tg_token, self.tg_chat, self.wa_phone, self.wa_api = tg_token, tg_chat, wa_phone, wa_api
         self.api, self.token_map, self.is_mock = None, None, is_mock
         self.client_name = "Offline User"
         self.client_ip = get_client_ip()
@@ -345,6 +346,9 @@ class SniperBot:
 
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
+        if HAS_NOTIFY:
+            try: notification.notify(title=title, message=message, app_name="Pro Scalper", timeout=5)
+            except: pass
 
     def log(self, msg):
         self.state["logs"].appendleft(f"[{get_ist().strftime('%H:%M:%S')}] {msg}")
@@ -378,7 +382,8 @@ class SniperBot:
         if index_name in INDEX_TOKENS: return INDEX_TOKENS[index_name]
         df_map = self.get_master()
         if df_map is not None and not df_map.empty:
-            today_date = pd.Timestamp(get_ist()).normalize()
+            # FIX: Strip timezone awareness to avoid pandas comparison errors
+            today_date = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
             futs = df_map[(df_map['name'] == index_name) & (df_map['instrumenttype'].isin(['FUTCOM', 'FUTIDX', 'FUTSTK', 'EQ']))]
             if not futs.empty:
                 eqs = futs[futs['instrumenttype'] == 'EQ']
@@ -458,7 +463,10 @@ class SniperBot:
         
         df = self.get_master()
         if df is None or df.empty: return None, None, None, 0.0
-        today = pd.Timestamp(get_ist()).normalize()
+        
+        # FIX: Strip timezone awareness to avoid pandas comparison errors
+        today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
+        
         mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
         subset = df[mask].copy()
         if subset.empty: return None, None, None, 0.0
@@ -545,6 +553,7 @@ class SniperBot:
                             }
                             if not paper and not self.is_mock: self.place_real_order(strike_sym, strike_token, qty, "BUY", strike_exch)
                             self.log(f"🟢 ENTRY: {strike_sym} @ ₹{entry_ltp}")
+                            self.push_notify("Trade Entered", f"Bought {qty} {strike_sym} @ {entry_ltp}")
                             self.state["active_trade"] = new_trade
                             self.state["trades_today"] += 1
 
@@ -584,9 +593,19 @@ class SniperBot:
                                 if market_close: win_text += " (Auto Sq-off)"
                                 
                                 self.log(f"🛑 EXIT {trade['symbol']} | PnL: ₹{round(pnl, 2)} [{win_text}]")
+                                self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: ₹{round(pnl, 2)}")
                                 
-                                # FIRE TRADE TO SUPABASE DB
-                                save_trade(self.api_key, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
+                                # ROUTE DATA BASED ON MODE
+                                if not self.is_mock:
+                                    save_trade(self.api_key, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
+                                else:
+                                    if "paper_history" not in self.state:
+                                        self.state["paper_history"] = []
+                                    self.state["paper_history"].append({
+                                        "Date": today_date, "Time": time_str, "Symbol": trade['symbol'],
+                                        "Type": trade['type'], "Qty": trade['qty'], "Entry Price": trade['entry'],
+                                        "Exit Price": ltp, "PnL (₹)": round(pnl, 2), "Result": win_text
+                                    })
                                 
                                 self.state["last_trade"] = trade.copy()
                                 self.state["last_trade"].update({"exit_price": ltp, "final_pnl": pnl, "win_text": win_text})
@@ -670,7 +689,7 @@ else:
             st.session_state.clear()
             st.rerun()
 
-    # --- MOVED BACK TO SIDEBAR AS REQUESTED ---
+    # --- SIDEBAR SETTINGS ---
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
         
@@ -827,7 +846,6 @@ else:
                 st.info(f"🛑 **SL (Trailing):** `₹{t['sl']:.2f}`\n\n🎯 **TP1:** `₹{t.get('tp1', 0):.2f}`\n\n🎯 **TP2:** `₹{t.get('tp2', 0):.2f}`\n\n🎯 **TP3:** `₹{t.get('tp3', 0):.2f}`")
             else: st.info("Waiting for entry setup...")
 
-    # --- TAB 2: ALL SCANNERS RESTORED ---
     with tab2:
         colA, colB, colC = st.columns(3)
         with colA:
@@ -895,23 +913,32 @@ else:
         with log_col:
             st.subheader("System Logs")
             for l in bot.state["logs"]: st.text(l)
+            
         with pnl_col:
-            st.subheader("📊 Trade History (From Cloud DB)")
-            if HAS_DB and not bot.is_mock:
-                try:
-                    res = supabase.table("trade_logs").select("*").eq("api_key", bot.api_key).execute()
-                    if res.data:
-                        df_db = pd.DataFrame(res.data)
-                        df_db = df_db.drop(columns=["id", "api_key"], errors="ignore")
-                        st.dataframe(df_db.iloc[::-1], use_container_width=True)
-                        
-                        output = io.BytesIO()
-                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer: df_db.to_excel(writer, index=False)
-                        st.download_button("📥 Download Excel (.xlsx)", data=output.getvalue(), file_name=f"Cloud_Trade_Log.xlsx")
-                    else: st.info("No trades recorded yet.")
-                except Exception as e: st.error(f"Could not load trades: {e}")
+            if bot.is_mock:
+                st.subheader("📊 Paper Trade History (Session Memory)")
+                if bot.state.get("paper_history"):
+                    df_paper = pd.DataFrame(bot.state["paper_history"])
+                    st.dataframe(df_paper.iloc[::-1], use_container_width=True)
+                else:
+                    st.info("No paper trades recorded yet in this session.")
             else:
-                st.info("Cloud history disabled in Paper Trading / Mock mode.")
+                st.subheader("📊 Live Trade History (Cloud DB)")
+                if HAS_DB:
+                    try:
+                        res = supabase.table("trade_logs").select("*").eq("api_key", bot.api_key).execute()
+                        if res.data:
+                            df_db = pd.DataFrame(res.data)
+                            df_db = df_db.drop(columns=["id", "api_key"], errors="ignore")
+                            st.dataframe(df_db.iloc[::-1], use_container_width=True)
+                            
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine='xlsxwriter') as writer: df_db.to_excel(writer, index=False)
+                            st.download_button("📥 Download Excel (.xlsx)", data=output.getvalue(), file_name=f"Cloud_Trade_Log.xlsx")
+                        else: st.info("No real trades recorded yet.")
+                    except Exception as e: st.error(f"Could not load trades: {e}")
+                else:
+                    st.error("Cloud DB not connected.")
 
 def cycle_asset():
     assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
@@ -949,19 +976,6 @@ components.html(
         wrapper.style.padding = '10px 15px'; 
         wrapper.style.borderTop = '1px solid #e2e8f0';
         wrapper.style.boxShadow = '0 -4px 6px -1px rgba(0, 0, 0, 0.1)';
-        
-        const row = wrapper.querySelector('[data-testid="stHorizontalBlock"]');
-        if (row) {
-            row.style.display = 'flex';
-            row.style.flexDirection = 'row';
-            row.style.flexWrap = 'nowrap';
-            row.style.gap = '5px';
-            const cols = row.querySelectorAll('[data-testid="column"]');
-            cols.forEach(c => { 
-                c.style.minWidth = '0'; 
-                c.style.flex = '1 1 0%'; 
-            });
-        }
     }
     </script>""", height=0)
 
