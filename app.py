@@ -123,7 +123,9 @@ st.markdown("""
     [data-testid="metric-container"] { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     [data-testid="metric-container"] label { color: #64748b !important; font-weight: 600 !important; font-size: 0.85rem !important; }
     [data-testid="metric-container"] div { color: #0f111a !important; font-size: 1.2rem !important; }
-    .main .block-container { padding-bottom: 80px; padding-top: 1rem; }
+    
+    /* ADDED HUGE PADDING TO BOTTOM SO DOCK DOESN'T BLOCK TEXT/CHARTS */
+    .main .block-container { padding-bottom: 150px !important; padding-top: 1rem; }
     
     /* Android Nav Dock Styling */
     .android-nav-btn { display: flex; justify-content: space-around; padding: 2px; }
@@ -134,9 +136,11 @@ st.markdown("""
 
 DEFAULT_LOTS = {"NIFTY": 25, "BANKNIFTY": 15, "FINNIFTY": 25, "SENSEX": 20, "CRUDEOIL": 100, "GOLD": 100, "INDIA VIX": 1}
 FOREX_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "XAGUSD", "US30", "NAS100"]
-
 STRAT_LIST = ["Intraday Trend Rider", "All in One", "ICT", "Momentum Breakout + S&R", "Institutional FVG + SMC"]
 
+# --- CRITICAL FIX: Re-added missing state initialization ---
+if 'sb_index_input' not in st.session_state: st.session_state.sb_index_input = "NIFTY"
+if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
 if 'bot' not in st.session_state: st.session_state.bot = None
 if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
 if 'custom_stock' not in st.session_state: st.session_state.custom_stock = ""
@@ -695,7 +699,6 @@ if not st.session_state.bot:
                     temp_bot = SniperBot(api_key=MT5_SERVER, client_id=MT5_ID, pwd=MT5_PASS, is_mock=False, is_forex=True)
                     with st.spinner("Connecting to MetaTrader 5 Terminal..."):
                         if temp_bot.login():
-                            # Save MT5 Details as well
                             save_creds(MT5_ID, MT5_PASS, "", MT5_SERVER, "", "", "", "")
                             st.session_state.bot = temp_bot
                             st.rerun()
@@ -726,12 +729,16 @@ else:
     # --- TOP BAR CONTROLS (NO SIDEBAR) ---
     st.markdown("### ⚙️ Quick Controls")
     
-    # Asset List Logic (Dynamic)
     if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
     asset_list = FOREX_PAIRS if bot.is_forex else list(st.session_state.user_lots.keys())
     if st.session_state.custom_stock and st.session_state.custom_stock not in asset_list: asset_list.append(st.session_state.custom_stock)
+    
     st.session_state.asset_options = asset_list
-    if st.session_state.sb_index_input not in asset_list: st.session_state.sb_index_input = asset_list[0]
+    
+    # CRITICAL FIX: Safe check for sb_index_input inside the current asset_list
+    if getattr(st.session_state, 'sb_index_input', None) not in asset_list: 
+        st.session_state.sb_index_input = asset_list[0]
+        
     if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
 
     # Row 1: Dropdowns & Lots
@@ -802,10 +809,8 @@ else:
             if is_running: st.success(f"🟢 **ENGINE IS RUNNING** ({INDEX} - Trades: {bot.state['trades_today']}/{MAX_TRADES})")
             else: st.error(f"🛑 **ENGINE STOPPED** ({INDEX})")
 
-        # Dynamic Metrics based on Market Type
         m1, m2, m3, m4, m5 = st.columns(5)
         
-        # Display Accurate Balance / Hide if unavailable
         bal_val = bot.state.get('balance')
         if bal_val is None: bal_str = "N/A"
         else: bal_str = f"₹ {round(bal_val, 2)}" if not bot.is_forex else f"$ {round(bal_val, 2)}"
