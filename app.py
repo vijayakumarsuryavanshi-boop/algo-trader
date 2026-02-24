@@ -115,7 +115,7 @@ def save_trade(api_key, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CONFIG
 # ==========================================
-st.set_page_config(page_title="ANGEL MT5", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="PRO SCALPER", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 # CUSTOM APPLIIX + STREAMLIT CSS
 st.markdown("""
@@ -1361,6 +1361,7 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
 
 
