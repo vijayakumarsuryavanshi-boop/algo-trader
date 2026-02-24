@@ -19,7 +19,8 @@ plotly
 streamlit-lightweight-charts
 plyer
 XlsxWriter
-superbase
+supabase
+
 
 
 
