@@ -124,15 +124,20 @@ st.markdown("""
     [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #0f111a; font-family: 'Inter', sans-serif; }
     
 /* Hide Streamlit Header for Appliix, but keep it active for swipe/JS */
-    @media (max-width: 850px) {
+   @media (max-width: 850px) {
         header[data-testid="stHeader"] { 
-            visibility: hidden !important; 
-            height: 0px !important; 
+            visibility: visible !important; 
+            height: auto !important;
+            background-color: #0284c7 !important; /* Matches your blue theme */
         }
-        /* This forces the sidebar to be accessible via swipe on Android */
-        section[data-testid="stSidebar"] {
-            visibility: visible !important;
-            display: block !important;
+        
+        /* Make the 'Open Sidebar' icon white so it's visible on blue */
+        header[data-testid="stHeader"] svg {
+            fill: white !important;
+        }
+
+        .main .block-container {
+            padding-top: 50px !important; /* Adds space for the header */
         }
     }
     
@@ -934,7 +939,7 @@ if not getattr(st.session_state, "bot", None):
 else:
     bot = st.session_state.bot
     
-    # 1. Top Bar (Logout & User)
+    # --- 1. TOP HEADER (USER & LOGOUT) ---
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
         st.markdown(f"**👤 User:** `{bot.client_name}`")
@@ -944,9 +949,10 @@ else:
             st.session_state.clear()
             st.rerun()
 
-    # 2. Sidebar (Settings) - Make sure this is NOT indented under the columns!
+    # --- 2. THE SIDEBAR (NOW UNIFIED) ---
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
+     
         
 
    
@@ -1361,6 +1367,7 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
 
 
