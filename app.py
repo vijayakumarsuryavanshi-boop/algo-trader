@@ -123,9 +123,12 @@ st.markdown("""
     /* Base Streamlit overrides */
     [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #0f111a; font-family: 'Inter', sans-serif; }
     
-    /* Hide Streamlit Header & Footer for Appliix Native Wrapper */
-    header[data-testid="stHeader"] { display: none !important; }
-    footer { display: none !important; }
+   /* Hide Streamlit Header visually, but keep it alive for Javascript clicks */
+    header[data-testid="stHeader"] { 
+        visibility: hidden !important; 
+        height: 0px !important; 
+        min-height: 0px !important; 
+    }
     
     [data-testid="stSidebar"] { background-color: #0284c7 !important; transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
@@ -1344,5 +1347,6 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
 
