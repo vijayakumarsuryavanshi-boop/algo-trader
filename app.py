@@ -45,15 +45,25 @@ def get_client_ip():
     return "Unknown IP"
 
 def render_signature():
-    st.markdown(
-        f'<div style="text-align: center; color: #0284c7; font-size: 0.8rem; font-weight: bold; border-top: 1px solid #e2e8f0; padding-top: 10px; margin-top: 10px;">'
+    st.sidebar.markdown(
+        f'<div style="text-align: center; color: #ffffff; font-size: 0.8rem; font-weight: bold; border-top: 1px solid #bae6fd; padding-top: 10px; margin-top: 10px;">'
         f'🚀 Algo trade<br>Developed by: Vijayakumar Suryavanshi</div>', 
         unsafe_allow_html=True
     )
     st.session_state['_dev_sig'] = "AUTH_OWNER_VIJAYAKUMAR SURYAVANSHI"
 
+def check_btst_stbt(df):
+    if df is None or len(df) < 5: return "NO DATA"
+    df = df.copy()
+    df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+    df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+    last = df.iloc[-1]
+    if last['close'] > last['ema9'] > last['ema21'] and (last['high'] - last['close']) < (last['close'] - last['open']): return "🔥 BTST Suggested"
+    elif last['close'] < last['ema9'] < last['ema21'] and (last['close'] - last['low']) < (last['open'] - last['close']): return "🩸 STBT Suggested"
+    return "⚖️ Neutral (No Hold)"
+
 # ==========================================
-# 1. DATABASE FUNCTIONS (Replaces Local Files)
+# 1. DATABASE FUNCTIONS
 # ==========================================
 def get_user_hash(api_key):
     if not api_key: return "guest"
@@ -95,9 +105,19 @@ def save_trade(api_key, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CONFIG
 # ==========================================
+st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+
 st.markdown("""
 <style>
+    /* Main Backgrounds */
     [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #0f111a; font-family: 'Inter', sans-serif; }
+    
+    /* Top Header & Sidebar Blue Theme */
+    [data-testid="stHeader"] { background-color: #0284c7 !important; border-bottom: 2px solid #0369a1; }
+    [data-testid="stHeader"] * { color: #ffffff !important; }
+    [data-testid="stSidebar"] { background-color: #0284c7 !important; }
+    [data-testid="stSidebar"] * { color: #ffffff !important; }
+
     div[data-baseweb="select"] > div, div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important;
     }
@@ -105,7 +125,9 @@ st.markdown("""
     [data-testid="metric-container"] label { color: #64748b !important; font-weight: 600 !important; }
     [data-testid="metric-container"] div { color: #0f111a !important; }
     [data-testid="stTable"] th { background-color: #f1f5f9 !important; color: #0284c7 !important; border: 1px solid #e2e8f0 !important; }
-    [data-testid="collapsedControl"] {display: none;}
+    
+    /* Ensure dock doesn't overlap content */
+    .main .block-container { padding-bottom: 120px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -165,6 +187,15 @@ class TechnicalAnalyzer:
         atr = self.get_atr(df, 14)
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
         df['is_sideways'] = (df['rsi'].between(45, 55)) & (abs(df['close'] - df['ema21']) < (atr * 0.5))
+        df['inside_bar'] = (df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1))
+        
+        try:
+            df['date'] = df.index.date
+            if 'volume' in df.columns and df['volume'].sum() > 0:
+                df['vol_price'] = df['close'] * df['volume']
+                df['avwap'] = df.groupby('date')['vol_price'].cumsum() / df.groupby('date')['volume'].cumsum()
+            else: df['avwap'] = df.groupby('date')['close'].transform(lambda x: x.expanding().mean())
+        except: df['avwap'] = df['close']
         return df
 
     def calculate_fib_zones(self, df, lookback=100):
@@ -297,7 +328,7 @@ class TechnicalAnalyzer:
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", is_mock=False):
         self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
-        self.tg_token, self.tg_chat, self.wa_phone, self.wa_api = tg_token, tg_chat, wa_phone, wa_api
+        self.tg_token, self.tg_chat, self.wa_phone, wa_api = tg_token, tg_chat, wa_phone, wa_api
         self.api, self.token_map, self.is_mock = None, None, is_mock
         self.client_name = "Offline User"
         self.client_ip = get_client_ip()
@@ -355,6 +386,15 @@ class SniperBot:
                 futs = futs[futs['expiry'] >= today_date]
                 if not futs.empty: return futs[futs['expiry'] == futs['expiry'].min()].iloc[0]['exch_seg'], futs[futs['expiry'] == futs['expiry'].min()].iloc[0]['token']
         return "NSE", "12345"
+
+    def get_market_data_oi(self, exchange, token):
+        if self.is_mock: return np.random.randint(50000, 150000), np.random.randint(1000, 10000)
+        if not self.api: return 0, 0
+        try:
+            res = self.api.marketData({"mode": "FULL", "exchangeTokens": { exchange: [str(token)] }})
+            if res and res.get('status') and res.get('data'): return res['data']['fetched'][0].get('opnInterest', 0), res['data']['fetched'][0].get('totMacVal', 0)
+        except: pass
+        return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
         if self.is_mock: 
@@ -473,6 +513,17 @@ class SniperBot:
                     elif "Trend Rider" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_trend_rider_strategy(df_candles, index)
                     else: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
 
+                    if s.get("fomo_entry"):
+                        body = abs(last_candle['close'] - last_candle['open'])
+                        avg_body = df_candles['close'].diff().abs().rolling(14).mean().iloc[-1]
+                        if body > (avg_body * 3) and last_candle.get('vol_spike', False):
+                            signal = "BUY_CE" if last_candle['close'] > last_candle['open'] else "BUY_PE"
+                            trend = "🚨 FOMO BREAKOUT ACTIVE"
+
+                    if s.get("hero_zero") and signal != "WAIT" and not self.is_mock:
+                        live_oi, live_vol = self.get_market_data_oi(exch, token)
+                        if live_vol < 50000: signal, trend = "WAIT", "Hero/Zero Blocked: Low Volume/OI"
+
                     self.state.update({"current_trend": trend, "current_signal": signal, "vwap": vwap, "ema": ema, "atr": current_atr, "fib_data": fib_data, "latest_data": df_chart})
 
                     if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time:
@@ -548,7 +599,6 @@ class SniperBot:
 # ==========================================
 # 5. STREAMLIT UI (MOBILE/TOP-BAR STYLE)
 # ==========================================
-st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide", initial_sidebar_state="collapsed")
 is_mkt_open, mkt_status_msg = get_market_status()
 
 def play_sound():
@@ -620,49 +670,50 @@ else:
             st.session_state.clear()
             st.rerun()
 
-    with st.expander("⚙️ SYSTEM CONFIGURATION & RISK CONTROLS", expanded=False):
-        c_setup, c_risk, c_adv = st.columns([1.5, 1.5, 1])
+    # --- MOVED BACK TO SIDEBAR AS REQUESTED ---
+    with st.sidebar:
+        st.header("⚙️ SYSTEM CONFIGURATION")
         
-        with c_setup:
-            st.markdown("**1. Market Setup**")
-            
-            if 'user_lots' not in st.session_state:
-                st.session_state.user_lots = DEFAULT_LOTS.copy()
-            
-            CUSTOM_STOCK = st.text_input("Add Custom Stock (NSE/BSE)", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE").upper().strip()
-            st.session_state.custom_stock = CUSTOM_STOCK
-            
-            asset_list = list(st.session_state.user_lots.keys())
-            if CUSTOM_STOCK and CUSTOM_STOCK not in asset_list:
-                asset_list.append(CUSTOM_STOCK)
-                st.session_state.user_lots[CUSTOM_STOCK] = 1 
-            
-            st.session_state.asset_options = asset_list
-            if st.session_state.sb_index_input not in asset_list: 
-                st.session_state.sb_index_input = asset_list[0]
-            
-            INDEX = st.selectbox("Watchlist Asset", asset_list, index=asset_list.index(st.session_state.sb_index_input), key="sb_index_input")
-            STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
-            TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
-            
-        with c_risk:
-            st.markdown("**2. Risk Management**")
-            col_r1, col_r2 = st.columns(2)
-            with col_r1:
-                LOTS = st.number_input("Base Lots", 1, 100, 1)
-                MAX_TRADES = st.number_input("Max Trades/Day", 1, 50, 5)
-                MAX_CAPITAL = st.number_input("Max Cap/Trade (₹)", 1000, 500000, 15000, step=1000)
-            with col_r2:
-                SL_PTS = st.number_input("SL Points", 5, 200, 20)
-                TSL_PTS = st.number_input("Trail SL Pts", 5, 200, 15)
-                TGT_PTS = st.number_input("Target Steps", 5, 500, 15)
-            CAPITAL_PROTECT = st.number_input("Capital Protection (Max Loss/Day ₹)", 500, 500000, 2000, step=500)
-            
-        with c_adv:
-            st.markdown("**3. Advanced Triggers**")
-            PAPER = st.toggle("📝 Paper Trade Mode", True, disabled=True if bot.is_mock else False)
-            HERO_ZERO = st.toggle("🚀 Hero/Zero Setup", False)
-            FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
+        st.markdown("**1. Market Setup**")
+        if 'user_lots' not in st.session_state:
+            st.session_state.user_lots = DEFAULT_LOTS.copy()
+        
+        CUSTOM_STOCK = st.text_input("Add Custom Stock (NSE/BSE)", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE").upper().strip()
+        st.session_state.custom_stock = CUSTOM_STOCK
+        
+        asset_list = list(st.session_state.user_lots.keys())
+        if CUSTOM_STOCK and CUSTOM_STOCK not in asset_list:
+            asset_list.append(CUSTOM_STOCK)
+            st.session_state.user_lots[CUSTOM_STOCK] = 1 
+        
+        st.session_state.asset_options = asset_list
+        if st.session_state.sb_index_input not in asset_list: 
+            st.session_state.sb_index_input = asset_list[0]
+        
+        INDEX = st.selectbox("Watchlist Asset", asset_list, index=asset_list.index(st.session_state.sb_index_input), key="sb_index_input")
+        STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
+        TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
+        
+        st.divider()
+        st.markdown("**2. Risk Management**")
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            LOTS = st.number_input("Base Lots", 1, 100, 1)
+            MAX_TRADES = st.number_input("Max Trades/Day", 1, 50, 5)
+            MAX_CAPITAL = st.number_input("Max Cap/Trade (₹)", 1000, 500000, 15000, step=1000)
+        with col_r2:
+            SL_PTS = st.number_input("SL Points", 5, 200, 20)
+            TSL_PTS = st.number_input("Trail SL Pts", 5, 200, 15)
+            TGT_PTS = st.number_input("Target Steps", 5, 500, 15)
+        CAPITAL_PROTECT = st.number_input("Capital Protection (Max Loss/Day ₹)", 500, 500000, 2000, step=500)
+        
+        st.divider()
+        st.markdown("**3. Advanced Triggers**")
+        PAPER = st.toggle("📝 Paper Trade Mode", True, disabled=True if bot.is_mock else False)
+        HERO_ZERO = st.toggle("🚀 Hero/Zero Setup", False)
+        FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
+        
+        render_signature()
 
     bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, "user_lots": st.session_state.user_lots.copy()}
 
@@ -740,6 +791,20 @@ else:
                 }
                 
                 chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
+
+                if 'avwap' in chart_df.columns:
+                    avwap_data = chart_df[['time', 'avwap']].dropna().rename(columns={'avwap': 'value'}).to_dict('records')
+                    if avwap_data: chart_series.append({"type": 'Line', "data": avwap_data, "options": { "color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP' }})
+
+                if 'vwap' in chart_df.columns:
+                    vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
+                    if vwap_data: chart_series.append({"type": 'Line', "data": vwap_data, "options": { "color": '#ff9800', "lineWidth": 2, "title": 'VWAP' }})
+
+                ema_col = 'ema_fast' if 'ema_fast' in chart_df.columns else 'ema_short'
+                if ema_col in chart_df.columns:
+                    ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
+                    if ema_data: chart_series.append({"type": 'Line', "data": ema_data, "options": { "color": '#0ea5e9', "lineWidth": 2, "title": 'EMA' }})
+
                 renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
 
         with trade_col:
@@ -762,18 +827,68 @@ else:
                 st.info(f"🛑 **SL (Trailing):** `₹{t['sl']:.2f}`\n\n🎯 **TP1:** `₹{t.get('tp1', 0):.2f}`\n\n🎯 **TP2:** `₹{t.get('tp2', 0):.2f}`\n\n🎯 **TP3:** `₹{t.get('tp3', 0):.2f}`")
             else: st.info("Waiting for entry setup...")
 
+    # --- TAB 2: ALL SCANNERS RESTORED ---
     with tab2:
-        st.subheader("Market Scanners")
-        st.info("Scanner data is real-time. Navigate carefully while trades are running.")
-        if st.button("🔄 Quick Scan Inside Bar"):
-            with st.spinner("Analyzing..."):
-                scan_results = []
-                for sym in ["RELIANCE", "TCS", "INFY"]:
-                    df = bot.get_historical_data("NSE", "99926000", symbol=sym, interval="5m")
-                    if df is not None and len(df) > 2:
-                        ib = "Yes 🟡" if (df['high'].iloc[-1] <= df['high'].iloc[-2] and df['low'].iloc[-1] >= df['low'].iloc[-2]) else "No"
-                        scan_results.append({"Symbol": sym, "Inside Bar": ib})
-                st.dataframe(pd.DataFrame(scan_results), use_container_width=True)
+        colA, colB, colC = st.columns(3)
+        with colA:
+            st.subheader("📊 52W High/Low & Intraday")
+            if st.button("🔍 Scan Top NSE Stocks"):
+                with st.spinner("Analyzing Volatility..."):
+                    try:
+                        watch_list = ["RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS"]
+                        scan_results = []
+                        for ticker in watch_list:
+                            tk = yf.Ticker(ticker)
+                            hist_1y = tk.history(period="1y")
+                            if hist_1y.empty: continue
+                            high_52 = hist_1y['High'].max()
+                            low_52 = hist_1y['Low'].min()
+                            ltp = hist_1y['Close'].iloc[-1]
+                            intra = tk.history(period="5d", interval="5m")
+                            rating = "Neutral ⚖️"
+                            if not intra.empty:
+                                df_intra = intra.copy()
+                                df_intra['vwap'] = (df_intra['Close'] * df_intra['Volume']).cumsum() / df_intra['Volume'].cumsum()
+                                df_intra['ema9'] = df_intra['Close'].ewm(span=9).mean()
+                                df_intra['ema21'] = df_intra['Close'].ewm(span=21).mean()
+                                c, v, e9, e21 = df_intra['Close'].iloc[-1], df_intra['vwap'].iloc[-1], df_intra['ema9'].iloc[-1], df_intra['ema21'].iloc[-1]
+                                if c > e9 > e21 and c > v: rating = "Strong Buy 🚀"
+                                elif c > v and c > e21: rating = "Buy 🟢"
+                                elif c < e9 < e21 and c < v: rating = "Strong Sell 🩸"
+                                elif c < v and c < e21: rating = "Sell 🔴"
+                            scan_results.append({"Stock": ticker.replace(".NS", ""), "LTP": round(ltp, 2), "52W High": round(high_52, 2), "52W Low": round(low_52, 2), "Signal": rating})
+                        st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
+                    except: st.error("Scanner failed.")
+                        
+        with colB:
+            st.subheader(f"📡 Multi-Stock & Inside Bar")
+            if st.button("🔄 Scan Market"):
+                with st.spinner("Analyzing Watchlist..."):
+                    scan_results = []
+                    for sym in list(DEFAULT_LOTS.keys()):
+                        df = bot.get_historical_data("NSE", "99926000", symbol=sym, interval="1d" if not is_mkt_open else "5m")
+                        if df is not None and len(df) > 2:
+                            inside_bar = "Yes 🟡" if (df['high'].iloc[-1] <= df['high'].iloc[-2] and df['low'].iloc[-1] >= df['low'].iloc[-2]) else "No"
+                            scan_results.append({"Symbol": sym, "LTP": round(df['close'].iloc[-1], 2), "Inside Bar": inside_bar, "BTST/STBT": check_btst_stbt(df) if not is_mkt_open else "N/A"})
+                    st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
+
+        with colC:
+            st.subheader("🪙 Low Cap / Penny Stocks")
+            if st.button("🚀 Scan Penny Stocks"):
+                with st.spinner("Scanning penny stocks..."):
+                    penny_list = ["SUZLON.NS", "YESBANK.NS", "IDEA.NS", "JPPOWER.NS", "RPOWER.NS", "GTLINFRA.NS"]
+                    p_results = []
+                    for pt in penny_list:
+                        try:
+                            ptk = yf.Ticker(pt)
+                            phist = ptk.history(period="5d", interval="5m")
+                            if phist.empty: continue
+                            phist['vwap'] = (phist['Close'] * phist['Volume']).cumsum() / phist['Volume'].cumsum()
+                            c, v, e9 = phist['Close'].iloc[-1], phist['vwap'].iloc[-1], phist['Close'].ewm(span=9).mean().iloc[-1]
+                            sig = "Bullish 🟢" if (c > v and c > e9) else ("Bearish 🔴" if (c < v and c < e9) else "Neutral ⚖️")
+                            p_results.append({"Stock": pt.replace(".NS", ""), "LTP": round(c, 2), "Signal": sig})
+                        except: pass
+                    st.dataframe(pd.DataFrame(p_results), use_container_width=True, hide_index=True)
 
     with tab3:
         log_col, pnl_col = st.columns([1, 2])
@@ -825,10 +940,28 @@ components.html(
     const anchor = doc.getElementById('bottom-dock-anchor');
     if (anchor) {
         const wrapper = anchor.closest('.element-container').parentElement;
-        wrapper.style.position = 'fixed'; wrapper.style.bottom = '0px'; wrapper.style.left = '0px'; wrapper.style.width = '100%';
-        wrapper.style.zIndex = '999999'; wrapper.style.backgroundColor = 'rgba(255, 255, 255, 0.95)'; 
-        wrapper.style.padding = '10px 15px'; wrapper.style.borderTop = '1px solid #e2e8f0';
+        wrapper.style.position = 'fixed'; 
+        wrapper.style.bottom = '0px'; 
+        wrapper.style.left = '0px'; 
+        wrapper.style.width = '100%';
+        wrapper.style.zIndex = '999999'; 
+        wrapper.style.backgroundColor = 'rgba(255, 255, 255, 0.95)'; 
+        wrapper.style.padding = '10px 15px'; 
+        wrapper.style.borderTop = '1px solid #e2e8f0';
         wrapper.style.boxShadow = '0 -4px 6px -1px rgba(0, 0, 0, 0.1)';
+        
+        const row = wrapper.querySelector('[data-testid="stHorizontalBlock"]');
+        if (row) {
+            row.style.display = 'flex';
+            row.style.flexDirection = 'row';
+            row.style.flexWrap = 'nowrap';
+            row.style.gap = '5px';
+            const cols = row.querySelectorAll('[data-testid="column"]');
+            cols.forEach(c => { 
+                c.style.minWidth = '0'; 
+                c.style.flex = '1 1 0%'; 
+            });
+        }
     }
     </script>""", height=0)
 
