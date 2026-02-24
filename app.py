@@ -135,7 +135,7 @@ st.markdown("""
     [data-testid="metric-container"] label { color: #64748b !important; font-weight: 600 !important; }
     [data-testid="metric-container"] div { color: #0f111a !important; }
     
-    .main .block-container { padding-bottom: 120px !important; }
+    .main .block-container { padding-bottom: 20px !important; }
     
     .android-nav-btn button { 
         font-size: 1.2rem !important; padding: 4px 8px !important; border-radius: 8px !important; 
@@ -1203,15 +1203,12 @@ def cycle_strat():
 dock_html = """
 <style>
 .bottom-dock-container {
-    position: fixed !important;
-    bottom: 0px !important;
-    left: 0px !important;
-    width: 100vw !important;
-    z-index: 9999999 !important;
-    background-color: rgba(255, 255, 255, 0.95) !important;
-    border-top: 1px solid #e2e8f0 !important;
-    box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1) !important;
-    padding: 5px 0px !important;
+    opacity: 0 !important;
+    position: absolute !important;
+    bottom: -9999px !important;
+    pointer-events: none !important;
+    height: 0px !important;
+    overflow: hidden !important;
 }
 </style>
 <script>
