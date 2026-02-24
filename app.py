@@ -117,11 +117,16 @@ def save_trade(api_key, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 st.set_page_config(page_title="Pro Scalper Bot", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
+# CUSTOM APPLIIX + STREAMLIT CSS
 st.markdown("""
 <style>
+    /* Base Streamlit overrides */
     [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #0f111a; font-family: 'Inter', sans-serif; }
-    [data-testid="stHeader"] { background-color: #0284c7 !important; border-bottom: 2px solid #0369a1; }
-    [data-testid="stHeader"] * { color: #ffffff !important; }
+    
+    /* Hide Streamlit Header & Footer for Appliix Native Wrapper */
+    header[data-testid="stHeader"] { display: none !important; }
+    footer { display: none !important; }
+    
     [data-testid="stSidebar"] { background-color: #0284c7 !important; transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
     
@@ -131,23 +136,54 @@ st.markdown("""
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important;
     }
     
-    [data-testid="metric-container"] { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    [data-testid="metric-container"] label { color: #64748b !important; font-weight: 600 !important; }
-    [data-testid="metric-container"] div { color: #0f111a !important; }
-    
     .main .block-container { padding-bottom: 20px !important; }
     
-    .android-nav-btn button { 
-        font-size: 1.2rem !important; padding: 4px 8px !important; border-radius: 8px !important; 
-        background-color: transparent !important; border: none !important; box-shadow: none !important;
-        margin: 0 !important; min-height: 0px !important; line-height: 1 !important;
+    /* Smooth Font Rendering */
+    * { -webkit-font-smoothing: antialiased; letter-spacing: -0.01em; }
+
+    /* =========================================
+       NATIVE ANDROID SWIPEABLE TABS
+       ========================================= */
+    div[data-baseweb="tab-list"] {
+        display: flex !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        white-space: nowrap !important;
+        -webkit-overflow-scrolling: touch !important; 
+        border-bottom: 2px solid #e2e8f0 !important;
+        gap: 5px !important;
+        padding-bottom: 0px !important;
+        background-color: #ffffff !important;
+        -ms-overflow-style: none !important;  
+        scrollbar-width: none !important;  
     }
-    .android-nav-btn button:hover { background-color: rgba(2, 132, 199, 0.1) !important; }
+    div[data-baseweb="tab-list"]::-webkit-scrollbar { display: none !important; }
+    
+    div[data-baseweb="tab"] {
+        flex: 0 0 auto !important; 
+        white-space: nowrap !important;
+        padding: 12px 16px !important;
+        margin: 0 !important;
+        font-weight: 600 !important;
+        border-radius: 0px !important;
+        background: transparent !important;
+        border: none !important;
+    }
+
+    /* INVISIBLE BOTTOM DOCK FOR APPLIIX JS TRIGGERS */
+    .bottom-dock-container {
+        opacity: 0 !important;
+        position: absolute !important;
+        bottom: -9999px !important;
+        pointer-events: none !important;
+        height: 0px !important;
+        overflow: hidden !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-DEFAULT_LOTS = {"NIFTY": 25, "BANKNIFTY": 15, "SENSEX": 10, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "XAUUSD": 0.01, "EURUSD": 0.01, "BTCUSD": 0.01, "ETHUSD": 0.1, "SOLUSD": 1.0, "INDIA VIX": 1}
-YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", "NATURALGAS": "NG=F", "GOLD": "GC=F", "XAUUSD": "GC=F", "EURUSD": "EURUSD=X", "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD", "SOLUSD": "SOL-USD"}
+DEFAULT_LOTS = {"NIFTY": 25, "BANKNIFTY": 15, "SENSEX": 10, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30, "XAUUSD": 0.01, "EURUSD": 0.01, "BTCUSD": 0.01, "ETHUSD": 0.1, "SOLUSD": 1.0, "INDIA VIX": 1}
+YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", "NATURALGAS": "NG=F", "GOLD": "GC=F", "SILVER": "SI=F", "XAUUSD": "GC=F", "EURUSD": "EURUSD=X", "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD", "SOLUSD": "SOL-USD"}
 INDEX_SYMBOLS = {"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank", "SENSEX": "BSE SENSEX", "INDIA VIX": "INDIA VIX"}
 INDEX_TOKENS = {"NIFTY": ("NSE", "26000"), "BANKNIFTY": ("NSE", "26009"), "INDIA VIX": ("NSE", "26017"), "SENSEX": ("BSE", "99919000")}
 
@@ -443,7 +479,7 @@ class SniperBot:
 
     def get_live_price(self, exchange, symbol, token):
         if self.is_mock: 
-            base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "NATURALGAS": 145.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
+            base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
             base = base_prices.get(symbol, 500)
             return float(np.random.uniform(base - 10, base + 10))
             
@@ -509,7 +545,7 @@ class SniperBot:
         df.index = df['timestamp']
         return df
 
-    # --- NEW GREEK/OI SIMULATION ---
+    # --- GREEK/OI SIMULATION ---
     def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
         if not is_hero_zero or df is None or len(df) < 14: return True, ""
         
@@ -518,7 +554,6 @@ class SniperBot:
         body = abs(last['close'] - last['open'])
         
         # Proxies: High volume + large body near end of day = Gamma Blast Probability
-        # Low volume + small body = Theta Decay Risk
         if last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.5 and body > atr:
             if signal == "BUY_CE" and last['close'] > last['open']:
                 return True, "🔥 OI Support Shifted Up. Gamma Blast Probable!"
@@ -562,6 +597,7 @@ class SniperBot:
         closest_expiry = subset['expiry'].min()
         subset = subset[subset['expiry'] == closest_expiry]
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
+        
         # For Hero/Zero, target slightly lower premium (OTM)
         if self.settings.get("hero_zero"):
             candidates = subset[subset['strike'] > spot] if opt_type == "CE" else subset[subset['strike'] < spot]
@@ -597,6 +633,7 @@ class SniperBot:
                 exch, token = self.get_token_info(index)
                 is_mt5_asset = (exch == "MT5")
 
+                # SILVER included in commodity late cutoff
                 cutoff_time = dt.time(15, 15) if index not in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] else dt.time(23, 15)
                 if is_mt5_asset or self.is_mock: cutoff_time = dt.time(23, 59) 
                 
@@ -812,10 +849,31 @@ if not getattr(st.session_state, "bot", None):
         """, unsafe_allow_html=True)
         
         with st.container(border=True):
-            auth_mode = st.radio("Operating Mode", ["📝 Paper Trading", "⚡ Real Trading"], horizontal=True, label_visibility="collapsed")
+            auth_mode = st.radio("Operating Mode", ["📝 Paper Trading", "⚡ Real Trading", "👆 Quick Auth"], horizontal=True, label_visibility="collapsed")
             st.divider()
             
-            if auth_mode == "⚡ Real Trading":
+            if auth_mode == "👆 Quick Auth":
+                st.info("💡 **Quick Login:** Paste your API Key. The system will auto-fetch your Cloud profile to log you in instantly.")
+                API_KEY = st.text_input("Enter your API Key", type="password")
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("👆 Authenticate & Connect", type="primary", use_container_width=True):
+                    creds = load_creds(API_KEY)
+                    if creds and creds.get("client_id"):
+                        temp_bot = SniperBot(
+                            api_key=API_KEY, client_id=creds.get("client_id"), pwd=creds.get("pwd"), 
+                            totp_secret=creds.get("totp_secret"), mt5_acc=creds.get("mt5_acc"), 
+                            mt5_pass=creds.get("mt5_pass"), mt5_server=creds.get("mt5_server"), is_mock=False
+                        )
+                        with st.spinner("Authenticating via Cloud..."):
+                            if temp_bot.login():
+                                st.session_state.bot = temp_bot
+                                st.rerun()
+                            else:
+                                st.error("❌ Login Failed! API or TOTP Error.")
+                    else:
+                        st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
+                        
+            elif auth_mode == "⚡ Real Trading":
                 st.markdown("### 🇮🇳 Angel One Credentials")
                 API_KEY = st.text_input("SmartAPI Key", type="password", placeholder="Enter Angel One API Key")
                 creds = load_creds(API_KEY) if API_KEY else {}
@@ -869,20 +927,7 @@ if not getattr(st.session_state, "bot", None):
 else:
     bot = st.session_state.bot
     
-    head_c1, head_c2, head_c3 = st.columns([2, 1, 1])
-    with head_c1: st.markdown(f"**👤 Owner:** `{bot.client_name}` | **🔒 Session:** `{bot.user_hash}`")
-    with head_c2:
-        if st.button("☠️ KILL SWITCH", type="primary", use_container_width=True):
-            bot.state["is_running"] = False
-            if bot.state["active_trade"]: bot.state["manual_exit"] = True
-            st.toast("System Terminated & Trades Closed", icon="☠️")
-    with head_c3:
-        if st.button("Logout", use_container_width=True):
-            bot.state["is_running"] = False
-            st.session_state.clear()
-            st.rerun()
-
-    # --- SIDEBAR SETTINGS ---
+    # Hidden sidebar for desktop view, easily toggled by Appliix navigation drawer
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
         
@@ -925,6 +970,11 @@ else:
         HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Wait for Gamma Blast)", False)
         FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
         
+        if st.button("Logout", use_container_width=True):
+            bot.state["is_running"] = False
+            st.session_state.clear()
+            st.rerun()
+
         render_signature()
 
     bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, "user_lots": st.session_state.user_lots.copy()}
@@ -948,104 +998,174 @@ else:
     tab1, tab2, tab3, tab4 = st.tabs(["⚡ Live Dashboard", "🔎 Scanners", "📜 Reports", "🚀 Crypto & Forex Analysis"])
 
     with tab1:
-        st.markdown(f"**Live Account Balance:** `{bot.get_balance()}`")
+        # 1. BEAUTIFUL HEADER & BALANCE CARD
+        exch, _ = bot.get_token_info(INDEX)
+        term_type = "🌍 MT5 Forex Terminal" if exch == "MT5" else "🇮🇳 Angel One Options"
         
-        st.subheader(f"⚡: {INDEX}")
+        st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 12px; color: white; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <h2 style="margin: 0; color: white; font-weight: 800; letter-spacing: 1px;">⚡ {INDEX}</h2>
+                <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #bae6fd; font-weight: 500;">{term_type}</p>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
+                    <span style="font-size: 0.85rem; color: #e0f2fe;">Live Balance:</span><br>
+                    <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
-        c1, c2, c3 = st.columns([1, 1, 3])
+        # 2. ENGINE CONTROLS & STATUS
         is_running = bot.state["is_running"]
+        status_color = "#22c55e" if is_running else "#ef4444"
+        status_bg = "#f0fdf4" if is_running else "#fef2f2"
+        status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
         
+        st.markdown(f"""
+            <div style="text-align: center; padding: 10px; border-radius: 8px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px; letter-spacing: 0.5px;">
+                {status_text}
+            </div>
+        """, unsafe_allow_html=True)
+
+        c1, c2, c_kill = st.columns([2, 2, 1])
         with c1:
-            if st.button("▶️ START ENGINE", use_container_width=True, type="primary", disabled=is_running):
+            if st.button("▶️ START", use_container_width=True, type="primary", disabled=is_running):
                 bot.state["is_running"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
                 add_script_run_ctx(t)
                 t.start()
                 st.rerun()
         with c2:
-            if st.button("🛑 STOP ENGINE", use_container_width=True, disabled=not is_running):
+            if st.button("🛑 STOP", use_container_width=True, disabled=not is_running):
                 bot.state["is_running"] = False
                 st.rerun()
-        with c3:
-            if is_running: st.success(f"🟢 **ENGINE IS RUNNING** (Trades Today: {bot.state['trades_today']}/{MAX_TRADES})")
-            else: st.error("🛑 **ENGINE STOPPED**")
+        with c_kill:
+            if st.button("☠️", use_container_width=True):
+                bot.state["is_running"] = False
+                if bot.state["active_trade"]: bot.state["manual_exit"] = True
+                st.toast("System Terminated & Trades Closed", icon="☠️")
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric(f"LTP", f"{round(bot.state['spot'], 4)}")
-        m2.metric("SMC / Fib Filter", "Active" if bot.state['fib_data'] else "Wait")
-        m3.metric("Volatility (ATR)", f"{round(bot.state['atr'], 4)}")
-        m4.info(f"Sentiment: {bot.state['current_trend']}")
+        # 3. MODERN 2x2 METRICS GRID
+        ltp_val = round(bot.state['spot'], 4)
+        atr_val = round(bot.state['atr'], 4)
+        trend_val = bot.state['current_trend']
+        smc_val = "Active" if bot.state['fib_data'] else "Wait"
         
-        chart_col, trade_col = st.columns([3, 1])
+        st.markdown(f"""
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
+                <div style="background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">LTP</div>
+                    <div style="font-size: 1.3rem; color: #0f111a; font-weight: 800; margin-top: 4px;">{ltp_val}</div>
+                </div>
+                <div style="background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">Volatility (ATR)</div>
+                    <div style="font-size: 1.3rem; color: #0f111a; font-weight: 800; margin-top: 4px;">{atr_val}</div>
+                </div>
+                <div style="background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); grid-column: span 2;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">Market Sentiment</div>
+                    <div style="font-size: 1.1rem; color: #0ea5e9; font-weight: 800; margin-top: 4px;">{trend_val}</div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
-        with chart_col:
-            c_header_col1, c_header_col2, c_header_col3 = st.columns([2, 1, 1])
-            with c_header_col2: SHOW_CHART = st.toggle("📊 Enable Chart", True)
-            with c_header_col3: FULL_CHART = st.toggle("⛶ Large Mode", False)
+        # 4. ACTIVE TRADE TICKET (BEAUTIFUL UI)
+        st.markdown("### 🎯 Live Position")
+        daily_pnl = bot.state.get("daily_pnl", 0.0)
+        st.markdown(f"**Today's Realized PnL:** {'🟢' if daily_pnl >= 0 else '🔴'} `{round(daily_pnl, 2)}`")
+        
+        if bot.state["active_trade"]:
+            t = bot.state["active_trade"]
+            ltp = t.get('current_ltp', t['entry'])
+            pnl = t.get('floating_pnl', 0.0)
+            pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+            pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
+            pnl_sign = "+" if pnl >= 0 else ""
+            exec_type = "MT5 Spot" if t['exch'] == "MT5" else "Options"
+            buy_sell_color = "#22c55e" if t['type'] in ["CE", "BUY"] else "#ef4444"
             
-            if SHOW_CHART and bot.state["latest_data"] is not None:
-                chart_df = bot.state["latest_data"].copy()
-                chart_df['time'] = (pd.to_datetime(chart_df.index).astype('int64') // 10**9) - 19800
-                candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
-                
-                fib_lines = []
-                if not bot.state["active_trade"] and bot.state.get('fib_data'):
-                    fib = bot.state['fib_data']
-                    fib_lines = [
-                        {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
-                        {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Fib 0.5'},
-                        {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Fib 0.618'},
-                        {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
-                    ]
-                
-                chartOptions = {
-                    "height": 800 if FULL_CHART else 450,
-                    "layout": { "textColor": '#1e293b', "background": { "type": 'solid', "color": '#ffffff' } },
-                    "grid": { "vertLines": { "color": 'rgba(226, 232, 240, 0.8)' }, "horzLines": { "color": 'rgba(226, 232, 240, 0.8)' } },
-                    "crosshair": { "mode": 0 }, "timeScale": { "timeVisible": True, "secondsVisible": False }
-                }
-                
-                chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
-
-                if 'avwap' in chart_df.columns:
-                    avwap_data = chart_df[['time', 'avwap']].dropna().rename(columns={'avwap': 'value'}).to_dict('records')
-                    if avwap_data: chart_series.append({"type": 'Line', "data": avwap_data, "options": { "color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP' }})
-
-                if 'vwap' in chart_df.columns:
-                    vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
-                    if vwap_data: chart_series.append({"type": 'Line', "data": vwap_data, "options": { "color": '#ff9800', "lineWidth": 2, "title": 'VWAP' }})
-
-                ema_col = 'ema_fast' if 'ema_fast' in chart_df.columns else 'ema_short'
-                if ema_col in chart_df.columns:
-                    ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
-                    if ema_data: chart_series.append({"type": 'Line', "data": ema_data, "options": { "color": '#0ea5e9', "lineWidth": 2, "title": 'EMA' }})
-
-                renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
-
-        with trade_col:
-            st.markdown("### 🎯 Order Info")
-            daily_pnl = bot.state.get("daily_pnl", 0.0)
-            st.markdown(f"**Daily PnL:** {'🟢' if daily_pnl >= 0 else '🔴'} {round(daily_pnl, 2)}")
+            st.markdown(f"""
+                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 12px; padding: 16px; box-shadow: 0 6px 12px rgba(0,0,0,0.08); margin-bottom: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #f1f5f9; padding-bottom: 12px; margin-bottom: 12px;">
+                        <div>
+                            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;">{t['type']}</span>
+                            <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
+                        </div>
+                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 8px; font-weight: 900; font-size: 1.3rem; border: 1px solid {pnl_color};">
+                            {pnl_sign}{round(pnl, 2)}
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">
+                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br>
+                            <b style="font-size: 1.1rem; color: #0f111a;">{t['entry']:.4f}</b>
+                        </div>
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">
+                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Price</span><br>
+                            <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
+                        </div>
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">
+                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Quantity</span><br>
+                            <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem;">({exec_type})</span>
+                        </div>
+                        <div style="background: #fef2f2; padding: 10px; border-radius: 8px; border: 1px solid #fecaca;">
+                            <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Trail SL</span><br>
+                            <b style="font-size: 1.1rem; color: #ef4444;">{t['sl']:.4f}</b>
+                        </div>
+                    </div>
+                    <div style="background: #0f111a; padding: 10px; border-radius: 8px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700; letter-spacing: 0.5px;">
+                        🎯 TP1: {t.get('tp1', 0):.2f} &nbsp;|&nbsp; TP2: {t.get('tp2', 0):.2f} &nbsp;|&nbsp; TP3: {t.get('tp3', 0):.2f}
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
             
-            if bot.state["active_trade"]:
-                t = bot.state["active_trade"]
-                ltp = t.get('current_ltp', t['entry'])
-                pnl = t.get('floating_pnl', 0.0)
-                indicator = "🟢" if pnl >= 0 else "🔴"
-                
-                exec_type = "MT5 Direct Spot" if t['exch'] == "MT5" else "Options Contract"
-                st.success(f"**🟢 ACTIVE** ({exec_type})\n`{t['symbol']}`\nQty/Vol: {t['qty']}")
-                
-                cA, cB = st.columns(2)
-                cA.metric("Entry", f"{t['entry']:.4f}")
-                cB.metric("LTP", f"{ltp:.4f}", f"{indicator} {round(pnl, 2)}")
-                
-                st.info(f"🛑 **SL (Trailing):** `{t['sl']:.4f}`\n\n🎯 **TP1:** `{t.get('tp1', 0):.4f}`\n\n🎯 **TP2:** `{t.get('tp2', 0):.4f}`\n\n🎯 **TP3:** `{t.get('tp3', 0):.4f}`")
-                
-                if st.button("🛑 MANUAL EXIT NOW", type="primary", use_container_width=True):
-                    bot.state["manual_exit"] = True
-                    st.toast("Forcing trade closure...", icon="🛑")
-            else: st.info("Waiting for entry setup...")
+            if st.button("🛑 FORCE MANUAL EXIT", type="primary", use_container_width=True):
+                bot.state["manual_exit"] = True
+                st.toast("Forcing trade closure...", icon="🛑")
+        else:
+            st.info("⏳ Waiting for optimal entry setup...")
+
+        # 5. CHART SECTION
+        st.markdown("<br>### 📈 Live Market Chart", unsafe_allow_html=True)
+        c_h1, c_h2 = st.columns(2)
+        with c_h1: SHOW_CHART = st.toggle("📊 Show Chart", True)
+        with c_h2: FULL_CHART = st.toggle("⛶ Large Mode", False)
+        
+        if SHOW_CHART and bot.state["latest_data"] is not None:
+            chart_df = bot.state["latest_data"].copy()
+            chart_df['time'] = (pd.to_datetime(chart_df.index).astype('int64') // 10**9) - 19800
+            candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
+            
+            fib_lines = []
+            if not bot.state["active_trade"] and bot.state.get('fib_data'):
+                fib = bot.state['fib_data']
+                fib_lines = [
+                    {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
+                    {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Fib 0.5'},
+                    {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Fib 0.618'},
+                    {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
+                ]
+            
+            chartOptions = {
+                "height": 700 if FULL_CHART else 400,
+                "layout": { "textColor": '#1e293b', "background": { "type": 'solid', "color": '#ffffff' } },
+                "grid": { "vertLines": { "color": 'rgba(226, 232, 240, 0.8)' }, "horzLines": { "color": 'rgba(226, 232, 240, 0.8)' } },
+                "crosshair": { "mode": 0 }, "timeScale": { "timeVisible": True, "secondsVisible": False }
+            }
+            
+            chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
+
+            if 'avwap' in chart_df.columns:
+                avwap_data = chart_df[['time', 'avwap']].dropna().rename(columns={'avwap': 'value'}).to_dict('records')
+                if avwap_data: chart_series.append({"type": 'Line', "data": avwap_data, "options": { "color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP' }})
+
+            if 'vwap' in chart_df.columns:
+                vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
+                if vwap_data: chart_series.append({"type": 'Line', "data": vwap_data, "options": { "color": '#ff9800', "lineWidth": 2, "title": 'VWAP' }})
+
+            ema_col = 'ema_fast' if 'ema_fast' in chart_df.columns else 'ema_short'
+            if ema_col in chart_df.columns:
+                ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
+                if ema_data: chart_series.append({"type": 'Line', "data": ema_data, "options": { "color": '#0ea5e9', "lineWidth": 2, "title": 'EMA' }})
+
+            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
 
     with tab2:
         colA, colB, colC = st.columns(3)
@@ -1172,7 +1292,7 @@ else:
             st.subheader("📈 Directional Bias (BTC & Gold)")
             if st.button("Analyze BTC & XAUUSD 🔍", use_container_width=True):
                 with st.spinner("Analyzing Market Structure & EMAs..."):
-                    assets_to_check = {"Bitcoin (BTC-USD)": "BTC-USD", "Gold (XAUUSD)": "GC=F"}
+                    assets_to_check = {"Bitcoin (BTC-USD)": "BTC-USD", "Gold (XAUUSD)": "GC=F", "Silver (SI=F)": "SI=F"}
                     bias_results = []
                     for name, ticker in assets_to_check.items():
                         try:
@@ -1199,44 +1319,16 @@ def cycle_asset():
 def cycle_strat():
     st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
 
-# --- FIXED ANDROID-STYLE NAVIGATION DOCK ---
-dock_html = """
-<style>
-.bottom-dock-container {
-    opacity: 0 !important;
-    position: absolute !important;
-    bottom: -9999px !important;
-    pointer-events: none !important;
-    height: 0px !important;
-    overflow: hidden !important;
-}
-</style>
-<script>
-    function lockDock() {
-        const doc = window.parent.document;
-        const anchor = doc.getElementById('bottom-dock-anchor');
-        if (anchor) {
-            const wrapper = anchor.closest('.element-container').parentElement;
-            wrapper.classList.add('bottom-dock-container');
-        }
-    }
-    lockDock();
-    setTimeout(lockDock, 500);
-</script>
-"""
-components.html(dock_html, height=0)
-
+# --- INVISIBLE ANDROID-STYLE NAVIGATION DOCK FOR APPLIIX ---
 dock_container = st.container()
 with dock_container:
-    st.markdown('<div id="bottom-dock-anchor"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="android-nav-btn">', unsafe_allow_html=True)
+    st.markdown('<div id="bottom-dock-anchor" class="bottom-dock-container">', unsafe_allow_html=True)
     dock_c1, dock_c2, dock_c3 = st.columns(3)
     
     with dock_c1: 
         st.button("◀️", key="btn_back", on_click=cycle_asset, use_container_width=True)
     
     with dock_c2: 
-        # Secure Home/Refresh Button
         if st.button("🏠", key="btn_home", use_container_width=True): 
             st.rerun()
                     
