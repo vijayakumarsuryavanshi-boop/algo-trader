@@ -172,12 +172,10 @@ st.markdown("""
 
     /* INVISIBLE BOTTOM DOCK FOR APPLIIX JS TRIGGERS */
     .bottom-dock-container {
-        opacity: 0 !important;
-        position: absolute !important;
-        bottom: -9999px !important;
-        pointer-events: none !important;
-        height: 0px !important;
-        overflow: hidden !important;
+        position: fixed !important;
+        bottom: -500px !important; /* Pushed off the screen */
+        opacity: 0.01 !important;  /* Technically visible to the system, invisible to you */
+        z-index: -1 !important;    /* Hidden behind everything else */
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1340,3 +1338,4 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
