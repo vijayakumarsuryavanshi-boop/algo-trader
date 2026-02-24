@@ -934,6 +934,16 @@ else:
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
         st.markdown(f"**👤 User:** `{bot.client_name}`")
+    with head_c2:
+        if st.button("🚪 Logout", use_container_width=True):
+            bot.state["is_running"] = False
+            st.session_state.clear()
+            st.rerun()
+
+    # Hidden sidebar for desktop view, easily toggled by Appliix navigation drawer
+    with st.sidebar:
+        st.header("⚙️ SYSTEM CONFIGURATION")
+
    
 
     # Hidden sidebar for desktop view, easily toggled by Appliix navigation drawer
@@ -1346,6 +1356,7 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
 
 
