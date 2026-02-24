@@ -20,7 +20,8 @@ streamlit-lightweight-charts
 plyer
 XlsxWriter
 supabase
-MetaTrader5
+
+
 
 
 
