@@ -952,14 +952,6 @@ else:
     # --- 2. THE SIDEBAR (NOW UNIFIED) ---
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
-     
-        
-
-   
-
-    # Hidden sidebar for desktop view, easily toggled by Appliix navigation drawer
-    with st.sidebar:
-        st.header("⚙️ SYSTEM CONFIGURATION")
         
         st.markdown("**1. Market Setup**")
         if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
@@ -1367,6 +1359,7 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
 
 
