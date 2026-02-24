@@ -119,8 +119,19 @@ st.markdown("""
     [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #0f111a; font-family: 'Inter', sans-serif; }
     [data-testid="stHeader"] { background-color: #0284c7 !important; border-bottom: 2px solid #0369a1; }
     [data-testid="stHeader"] * { color: #ffffff !important; }
-    [data-testid="stSidebar"] { background-color: #0284c7 !important; }
+    
+    /* Animated & Smooth Scrolling Sidebar */
+    [data-testid="stSidebar"] { 
+        background-color: #0284c7 !important; 
+        transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+    }
+    [data-testid="stSidebar"] > div:first-child {
+        scroll-behavior: smooth;
+    }
+    [data-testid="stSidebar"]::-webkit-scrollbar { width: 6px; }
+    [data-testid="stSidebar"]::-webkit-scrollbar-thumb { background-color: #0369a1; border-radius: 10px; }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
+    
     div[data-baseweb="select"] > div, div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important;
     }
@@ -129,6 +140,10 @@ st.markdown("""
     [data-testid="metric-container"] div { color: #0f111a !important; }
     [data-testid="stTable"] th { background-color: #f1f5f9 !important; color: #0284c7 !important; border: 1px solid #e2e8f0 !important; }
     .main .block-container { padding-bottom: 120px; }
+    
+    /* Android Nav Dock Styling */
+    .android-nav-btn button { font-size: 1.5rem !important; padding: 10px !important; border-radius: 20px !important; background-color: transparent !important; border: none !important; box-shadow: none !important;}
+    .android-nav-btn button:hover { background-color: rgba(2, 132, 199, 0.1) !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -346,8 +361,20 @@ class SniperBot:
 
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
+        
+        # Windows Native
         if HAS_NOTIFY:
             try: notification.notify(title=title, message=message, app_name="Pro Scalper", timeout=5)
+            except: pass
+            
+        # Telegram
+        if self.tg_token and self.tg_chat:
+            try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
+            except: pass
+            
+        # WhatsApp (CallMeBot template)
+        if self.wa_phone and self.wa_api:
+            try: requests.get("https://api.callmebot.com/whatsapp.php", params={"phone": self.wa_phone, "text": f"{title}\n{message}", "apikey": self.wa_api}, timeout=3)
             except: pass
 
     def log(self, msg):
@@ -382,7 +409,6 @@ class SniperBot:
         if index_name in INDEX_TOKENS: return INDEX_TOKENS[index_name]
         df_map = self.get_master()
         if df_map is not None and not df_map.empty:
-            # FIX: Strip timezone awareness to avoid pandas comparison errors
             today_date = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
             futs = df_map[(df_map['name'] == index_name) & (df_map['instrumenttype'].isin(['FUTCOM', 'FUTIDX', 'FUTSTK', 'EQ']))]
             if not futs.empty:
@@ -464,7 +490,6 @@ class SniperBot:
         df = self.get_master()
         if df is None or df.empty: return None, None, None, 0.0
         
-        # FIX: Strip timezone awareness to avoid pandas comparison errors
         today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
         
         mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
@@ -595,7 +620,6 @@ class SniperBot:
                                 self.log(f"🛑 EXIT {trade['symbol']} | PnL: ₹{round(pnl, 2)} [{win_text}]")
                                 self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: ₹{round(pnl, 2)}")
                                 
-                                # ROUTE DATA BASED ON MODE
                                 if not self.is_mock:
                                     save_trade(self.api_key, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
                                 else:
@@ -650,23 +674,34 @@ if not st.session_state.bot:
             
             if auth_mode == "⚡ Real Trading":
                 API_KEY = st.text_input("SmartAPI Key (Required)", type="password", placeholder="Enter Angel One API Key")
-                if API_KEY:
-                    creds = load_creds(API_KEY)
-                    col_id, col_pin = st.columns(2)
-                    with col_id: CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
-                    with col_pin: PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
-                    
-                    TOTP = st.text_input("TOTP Secret", value=creds.get("totp_secret", ""), type="password")
-                    SAVE_CREDS = st.checkbox("Remember Credentials Securely (Cloud DB)", value=True)
-                    
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("CONNECT LIVE EXCHANGE 🚀", type="primary", use_container_width=True):
-                        temp_bot = SniperBot(API_KEY, CLIENT_ID, PIN, TOTP, is_mock=False)
-                        with st.spinner("Authenticating Secure Connection..."):
-                            if temp_bot.login():
-                                if SAVE_CREDS: save_creds(CLIENT_ID, PIN, TOTP, API_KEY, "", "", "", "")
-                                st.session_state.bot = temp_bot
-                                st.rerun()
+                creds = load_creds(API_KEY) if API_KEY else {}
+                
+                col_id, col_pin = st.columns(2)
+                with col_id: CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
+                with col_pin: PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
+                
+                TOTP = st.text_input("TOTP Secret", value=creds.get("totp_secret", ""), type="password")
+                
+                with st.expander("📱 Notification Settings (Telegram / WhatsApp)"):
+                    TG_TOKEN = st.text_input("Telegram Bot Token", value=creds.get("tg_token", ""))
+                    TG_CHAT = st.text_input("Telegram Chat ID", value=creds.get("tg_chat", ""))
+                    WA_PHONE = st.text_input("WhatsApp Phone (with country code)", value=creds.get("wa_phone", ""))
+                    WA_API = st.text_input("WhatsApp API Key (CallMeBot)", value=creds.get("wa_api", ""))
+
+                SAVE_CREDS = st.checkbox("Remember Credentials Securely (Cloud DB)", value=True)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("CONNECT LIVE EXCHANGE 🚀", type="primary", use_container_width=True):
+                    temp_bot = SniperBot(API_KEY, CLIENT_ID, PIN, TOTP, tg_token=TG_TOKEN, tg_chat=TG_CHAT, wa_phone=WA_PHONE, wa_api=WA_API, is_mock=False)
+                    with st.spinner("Authenticating Secure Connection..."):
+                        if temp_bot.login():
+                            if SAVE_CREDS: save_creds(CLIENT_ID, PIN, TOTP, API_KEY, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API)
+                            st.session_state.bot = temp_bot
+                            st.rerun()
+                        else:
+                            # Surface the error returned by the exchange properly!
+                            err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
+                            st.error(f"Login Failed! Please verify your API Key and TOTP sync. \n\n**System Log:** {err_msg}")
             else:
                 st.info("Paper Trading simulates live market movement without risking real capital.")
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -948,18 +983,19 @@ def cycle_asset():
 def cycle_strat():
     st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
 
+# --- ANDROID-STYLE NAVIGATION DOCK ---
 dock_container = st.container()
 with dock_container:
     st.markdown('<div id="bottom-dock-anchor"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="android-nav-btn">', unsafe_allow_html=True)
     dock_c1, dock_c2, dock_c3 = st.columns(3)
-    with dock_c1: st.button(f"🔄 Switch: {st.session_state.sb_index_input}", key="btn_asset_switch", on_click=cycle_asset, use_container_width=True)
-    with dock_c2: st.button(f"🧠 Strat: {st.session_state.sb_strat_input.split(' ')[0]}", key="btn_strat_switch", on_click=cycle_strat, use_container_width=True)
-    with dock_c3:
-        if st.button("👆 Quick Login", use_container_width=True):
-            if not st.session_state.bot:
-                temp_bot = SniperBot(is_mock=True)
-                temp_bot.login()
-                st.session_state.bot = temp_bot
+    with dock_c1: 
+        st.button("◀️", key="btn_back", on_click=cycle_asset, use_container_width=True, help="Switch Asset")
+    with dock_c2: 
+        if st.button("🏠", key="btn_home", use_container_width=True, help="Home / Refresh"): st.rerun()
+    with dock_c3: 
+        st.button("🔲", key="btn_recent", on_click=cycle_strat, use_container_width=True, help="Switch Strategy")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 components.html(
     """<script>
@@ -973,9 +1009,12 @@ components.html(
         wrapper.style.width = '100%';
         wrapper.style.zIndex = '999999'; 
         wrapper.style.backgroundColor = 'rgba(255, 255, 255, 0.95)'; 
-        wrapper.style.padding = '10px 15px'; 
+        wrapper.style.padding = '5px 15px'; 
         wrapper.style.borderTop = '1px solid #e2e8f0';
         wrapper.style.boxShadow = '0 -4px 6px -1px rgba(0, 0, 0, 0.1)';
+        wrapper.style.display = 'flex';
+        wrapper.style.justifyContent = 'space-around';
+        wrapper.style.alignItems = 'center';
     }
     </script>""", height=0)
 
