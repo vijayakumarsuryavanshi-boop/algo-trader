@@ -115,7 +115,7 @@ def save_trade(api_key, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CONFIG
 # ==========================================
-st.set_page_config(page_title="PRO SCALPER", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="ANGEL", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 # CUSTOM APPLIIX + STREAMLIT CSS
 st.markdown("""
@@ -398,7 +398,7 @@ class SniperBot:
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
         if HAS_NOTIFY:
-            try: notification.notify(title=title, message=message, app_name="Pro Scalper", timeout=5)
+            try: notification.notify(title=title, message=message, app_name="ANGEL", timeout=5)
             except: pass
         if self.tg_token and self.tg_chat:
             try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
@@ -585,7 +585,7 @@ class SniperBot:
                 request = {
                     "action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty),
                     "type": action_type, "price": price, "deviation": 20, "magic": 234000,
-                    "comment": "Pro Scalper Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC,
+                    "comment": "ANGEL Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC,
                 }
                 result = mt5.order_send(request)
                 if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -855,7 +855,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0b1120, #0284c7); padding: 20px; border-radius: 12px 12px 0 0; border: 1px solid #0284c7; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 800; letter-spacing: 2px;'>⚡ PRO SCALPER</h1>
+                <h1 style='color: white; margin:0; font-weight: 800; letter-spacing: 2px;'>⚡ ANGEL</h1>
                 <p style='color: #bae6fd; margin:0; font-size: 0.9rem;'>SECURE CLOUD GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -1359,6 +1359,7 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
 
 
