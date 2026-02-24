@@ -979,10 +979,7 @@ else:
         HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Wait for Gamma Blast)", False)
         FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
         
-        if st.button("Logout", use_container_width=True):
-            bot.state["is_running"] = False
-            st.session_state.clear()
-            st.rerun()
+        
 
         render_signature()
 
@@ -1349,6 +1346,7 @@ with dock_container:
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
     st.rerun()
+
 
 
 
