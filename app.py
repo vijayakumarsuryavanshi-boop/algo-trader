@@ -124,13 +124,11 @@ st.markdown("""
     [data-testid="metric-container"] label { color: #64748b !important; font-weight: 600 !important; font-size: 0.85rem !important; }
     [data-testid="metric-container"] div { color: #0f111a !important; font-size: 1.2rem !important; }
     
-    /* ADDED HUGE PADDING TO BOTTOM SO DOCK DOESN'T BLOCK TEXT/CHARTS */
-    .main .block-container { padding-bottom: 150px !important; padding-top: 1rem; }
+    /* Normal padding, nav is now naturally at the bottom */
+    .main .block-container { padding-bottom: 40px !important; padding-top: 1rem; }
     
-    /* Android Nav Dock Styling */
-    .android-nav-btn { display: flex; justify-content: space-around; padding: 2px; }
-    .android-nav-btn button { font-size: 1.1rem !important; padding: 8px !important; border-radius: 10px !important; background-color: #f1f5f9 !important; border: 1px solid #cbd5e1 !important; color: #0f111a !important; font-weight: bold !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;}
-    .android-nav-btn button:hover { background-color: #e2e8f0 !important; }
+    /* Button Styling */
+    div.stButton > button { font-weight: bold !important; border-radius: 8px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -138,7 +136,7 @@ DEFAULT_LOTS = {"NIFTY": 25, "BANKNIFTY": 15, "FINNIFTY": 25, "SENSEX": 20, "CRU
 FOREX_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "XAGUSD", "US30", "NAS100"]
 STRAT_LIST = ["Intraday Trend Rider", "All in One", "ICT", "Momentum Breakout + S&R", "Institutional FVG + SMC"]
 
-# --- CRITICAL FIX: Re-added missing state initialization ---
+# --- SAFELY INITIALIZE STATE ---
 if 'sb_index_input' not in st.session_state: st.session_state.sb_index_input = "NIFTY"
 if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
 if 'bot' not in st.session_state: st.session_state.bot = None
@@ -161,6 +159,9 @@ def get_angel_scrip_master():
         df['strike'] = pd.to_numeric(df['strike'], errors='coerce') / 100 
         return df
     except Exception: return pd.DataFrame()
+
+INDEX_TOKENS = {"NIFTY": ("NSE", "26000"), "BANKNIFTY": ("NSE", "26009"), "FINNIFTY": ("NSE", "26037"), "INDIA VIX": ("NSE", "26017"), "SENSEX": ("BSE", "99919000")}
+INDEX_SYMBOLS = {"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank", "FINNIFTY": "Nifty Fin Service", "SENSEX": "BSE SENSEX", "INDIA VIX": "INDIA VIX"}
 
 # ==========================================
 # 3. ADVANCED TECHNICAL ANALYZER 
@@ -329,7 +330,7 @@ class SniperBot:
         if self.is_mock: 
             self.client_name, self.api_key = "Paper Trading User", "mock_key_123"
             self.user_hash = get_user_hash(self.api_key)
-            self.state["balance"] = None # Hide false balance
+            self.state["balance"] = None 
             self.push_notify("🟢 Session Started", f"Paper Trading from IP: {self.client_ip}")
             return True
             
@@ -392,6 +393,9 @@ class SniperBot:
         return self.token_map
 
     def get_token_info(self, index_name):
+        # FIX: Hard cast to string to prevent any unexpected unhashable TypeErrors in Streamlit UI re-renders
+        index_name = str(index_name).strip() 
+        
         if self.is_forex: return "MT5", index_name
         if index_name in INDEX_TOKENS: return INDEX_TOKENS[index_name]
         df_map = self.get_master()
@@ -467,7 +471,27 @@ class SniperBot:
         return df
 
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
-        if self.is_mock or self.is_forex: return "MOCK_" + uuid.uuid4().hex[:6].upper()
+        if self.is_mock: return "MOCK_" + uuid.uuid4().hex[:6].upper()
+        
+        if self.is_forex and HAS_MT5:
+            try:
+                order_type = mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL
+                price = mt5.symbol_info_tick(symbol).ask if side == "BUY" else mt5.symbol_info_tick(symbol).bid
+                
+                request = {
+                    "action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty), "type": order_type,
+                    "price": price, "deviation": 20, "magic": 123456, "comment": "Pro Scalper Bot",
+                    "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC,
+                }
+                result = mt5.order_send(request)
+                if result.retcode != mt5.TRADE_RETCODE_DONE:
+                    self.log(f"❌ MT5 Order failed: {result.comment}")
+                    return None
+                return result.order
+            except Exception as e:
+                self.log(f"MT5 Execution Error: {e}")
+                return None
+
         try: return self.api.placeOrder({"variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token), "transactiontype": side, "exchange": exchange, "ordertype": "MARKET", "producttype": "INTRADAY", "duration": "DAY", "quantity": str(qty)})
         except Exception as e: 
             self.log(f"Order failed: {e}")
@@ -662,7 +686,6 @@ if not st.session_state.bot:
             auth_mode = st.radio("Operating Mode", ["📝 Paper Trading", "⚡ Real Trading", "🌍 Forex (MT5)"], horizontal=True, label_visibility="collapsed")
             st.divider()
             
-            # Fetch Last Saved Credentials
             saved_creds = get_default_creds()
             
             if auth_mode == "⚡ Real Trading":
@@ -693,7 +716,8 @@ if not st.session_state.bot:
                 st.info("Forex Login Window: Connects natively to MetaTrader 5 Terminal")
                 MT5_ID = st.text_input("MT5 Account ID (Login)", value=saved_creds.get("client_id", ""))
                 MT5_PASS = st.text_input("MT5 Password", type="password", value=saved_creds.get("pwd", ""))
-                MT5_SERVER = st.text_input("Broker Server Name", value="MetaQuotes-Demo")
+                saved_server = saved_creds.get("api_key", "")
+                MT5_SERVER = st.text_input("Broker Server Name", value=saved_server if saved_server else "MetaQuotes-Demo")
                 
                 if st.button("CONNECT FOREX 🚀", type="primary", use_container_width=True):
                     temp_bot = SniperBot(api_key=MT5_SERVER, client_id=MT5_ID, pwd=MT5_PASS, is_mock=False, is_forex=True)
@@ -717,7 +741,6 @@ if not st.session_state.bot:
 else:
     bot = st.session_state.bot
     
-    # Header Info & Logout
     head_c1, head_c2 = st.columns([4, 1])
     with head_c1: st.markdown(f"👤 `{bot.client_name}` | 🔒 `{bot.user_hash}`")
     with head_c2:
@@ -726,7 +749,6 @@ else:
             st.session_state.clear()
             st.rerun()
 
-    # --- TOP BAR CONTROLS (NO SIDEBAR) ---
     st.markdown("### ⚙️ Quick Controls")
     
     if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
@@ -734,23 +756,20 @@ else:
     if st.session_state.custom_stock and st.session_state.custom_stock not in asset_list: asset_list.append(st.session_state.custom_stock)
     
     st.session_state.asset_options = asset_list
-    
-    # CRITICAL FIX: Safe check for sb_index_input inside the current asset_list
     if getattr(st.session_state, 'sb_index_input', None) not in asset_list: 
         st.session_state.sb_index_input = asset_list[0]
         
-    if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
-
-    # Row 1: Dropdowns & Lots
     ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 2, 1, 1])
-    with ctrl_c1: INDEX = st.selectbox("Asset", asset_list, index=asset_list.index(st.session_state.sb_index_input), key="sb_index_input", label_visibility="collapsed")
-    with ctrl_c2: STRATEGY = st.selectbox("Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input", label_visibility="collapsed")
+    with ctrl_c1: INDEX = st.selectbox("Asset", asset_list, key="sb_index_input", label_visibility="collapsed")
+    with ctrl_c2: STRATEGY = st.selectbox("Strategy", STRAT_LIST, key="sb_strat_input", label_visibility="collapsed")
     with ctrl_c3: TIMEFRAME = st.selectbox("Timeframe", ["1m", "3m", "5m", "15m"], index=2, label_visibility="collapsed")
     with ctrl_c4: 
         if bot.is_forex: LOTS = st.number_input("Lots", min_value=0.01, step=0.01, format="%.2f", value=0.01, label_visibility="collapsed")
         else: LOTS = st.number_input("Lots", min_value=1, step=1, value=1, label_visibility="collapsed")
-        
-    # Row 2: Advanced Risk Settings (Inside Expander to save space)
+    
+    # HARD CAST FOR UI SAFETY
+    INDEX = str(INDEX).strip()
+
     with st.expander("🛠️ Advanced Settings & Risk Management"):
         st.markdown("**1. Risk Profile**")
         r_c1, r_c2, r_c3 = st.columns(3)
@@ -788,7 +807,7 @@ else:
 
     if not is_mkt_open and not bot.is_forex: st.error(f"😴 {mkt_status_msg}")
         
-    tab1, tab2, tab3 = st.tabs(["⚡ Live Dashboard", "🔎 Scanners", "📜 PnL Reports"])
+    tab1, tab2, tab3 = st.tabs(["⚡ Dashboard", "🔎 Scanners", "📜 Reports"])
 
     with tab1:
         c1, c2, c3 = st.columns([1, 1, 3])
@@ -806,8 +825,8 @@ else:
                 bot.state["is_running"] = False
                 st.rerun()
         with c3:
-            if is_running: st.success(f"🟢 **ENGINE IS RUNNING** ({INDEX} - Trades: {bot.state['trades_today']}/{MAX_TRADES})")
-            else: st.error(f"🛑 **ENGINE STOPPED** ({INDEX})")
+            if is_running: st.success(f"🟢 **RUNNING** ({INDEX} - Trades: {bot.state['trades_today']}/{MAX_TRADES})")
+            else: st.error(f"🛑 **STOPPED** ({INDEX})")
 
         m1, m2, m3, m4, m5 = st.columns(5)
         
@@ -985,32 +1004,19 @@ def cycle_asset():
 def cycle_strat():
     st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
 
-# --- SMALL ANDROID-STYLE NAVIGATION DOCK ---
-dock_container = st.container()
-with dock_container:
-    st.markdown('<div id="bottom-dock-anchor"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="android-nav-btn">', unsafe_allow_html=True)
-    dock_c1, dock_c2, dock_c3 = st.columns(3)
-    with dock_c1: st.button("🔄 Asset", key="btn_back", on_click=cycle_asset, use_container_width=True)
-    with dock_c2: 
-        if st.button("👆 Quick", key="btn_quick", use_container_width=True):
-            if not getattr(st.session_state, "bot", None):
-                temp_bot = SniperBot(is_mock=True)
-                temp_bot.login()
-                st.session_state.bot = temp_bot
-                st.rerun()
-    with dock_c3: st.button("🧠 Strat", key="btn_recent", on_click=cycle_strat, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-components.html(
-    """<script>
-    const doc = window.parent.document;
-    const anchor = doc.getElementById('bottom-dock-anchor');
-    if (anchor) {
-        const wrapper = anchor.closest('.element-container').parentElement;
-        wrapper.style.position = 'fixed'; wrapper.style.bottom = '0px'; wrapper.style.left = '0px'; wrapper.style.width = '100%'; wrapper.style.zIndex = '999999'; wrapper.style.backgroundColor = 'rgba(255, 255, 255, 0.95)'; wrapper.style.padding = '5px'; wrapper.style.borderTop = '1px solid #e2e8f0'; wrapper.style.boxShadow = '0 -2px 4px -1px rgba(0, 0, 0, 0.1)';
-    }
-    </script>""", height=0)
+# --- NATURAL BOTTOM NAVIGATION BAR ---
+st.divider()
+st.markdown("### 🧭 Mobile Navigation Navigation")
+dock_c1, dock_c2, dock_c3 = st.columns(3)
+with dock_c1: st.button("🔄 Asset", key="btn_back", on_click=cycle_asset, use_container_width=True)
+with dock_c2: 
+    if st.button("👆 Quick", key="btn_quick", use_container_width=True):
+        if not getattr(st.session_state, "bot", None):
+            temp_bot = SniperBot(is_mock=True)
+            temp_bot.login()
+            st.session_state.bot = temp_bot
+            st.rerun()
+with dock_c3: st.button("🧠 Strat", key="btn_recent", on_click=cycle_strat, use_container_width=True)
 
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
     time.sleep(2)
