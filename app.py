@@ -101,6 +101,22 @@ def get_usdt_inr_rate():
     except: pass
     return 86.50 # Fallback INR rate
 
+@st.cache_data(ttl=3600)
+def get_all_crypto_pairs():
+    """Dynamically fetches all available pairs from CoinDCX API for the dropdown."""
+    pairs = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "BNBUSD"]
+    try:
+        res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
+        for coin in res:
+            mkt = coin.get('market', '')
+            if mkt.endswith('USDT'):
+                # Standardize to USD for strategy engine (bot handles conversion to USDT for execution)
+                base = mkt.replace('USDT', 'USD')
+                if base not in pairs:
+                    pairs.append(base)
+    except: pass
+    return sorted(pairs)
+
 # ==========================================
 # 1. DATABASE FUNCTIONS 
 # ==========================================
@@ -152,7 +168,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS (SQUARE TABS & BUTTONS)
 # ==========================================
-st.set_page_config(page_title="SHRI OM", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHRI RAGHAVENDRA", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -168,60 +184,44 @@ st.markdown("""
     [data-testid="stSidebar"] * { color: #ffffff !important; }
     
     div[data-baseweb="select"] * { color: #0f111a !important; font-weight: 600 !important; }
-    div[data-baseweb="select"] { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important; }
+    div[data-baseweb="select"] { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 4px !important; }
     div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
-        color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important;
+        color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 4px !important;
     }
 
-    /* --- BEAUTIFUL SQUARE BUTTON TABS --- */
+    /* --- BEAUTIFUL SQUARE BUTTON TABS (Fixed for newer Streamlit DOM) --- */
     div[data-baseweb="tab-list"] { 
         display: flex !important; width: 100% !important; 
         background-color: transparent !important; 
         padding: 0 !important; gap: 12px !important; border: none !important; 
     }
-    div[data-baseweb="tab"] { 
+    /* Hide the thin blue default underline from Streamlit */
+    div[data-baseweb="tab-highlight"] { display: none !important; }
+    
+    /* Target the button element explicitly for tabs */
+    button[data-baseweb="tab"] { 
         flex: 1 !important; text-align: center !important; justify-content: center !important; 
         background: linear-gradient(135deg, #1e293b, #0f111a) !important; 
         color: #f8fafc !important; 
-        border-radius: 2px !important; /* SHARP SQUARE SHAPE */
+        border-radius: 4px !important; /* SHARP SQUARE SHAPE */
         font-weight: 800 !important; font-size: 0.95rem !important; 
         letter-spacing: 0.5px !important; padding: 14px 0 !important; margin: 0 !important; 
         border: 1px solid #334155 !important;
         box-shadow: 0 4px 6px rgba(0,0,0,0.15) !important;
         transition: all 0.2s ease-in-out !important; 
     }
-    div[data-baseweb="tab"]:hover { 
+    button[data-baseweb="tab"]:hover { 
         background: linear-gradient(135deg, #0ea5e9, #0284c7) !important; 
         color: #ffffff !important; 
         transform: translateY(-2px) !important; 
         box-shadow: 0 6px 12px rgba(2, 132, 199, 0.4) !important; 
     }
-    div[data-baseweb="tab"][aria-selected="true"] { 
+    button[data-baseweb="tab"][aria-selected="true"] { 
         background: linear-gradient(135deg, #22c55e, #16a34a) !important; /* VIBRANT GREEN FOR ACTIVE */
         color: #ffffff !important; 
         border: 1px solid #16a34a !important;
         box-shadow: 0 4px 15px rgba(34, 197, 94, 0.5) !important; 
         transform: translateY(-1px) !important; 
-    }
-
-    /* --- VIBRANT GLOWING SQUARE LOGOUT BUTTON --- */
-    /* Targeting the specific column containing the Logout button */
-    div[data-testid="column"]:nth-child(2) button {
-        background: linear-gradient(135deg, #ff416c, #ff4b2b) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 2px !important; /* Match Square Shape of Tabs */
-        font-weight: 900 !important;
-        font-size: 1rem !important;
-        letter-spacing: 1px !important;
-        box-shadow: 0 4px 15px rgba(255, 65, 108, 0.5) !important;
-        transition: all 0.2s ease;
-        padding: 14px 0 !important;
-        height: 100% !important;
-    }
-    div[data-testid="column"]:nth-child(2) button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(255, 65, 108, 0.7) !important;
     }
 
     .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
@@ -1199,8 +1199,8 @@ if not getattr(st.session_state, "bot", None):
     
     with login_col:
         st.markdown("""
-            <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 2px 2px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI OM</h1>
+            <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI RAGHAVENDRA</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -1347,8 +1347,26 @@ else:
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
         st.markdown(f"**👤 Session:** `<span style='color:#0284c7'>{bot.client_name}</span>` | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
+    
     with head_c2:
-        # Beautiful, glowing red/orange square logout button
+        # Applying aggressive CSS just for this specific column containing the Logout button
+        st.markdown("""
+        <style>
+        div[data-testid="column"]:nth-of-type(2) button {
+            background: linear-gradient(135deg, #ff416c, #ff4b2b) !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 4px !important; 
+            font-weight: 900 !important;
+            box-shadow: 0 4px 15px rgba(255, 65, 108, 0.5) !important;
+            transition: all 0.2s ease !important;
+        }
+        div[data-testid="column"]:nth-of-type(2) button:hover {
+            transform: scale(1.02) !important;
+            box-shadow: 0 6px 20px rgba(255, 65, 108, 0.7) !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         if st.button("🚪 LOGOUT", use_container_width=True):
             bot.state["is_running"] = False
             st.session_state.clear()
@@ -1371,10 +1389,17 @@ else:
             all_assets.append(CUSTOM_STOCK)
             st.session_state.user_lots[CUSTOM_STOCK] = 0.01 if len(CUSTOM_STOCK) == 6 or "USD" in CUSTOM_STOCK else 1 
         
-        if BROKER in ["Angel One", "Zerodha"]:
+        # --- DYNAMIC COINDCX PAIR INJECTION ---
+        if BROKER in ["CoinDCX", "Delta Exchange"]:
+            crypto_pairs = get_all_crypto_pairs()
+            valid_assets = [a for a in all_assets if ("USD" in a or "USDT" in a or "INR" in a)]
+            for p in crypto_pairs:
+                if p not in valid_assets:
+                    valid_assets.append(p)
+                if p not in st.session_state.user_lots:
+                    st.session_state.user_lots[p] = 1.0 # Base lot for newly fetched coins
+        elif BROKER in ["Angel One", "Zerodha"]:
             valid_assets = [a for a in all_assets if a in ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "INDIA VIX"] or ("USD" not in a and "USDT" not in a)]
-        elif BROKER in ["CoinDCX", "Delta Exchange"]:
-            valid_assets = [a for a in all_assets if a in ["BTCUSD", "ETHUSD", "SOLUSD"] or "USD" in a or "USDT" in a or "INR" in a]
         else: # MT5
             valid_assets = [a for a in all_assets if a in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", "SOLUSD"] or "USD" in a]
             
@@ -1448,7 +1473,6 @@ else:
 
     if not is_mkt_open: st.error(f"😴 {mkt_status_msg}")
         
-    # The CSS globally transforms these into colourful square buttons 
     tab1, tab2, tab3, tab4 = st.tabs(["⚡ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX"])
 
     with tab1:
@@ -1459,7 +1483,7 @@ else:
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
         
         st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 2px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
                 <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">⚡ {INDEX}</h2>
                 <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
@@ -1475,7 +1499,7 @@ else:
         status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
         
         st.markdown(f"""
-            <div style="text-align: center; padding: 10px; border-radius: 2px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px; letter-spacing: 0.5px;">
+            <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px; letter-spacing: 0.5px;">
                 {status_text}
             </div>
         """, unsafe_allow_html=True)
@@ -1511,15 +1535,15 @@ else:
         
         st.markdown(f"""
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
-                <div style="background: #ffffff; padding: 15px; border-radius: 2px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live Spot</div>
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
                 </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 2px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">ATR Base</div>
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{atr_val}</div>
                 </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 2px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Quant Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
@@ -1546,35 +1570,35 @@ else:
                 pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
             
             st.markdown(f"""
-                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 2px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
+                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
                         <div>
-                            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 2px; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;">{t['type']}</span>
+                            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;">{t['type']}</span>
                             <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
                         </div>
-                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 2px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
+                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
                             {pnl_display}
                         </div>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 2px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br>
                             <b style="font-size: 1.1rem; color: #0f111a;">{t['entry']:.4f}</b>
                         </div>
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 2px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br>
                             <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
                         </div>
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 2px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Lot / Qty</span><br>
                             <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span>
                         </div>
-                        <div style="background: #fef2f2; padding: 10px; border-radius: 2px; border: 1px solid #fecaca;">
+                        <div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;">
                             <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br>
                             <b style="font-size: 1.1rem; color: #ef4444;">{t['sl']:.4f}</b>
                         </div>
                     </div>
-                    <div style="background: #0f111a; padding: 10px; border-radius: 2px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700; letter-spacing: 0.5px;">
+                    <div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700; letter-spacing: 0.5px;">
                         🎯 TP1: {t.get('tp1', 0):.2f} &nbsp;|&nbsp; TP2: {t.get('tp2', 0):.2f} &nbsp;|&nbsp; TP3: {t.get('tp3', 0):.2f}
                     </div>
                 </div>
