@@ -102,7 +102,7 @@ def get_usdt_inr_rate():
     return 86.50 # Fallback INR rate
 
 # ==========================================
-# 1. DATABASE FUNCTIONS (UPDATED FOR EMAIL/PHONE)
+# 1. DATABASE FUNCTIONS 
 # ==========================================
 def get_user_hash(user_id):
     if not user_id: return "guest"
@@ -150,32 +150,79 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
         except: pass
 
 # ==========================================
-# 2. UI & CONFIG 
+# 2. UI & CUSTOM CSS (TABS & BUTTONS)
 # ==========================================
 st.set_page_config(page_title="SHRI RAGHAVENDRA", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
     [data-testid="stAppViewContainer"] { background-color: #f4f7f6; color: #0f111a; font-family: 'Inter', sans-serif; }
+    
     @media (max-width: 850px) {
         header[data-testid="stHeader"] { visibility: visible !important; height: auto !important; background-color: #0284c7 !important; }
         header[data-testid="stHeader"] svg { fill: white !important; }
         .main .block-container { padding-top: 50px !important; }
     }
+    
     [data-testid="stSidebar"] { background-color: #0284c7 !important; transition: all 0.4s ease; border-right: 1px solid #0369a1; }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
+    
     div[data-baseweb="select"] * { color: #0f111a !important; font-weight: 600 !important; }
-    div[data-baseweb="select"] { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important; }
+    div[data-baseweb="select"] { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 4px !important; }
     div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
-        color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important;
+        color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 4px !important;
     }
-    .main .block-container { padding-bottom: 20px !important; }
 
-    div[data-baseweb="tab-list"] { display: flex !important; width: 100% !important; background-color: #e2e8f0 !important; border-radius: 14px !important; padding: 6px !important; gap: 6px !important; border: none !important; }
-    div[data-baseweb="tab"] { flex: 1 !important; text-align: center !important; justify-content: center !important; background-color: transparent !important; color: #64748b !important; border-radius: 10px !important; font-weight: 700 !important; font-size: 0.95rem !important; letter-spacing: 0.5px !important; padding: 12px 0 !important; margin: 0 !important; border: none !important; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important; }
-    div[data-baseweb="tab"]:hover { color: #0284c7 !important; background-color: rgba(255,255,255,0.5) !important; }
-    div[data-baseweb="tab"][aria-selected="true"] { background-color: #ffffff !important; color: #0284c7 !important; box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important; transform: translateY(-1px) !important; }
-    .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 16px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
+    /* --- BEAUTIFUL SQUARE BUTTON TABS --- */
+    div[data-baseweb="tab-list"] { 
+        display: flex !important; width: 100% !important; 
+        background-color: transparent !important; 
+        padding: 0 !important; gap: 12px !important; border: none !important; 
+    }
+    div[data-baseweb="tab"] { 
+        flex: 1 !important; text-align: center !important; justify-content: center !important; 
+        background: linear-gradient(135deg, #1e293b, #0f111a) !important; 
+        color: #f8fafc !important; 
+        border-radius: 4px !important; /* SQUARE SHAPE */
+        font-weight: 800 !important; font-size: 0.95rem !important; 
+        letter-spacing: 0.5px !important; padding: 14px 0 !important; margin: 0 !important; 
+        border: 1px solid #334155 !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.15) !important;
+        transition: all 0.2s ease-in-out !important; 
+    }
+    div[data-baseweb="tab"]:hover { 
+        background: linear-gradient(135deg, #0ea5e9, #0284c7) !important; 
+        color: #ffffff !important; 
+        transform: translateY(-2px) !important; 
+        box-shadow: 0 6px 12px rgba(2, 132, 199, 0.4) !important; 
+    }
+    div[data-baseweb="tab"][aria-selected="true"] { 
+        background: linear-gradient(135deg, #22c55e, #16a34a) !important; /* VIBRANT GREEN FOR ACTIVE */
+        color: #ffffff !important; 
+        border: 1px solid #16a34a !important;
+        box-shadow: 0 4px 15px rgba(34, 197, 94, 0.5) !important; 
+        transform: translateY(-1px) !important; 
+    }
+
+    /* --- VIBRANT GLOWING SQUARE LOGOUT BUTTON --- */
+    /* Targeting the specific column containing the Logout button */
+    div[data-testid="column"]:nth-child(2) button {
+        background: linear-gradient(135deg, #ff416c, #ff4b2b) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important; /* Square Shape */
+        font-weight: 900 !important;
+        font-size: 1rem !important;
+        letter-spacing: 1px !important;
+        box-shadow: 0 4px 15px rgba(255, 65, 108, 0.5) !important;
+        transition: all 0.2s ease;
+    }
+    div[data-testid="column"]:nth-child(2) button:hover {
+        transform: scale(1.05) !important;
+        box-shadow: 0 6px 20px rgba(255, 65, 108, 0.7) !important;
+    }
+
+    .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
     .bottom-dock-container { position: fixed !important; bottom: -500px !important; opacity: 0.01 !important; z-index: -1 !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -214,12 +261,10 @@ def get_market_status():
     now_ist = get_ist()
     bot = getattr(st.session_state, 'bot', None)
     
-    # Identify if a 24/7 Crypto/Forex Broker is selected
     is_crypto_active = bot and (bot.coindcx_api or bot.delta_api or bot.is_mt5_connected)
     if is_crypto_active and bot.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange", "MT5"]:
         return True, "Crypto/Forex Live 🌍"
 
-    # Strict Indian Market Hours
     if now_ist.weekday() >= 5: return False, "Market Closed (Weekend)"
     if dt.time(9, 15) <= now_ist.time() <= dt.time(15, 30): return True, "Market Live 🟢"
     if dt.time(17, 00) <= now_ist.time() <= dt.time(23, 30): return True, "Commodity Live 🟠"
@@ -237,7 +282,7 @@ def get_angel_scrip_master():
     except Exception: return pd.DataFrame()
 
 # ==========================================
-# 3. ADVANCED TECHNICAL ANALYZER 
+# 3. ADVANCED TECHNICAL ANALYZER (RELAXED FOR MORE SIGNALS)
 # ==========================================
 class TechnicalAnalyzer:
     def get_atr(self, df, period=14):
@@ -252,7 +297,7 @@ class TechnicalAnalyzer:
         df = df.copy()
         df['vol_sma'] = df['volume'].rolling(20).mean()
         if is_index: df['vol_spike'] = True
-        else: df['vol_spike'] = df['volume'] > (df['vol_sma'] * 1.5) 
+        else: df['vol_spike'] = df['volume'] > (df['vol_sma'] * 1.1)  # Relaxed from 1.5
         
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -261,7 +306,8 @@ class TechnicalAnalyzer:
         
         atr = self.get_atr(df, 14)
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-        df['is_sideways'] = (df['rsi'].between(45, 55)) & (abs(df['close'] - df['ema21']) < (atr * 0.5))
+        # RELAXED SIDEWAYS: Tighter RSI bounds and smaller ATR requirement for breakout
+        df['is_sideways'] = (df['rsi'].between(48, 52)) & (abs(df['close'] - df['ema21']) < (atr * 0.3))
         df['inside_bar'] = (df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1))
         
         try:
@@ -283,8 +329,8 @@ class TechnicalAnalyzer:
         df = df.copy()
         df['body'] = abs(df['close'] - df['open'])
         avg_body = df['body'].rolling(10).mean()
-        strong_up = (df['close'] > df['open']) & (df['body'] > avg_body * 1.8)
-        strong_down = (df['close'] < df['open']) & (df['body'] > avg_body * 1.8)
+        strong_up = (df['close'] > df['open']) & (df['body'] > avg_body * 1.5) # Relaxed from 1.8
+        strong_down = (df['close'] < df['open']) & (df['body'] > avg_body * 1.5)
         bob_h, bob_l, beob_h, beob_l = 0.0, 0.0, 0.0, 0.0
         
         for i in range(len(df)-1, max(0, len(df)-50), -1):
@@ -328,16 +374,17 @@ class TechnicalAnalyzer:
 
         trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
 
-        mitigated_bull = (last['low'] <= latest_bull_top.iloc[-1]) and (last['low'] >= latest_bull_bot.iloc[-1] * 0.999)
-        bull_reversal = last['close'] > last['open'] and last['close'] > last['ema9']
+        # RELAXED ICT: Allows deeper wicks into FVG (0.995 instead of 0.999)
+        mitigated_bull = (last['low'] <= latest_bull_top.iloc[-1] * 1.002) and (last['low'] >= latest_bull_bot.iloc[-1] * 0.995)
+        bull_reversal = last['close'] > last['open'] # Removed strict ema9 requirement for entry to get in early
 
-        if mitigated_bull and bull_reversal and (last['ema9'] > last['ema21']) and (last['stoch_k'] > last['stoch_d']):
+        if mitigated_bull and bull_reversal and (last['stoch_k'] > last['stoch_d']):
             trend, signal = "ICT BULL FVG REVERSAL CONFIRMED 🟢", "BUY_CE"
 
-        mitigated_bear = (last['high'] >= latest_bear_bot.iloc[-1]) and (last['high'] <= latest_bear_top.iloc[-1] * 1.001)
-        bear_reversal = last['close'] < last['open'] and last['close'] < last['ema9']
+        mitigated_bear = (last['high'] >= latest_bear_bot.iloc[-1] * 0.998) and (last['high'] <= latest_bear_top.iloc[-1] * 1.005)
+        bear_reversal = last['close'] < last['open']
 
-        if mitigated_bear and bear_reversal and (last['ema9'] < last['ema21']) and (last['stoch_k'] < last['stoch_d']):
+        if mitigated_bear and bear_reversal and (last['stoch_k'] < last['stoch_d']):
             trend, signal = "ICT BEAR FVG REVERSAL CONFIRMED 🔴", "BUY_PE"
 
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
@@ -358,32 +405,26 @@ class TechnicalAnalyzer:
         df_ta = df.copy()
         df_ta.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
         
-        df_ta['EMA_5'] = ta.ema(df_ta['Close'], length=5)
         df_ta['EMA_13'] = ta.ema(df_ta['Close'], length=13)
         df_ta['EMA_21'] = ta.ema(df_ta['Close'], length=21)
-        df_ta['EMA_34'] = ta.ema(df_ta['Close'], length=34)
         df_ta['EMA_50'] = ta.ema(df_ta['Close'], length=50)
-        df_ta['EMA_72'] = ta.ema(df_ta['Close'], length=72)
-        
-        df_ta['HMA_9'] = ta.hma(df_ta['Close'], length=9)
         df_ta['HMA_21'] = ta.hma(df_ta['Close'], length=21)
         
         adx_df = ta.adx(df_ta['High'], df_ta['Low'], df_ta['Close'], length=14)
         df_ta['ADX'] = adx_df['ADX_14'] if adx_df is not None else 0
-        df_ta['is_choppy'] = df_ta['ADX'] < 20
-
+        
+        # RELAXED VIJAY RFF: Lowered ADX threshold from 20 to 15, Volume requirement from 1.3 to 0.9
+        df_ta['is_choppy'] = df_ta['ADX'] < 15
+        
         sti = ta.supertrend(df_ta['High'], df_ta['Low'], df_ta['Close'], length=10, multiplier=2.0)
         df_ta['SuperTrend_Dir'] = sti['SUPERTd_10_2.0'] if sti is not None else 1
-        
-        df_ta['RSI_ta'] = ta.rsi(df_ta['Close'], length=14)
-        df_ta['RSI_SMA'] = ta.sma(df_ta['RSI_ta'], length=9)
         
         df_ta['VWAP'] = ta.vwap(df_ta['High'], df_ta['Low'], df_ta['Close'], df_ta['Volume'])
         if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all():
             df_ta['VWAP'] = df_ta['Close']
             
         df_ta['Vol_SMA'] = ta.sma(df_ta['Volume'], length=20)
-        df_ta['is_strong_vol'] = df_ta['Volume'] > (df_ta['Vol_SMA'] * 1.3)
+        df_ta['is_strong_vol'] = df_ta['Volume'] >= (df_ta['Vol_SMA'] * 0.9)
         
         df_ta['Buy_Signal'] = False
         df_ta['Sell_Signal'] = False
@@ -391,8 +432,9 @@ class TechnicalAnalyzer:
         bull_trend = (df_ta['Close'] > df_ta['HMA_21']) & (df_ta['Close'] > df_ta['VWAP'])
         bear_trend = (df_ta['Close'] < df_ta['HMA_21']) & (df_ta['Close'] < df_ta['VWAP'])
         
-        osv2_buy = (df_ta['SuperTrend_Dir'] == 1) & (df_ta['Close'] > df_ta['EMA_50'])
-        osv2_sell = (df_ta['SuperTrend_Dir'] == -1) & (df_ta['Close'] < df_ta['EMA_50'])
+        # RELAXED: Use faster EMA_21 instead of EMA_50 for early breakout detection
+        osv2_buy = (df_ta['SuperTrend_Dir'] == 1) & (df_ta['Close'] > df_ta['EMA_21'])
+        osv2_sell = (df_ta['SuperTrend_Dir'] == -1) & (df_ta['Close'] < df_ta['EMA_21'])
 
         df_ta.loc[(bull_trend) & (osv2_buy) & (~df_ta['is_choppy']) & (df_ta['is_strong_vol']), 'Buy_Signal'] = True
         df_ta.loc[(bear_trend) & (osv2_sell) & (~df_ta['is_choppy']) & (df_ta['is_strong_vol']), 'Sell_Signal'] = True
@@ -413,7 +455,7 @@ class TechnicalAnalyzer:
             signal = "BUY_PE"
             trend = "VIJAY_RFF BEAR DOWNTREND 🔴"
         elif last['is_choppy']:
-            trend = "CHOPPY MARKET 🟡 (ADX < 20)"
+            trend = "CHOPPY MARKET 🟡 (ADX < 15)"
             
         return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data
 
@@ -433,18 +475,22 @@ class TechnicalAnalyzer:
         last, prev = df.iloc[-1], df.iloc[-2]
         signal, trend = "WAIT", "RANGING 🟡"
         
+        # RELAXED: RSI > 50 (instead of 55) and removed strict vol_spike logic for faster entries
         if last['ema_fast'] > last['ema_trend'] and last['close'] > last['vwap']:
             trend = "STRONG UPTREND 🟢"
-            if last['close'] > prev['high'] and last['rsi'] > 55:
-                if (smc_blocks['bob_high'] != 0.0 and last['close'] > smc_blocks['bob_high']) or last.get('vol_spike', False):
-                    signal, trend = "BUY_CE", "SMC/VOL UPTREND CONFIRMED 🚀"
-                else: trend = "UPTREND (Awaiting Base/Volume) ⏳"
+            if last['close'] > prev['high'] and last['rsi'] > 50:
+                if smc_blocks['bob_high'] != 0.0 and last['close'] > smc_blocks['bob_high']:
+                    signal, trend = "BUY_CE", "SMC UPTREND CONFIRMED 🚀"
+                else: 
+                    signal, trend = "BUY_CE", "EARLY UPTREND RIDER 🚀"
         elif last['ema_fast'] < last['ema_trend'] and last['close'] < last['vwap']:
             trend = "STRONG DOWNTREND 🔴"
-            if last['close'] < prev['low'] and last['rsi'] < 45:
-                if (smc_blocks['beob_low'] != 0.0 and last['close'] < smc_blocks['beob_low']) or last.get('vol_spike', False):
-                    signal, trend = "BUY_PE", "SMC/VOL DOWNTREND CONFIRMED 🩸"
-                else: trend = "DOWNTREND (Awaiting Base/Volume) ⏳"
+            if last['close'] < prev['low'] and last['rsi'] < 50:
+                if smc_blocks['beob_low'] != 0.0 and last['close'] < smc_blocks['beob_low']:
+                    signal, trend = "BUY_PE", "SMC DOWNTREND CONFIRMED 🩸"
+                else: 
+                    signal, trend = "BUY_PE", "EARLY DOWNTREND RIDER 🩸"
+                    
         return trend, signal, last['vwap'], last['ema_fast'], df, atr, fib_data
 
     def apply_vwap_ema_strategy(self, df, index_name="NIFTY"):
@@ -459,10 +505,14 @@ class TechnicalAnalyzer:
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
         last = df.iloc[-1]
         signal, trend = "WAIT", "FLAT"
-        if not last['is_sideways']:
-            benchmark = last['ema_long'] if is_index else last['vwap']
-            if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark): trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
-            elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark): trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
+        
+        # RELAXED: Dropped 'is_sideways' block, rely only on direct Momentum and RSI alignment
+        benchmark = last['ema_long'] if is_index else last['vwap']
+        if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark) and last['rsi'] > 50: 
+            trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
+        elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark) and last['rsi'] < 50: 
+            trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
+            
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data
 
 # ==========================================
@@ -565,7 +615,6 @@ class SniperBot:
             return True
         
         success = False
-        # Angel One
         if self.api_key and self.totp_secret:
             try:
                 obj = SmartConnect(api_key=self.api_key)
@@ -578,7 +627,6 @@ class SniperBot:
                 else: self.log(f"❌ Angel Login failed: {res.get('message', 'Check credentials')}")
             except Exception as e: self.log(f"❌ Angel Login Exception: {e}")
 
-        # Zerodha
         if self.zerodha_api and self.zerodha_secret and self.request_token and HAS_ZERODHA:
             try:
                 self.kite = KiteConnect(api_key=self.zerodha_api)
@@ -588,7 +636,6 @@ class SniperBot:
                 success = True
             except Exception as e: self.log(f"❌ Zerodha Exception: {e}")
 
-        # MT5
         if self.mt5_acc and self.mt5_server and HAS_MT5:
             try:
                 if mt5.initialize():
@@ -600,7 +647,6 @@ class SniperBot:
                 else: self.log(f"❌ MT5 Init failed: {mt5.last_error()}")
             except Exception as e: self.log(f"❌ MT5 Exception: {e}")
 
-        # CoinDCX & Delta
         if self.coindcx_api and self.coindcx_secret:
             self.log(f"✅ CoinDCX Credentials Loaded")
             success = True
@@ -671,7 +717,6 @@ class SniperBot:
             
         if exchange == "DELTA" and self.delta_api:
             try:
-                # Delta uses perpetual names primarily like BTCUSD or BTCUSDT
                 target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
                 res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={target}").json()
                 if res.get('success'): 
@@ -762,15 +807,15 @@ class SniperBot:
         body = abs(last['close'] - last['open'])
         vol_sma = df['volume'].rolling(20).mean().iloc[-1]
         
-        # THETA DECAY CHECK: Block if market consolidates < 1.5x ATR
+        # RELAXED THETA DECAY CHECK: Block if range is < 1.0x ATR (instead of 1.5x)
         recent_range = df['high'].rolling(5).max().iloc[-1] - df['low'].rolling(5).min().iloc[-1]
-        is_choppy = recent_range < (atr * 1.5)
+        is_choppy = recent_range < (atr * 1.0)
         
         if is_choppy and last['volume'] < vol_sma:
             return False, "⚠️ Blocked: Consolidating Market. High Theta Decay Risk."
             
-        # GAMMA BLAST CHECK: Sudden volume expansion + directional push
-        if last['volume'] > (vol_sma * 1.5) and body > (atr * 0.8):
+        # RELAXED GAMMA BLAST CHECK: Volume > 1.2x SMA and Body > 0.5x ATR
+        if last['volume'] > (vol_sma * 1.2) and body > (atr * 0.5):
             if signal == "BUY_CE" and last['close'] > last['open']: 
                 return True, "🔥 Gamma Blast Detected! Buying OTM Bottom."
             elif signal == "BUY_PE" and last['close'] < last['open']: 
@@ -782,12 +827,11 @@ class SniperBot:
         if self.is_mock: return "MOCK_" + uuid.uuid4().hex[:6].upper()
         broker = self.settings.get("primary_broker", "Angel One")
         
-        # Real Order Indian Broker Fix: Force purely to integer string to prevent 25.0 error
+        # Indian Exchanges require Integer string for quantity
         formatted_qty = str(int(float(qty))) if exchange in ["NFO", "NSE", "BFO", "MCX"] else str(qty)
         
         if exchange == "DELTA":
             try:
-                # Delta uses exact derivative names for orders
                 target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
                 payload = {"product_id": target, "size": int(float(qty)), "side": "buy" if side == "BUY" else "sell", "order_type": "market"}
                 payload_str = json.dumps(payload)
@@ -950,7 +994,7 @@ class SniperBot:
                     if s.get("fomo_entry"):
                         body = abs(last_candle['close'] - last_candle['open'])
                         avg_body = df_candles['close'].diff().abs().rolling(14).mean().iloc[-1]
-                        if body > (avg_body * 3) and last_candle.get('vol_spike', False):
+                        if body > (avg_body * 2.5) and last_candle.get('vol_spike', False): # Relaxed from 3x
                             signal = "BUY_CE" if last_candle['close'] > last_candle['open'] else "BUY_PE"
                             trend = "🚨 FOMO BREAKOUT ACTIVE"
                             if self.state["active_trade"] is None:
@@ -1144,7 +1188,7 @@ if not getattr(st.session_state, "bot", None):
     
     with login_col:
         st.markdown("""
-            <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 20px 20px 0 0; border-bottom: none;'>
+            <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
                 <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI RAGHAVENDRA</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
@@ -1288,12 +1332,13 @@ if not getattr(st.session_state, "bot", None):
 else:
     bot = st.session_state.bot
     
-    # --- 1. TOP HEADER ---
+    # --- 1. TOP HEADER & LOGOUT ---
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
         st.markdown(f"**👤 Session:** `<span style='color:#0284c7'>{bot.client_name}</span>` | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
     with head_c2:
-        if st.button("🚪 Logout", use_container_width=True):
+        # Beautiful, colorful, glowing square logout button applied perfectly here via exact column targeting
+        if st.button("🚪 LOGOUT", use_container_width=True):
             bot.state["is_running"] = False
             st.session_state.clear()
             st.rerun()
@@ -1392,7 +1437,8 @@ else:
 
     if not is_mkt_open: st.error(f"😴 {mkt_status_msg}")
         
-    tab1, tab2, tab3, tab4 = st.tabs(["⚡ Dashboard", "🔎 Deep Scanners", "📜 Server Logs", "🚀 Crypto & FX"])
+    # The CSS globally transforms these into colourful square buttons 
+    tab1, tab2, tab3, tab4 = st.tabs(["⚡ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX"])
 
     with tab1:
         exch, _ = bot.get_token_info(INDEX)
@@ -1402,7 +1448,7 @@ else:
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
         
         st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 12px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
                 <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">⚡ {INDEX}</h2>
                 <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
@@ -1418,7 +1464,7 @@ else:
         status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
         
         st.markdown(f"""
-            <div style="text-align: center; padding: 10px; border-radius: 8px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px; letter-spacing: 0.5px;">
+            <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px; letter-spacing: 0.5px;">
                 {status_text}
             </div>
         """, unsafe_allow_html=True)
@@ -1445,7 +1491,6 @@ else:
         atr_val = round(bot.state['atr'], 4)
         trend_val = bot.state['current_trend']
         
-        # Crypto INR Conversion Display
         currency_sym = "$" if exch in ["MT5", "DELTA", "COINDCX"] else "₹"
         if exch in ["DELTA", "COINDCX"] and SHOW_INR_CRYPTO:
             inr_val = ltp_val * get_usdt_inr_rate()
@@ -1455,15 +1500,15 @@ else:
         
         st.markdown(f"""
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
-                <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live Spot</div>
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
                 </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">ATR Base</div>
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{atr_val}</div>
                 </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Quant Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
@@ -1490,35 +1535,35 @@ else:
                 pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
             
             st.markdown(f"""
-                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 12px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
+                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
                         <div>
-                            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;">{t['type']}</span>
+                            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;">{t['type']}</span>
                             <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
                         </div>
-                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 8px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
+                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
                             {pnl_display}
                         </div>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br>
                             <b style="font-size: 1.1rem; color: #0f111a;">{t['entry']:.4f}</b>
                         </div>
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br>
                             <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
                         </div>
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Lot / Qty</span><br>
                             <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span>
                         </div>
-                        <div style="background: #fef2f2; padding: 10px; border-radius: 8px; border: 1px solid #fecaca;">
+                        <div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;">
                             <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br>
                             <b style="font-size: 1.1rem; color: #ef4444;">{t['sl']:.4f}</b>
                         </div>
                     </div>
-                    <div style="background: #0f111a; padding: 10px; border-radius: 8px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700; letter-spacing: 0.5px;">
+                    <div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700; letter-spacing: 0.5px;">
                         🎯 TP1: {t.get('tp1', 0):.2f} &nbsp;|&nbsp; TP2: {t.get('tp2', 0):.2f} &nbsp;|&nbsp; TP3: {t.get('tp3', 0):.2f}
                     </div>
                 </div>
