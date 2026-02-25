@@ -1407,17 +1407,23 @@ else:
             </div>
         """, unsafe_allow_html=True)
 
-        c1, c2, c_kill = st.columns([2, 2, 1])
+       c1, c2, c_kill = st.columns([2, 2, 1])
         with c1:
             if st.button("▶️ FIRE ENGINE", use_container_width=True, type="primary", disabled=is_running):
+                # Play Start Sound (High pitch beep)
+                components.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/button-09.mp3" type="audio/mpeg"></audio>""", height=0)
                 bot.state["is_running"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
                 add_script_run_ctx(t)
                 t.start()
+                time.sleep(0.5) # Give the sound a millisecond to play before rerunning
                 st.rerun()
         with c2:
             if st.button("🛑 HALT ENGINE", use_container_width=True, disabled=not is_running):
+                # Play Stop Sound (Low pitch beep)
+                components.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/button-10.mp3" type="audio/mpeg"></audio>""", height=0)
                 bot.state["is_running"] = False
+                time.sleep(0.5)
                 st.rerun()
         with c_kill:
             if st.button("☠️", use_container_width=True):
@@ -1706,3 +1712,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
