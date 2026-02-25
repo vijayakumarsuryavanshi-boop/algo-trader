@@ -94,9 +94,8 @@ def generate_delta_signature(method, endpoint, payload_string, secret):
     return timestamp, signature
 
 # ==========================================
-# 1. DATABASE FUNCTIONS (UPDATED FOR EMAIL/PHONE)
+# 1. DATABASE FUNCTIONS
 # ==========================================
-# Note: Ensure your Supabase 'user_credentials' and 'trade_logs' tables have a 'user_id' and 'angel_api' column.
 def get_user_hash(user_id):
     if not user_id: return "guest"
     return hashlib.md5(user_id.encode()).hexdigest()[:8]
@@ -143,13 +142,13 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
         except: pass
 
 # ==========================================
-# 2. UI & CONFIG (CLEAN ANGEL THEME + MODERN TABS)
+# 2. UI & CONFIG (CLEAN THEME + MODERN TABS)
 # ==========================================
-st.set_page_config(page_title="SHRI RAGHAVENDRA", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHRI OM", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
-    /* Clean Angel Theme */
+    /* Clean Theme */
     [data-testid="stAppViewContainer"] { background-color: #f4f7f6; color: #0f111a; font-family: 'Inter', sans-serif; }
     
     @media (max-width: 850px) {
@@ -525,7 +524,7 @@ class SniperBot:
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
         if HAS_NOTIFY:
-            try: notification.notify(title=title, message=message, app_name="QUANT", timeout=5)
+            try: notification.notify(title=title, message=message, app_name="SHRI OM", timeout=5)
             except: pass
         if self.tg_token and self.tg_chat:
             try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
@@ -832,7 +831,7 @@ class SniperBot:
                 action_type = mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL
                 tick = mt5.symbol_info_tick(symbol)
                 price = tick.ask if side == "BUY" else tick.bid
-                request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty), "type": action_type, "price": price, "deviation": 20, "magic": 234000, "comment": "QUANT Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
+                request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty), "type": action_type, "price": price, "deviation": 20, "magic": 234000, "comment": "SHRI OM Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
                 result = mt5.order_send(request)
                 if result.retcode != mt5.TRADE_RETCODE_DONE: self.log(f"❌ MT5 Order Failed: {result.comment}"); return None
                 return result.order
@@ -1129,7 +1128,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 20px 20px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI RAGHAVENDRA</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI OM TERMINAL</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -1179,10 +1178,10 @@ if not getattr(st.session_state, "bot", None):
                 DCX_API, DCX_SEC = "", ""
                 DELTA_API, DELTA_SEC = "", ""
 
-           # --- ANGEL ONE BOX ---
+                # --- ANGEL ONE BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
+                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=angelone.in&sz=128"></div>', unsafe_allow_html=True)
                     with col_t: use_angel = st.toggle("Angel One India", value=bool(creds.get("client_id")))
                     if use_angel:
                         ANGEL_API = st.text_input("Angel API Key", value=creds.get("angel_api", ""))
@@ -1194,7 +1193,7 @@ if not getattr(st.session_state, "bot", None):
                 # --- ZERODHA BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=zerodha.com&sz=128", width=40)
+                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=zerodha.com&sz=128"></div>', unsafe_allow_html=True)
                     with col_t: use_zerodha = st.toggle("Zerodha Kite", value=bool(creds.get("zerodha_api")))
                     if use_zerodha:
                         Z_API = st.text_input("Kite API Key", value=creds.get("zerodha_api", ""))
@@ -1204,7 +1203,7 @@ if not getattr(st.session_state, "bot", None):
                 # --- COINDCX BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=coindcx.com&sz=128", width=40)
+                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=coindcx.com&sz=128"></div>', unsafe_allow_html=True)
                     with col_t: use_coindcx = st.toggle("CoinDCX Crypto", value=bool(creds.get("coindcx_api")))
                     if use_coindcx:
                         DCX_API = st.text_input("CoinDCX API Key", value=creds.get("coindcx_api", ""))
@@ -1213,7 +1212,7 @@ if not getattr(st.session_state, "bot", None):
                 # --- DELTA EXCHANGE BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=delta.exchange&sz=128", width=40)
+                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=delta.exchange&sz=128"></div>', unsafe_allow_html=True)
                     with col_t: use_delta = st.toggle("Delta Exchange", value=bool(creds.get("delta_api")))
                     if use_delta:
                         DELTA_API = st.text_input("Delta API Key", value=creds.get("delta_api", ""))
@@ -1222,13 +1221,14 @@ if not getattr(st.session_state, "bot", None):
                 # --- MT5 BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128", width=40)
+                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128"></div>', unsafe_allow_html=True)
                     with col_t: use_mt5 = st.toggle("MetaTrader 5 (MT5)", value=bool(creds.get("mt5_acc")))
                     if use_mt5:
                         col_m1, col_m2 = st.columns(2)
                         with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
                         with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
                         MT5_SERVER = st.text_input("MT5 Server", value=creds.get("mt5_server", ""))
+
                 st.divider()
                 with st.expander("📱 Notifications (Telegram/WhatsApp)"):
                     TG_TOKEN = st.text_input("Telegram Bot Token", value=creds.get("tg_token", ""))
@@ -1407,20 +1407,18 @@ else:
             </div>
         """, unsafe_allow_html=True)
 
-       c1, c2, c_kill = st.columns([2, 2, 1])
+        c1, c2, c_kill = st.columns([2, 2, 1])
         with c1:
             if st.button("▶️ FIRE ENGINE", use_container_width=True, type="primary", disabled=is_running):
-                # Play Start Sound (High pitch beep)
                 components.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/button-09.mp3" type="audio/mpeg"></audio>""", height=0)
                 bot.state["is_running"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
                 add_script_run_ctx(t)
                 t.start()
-                time.sleep(0.5) # Give the sound a millisecond to play before rerunning
+                time.sleep(0.5)
                 st.rerun()
         with c2:
             if st.button("🛑 HALT ENGINE", use_container_width=True, disabled=not is_running):
-                # Play Stop Sound (Low pitch beep)
                 components.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/button-10.mp3" type="audio/mpeg"></audio>""", height=0)
                 bot.state["is_running"] = False
                 time.sleep(0.5)
@@ -1446,7 +1444,7 @@ else:
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{atr_val}</div>
                 </div>
                 <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Quant Algorithm Sentiment</div>
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">SHRI OM Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
             </div>
@@ -1712,4 +1710,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
