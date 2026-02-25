@@ -150,9 +150,9 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
         except: pass
 
 # ==========================================
-# 2. UI & CUSTOM CSS (TABS & BUTTONS)
+# 2. UI & CUSTOM CSS (SQUARE TABS & BUTTONS)
 # ==========================================
-st.set_page_config(page_title="SHRI RAGHAVENDRA", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHRI OM", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -168,9 +168,9 @@ st.markdown("""
     [data-testid="stSidebar"] * { color: #ffffff !important; }
     
     div[data-baseweb="select"] * { color: #0f111a !important; font-weight: 600 !important; }
-    div[data-baseweb="select"] { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 4px !important; }
+    div[data-baseweb="select"] { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important; }
     div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
-        color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 4px !important;
+        color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important;
     }
 
     /* --- BEAUTIFUL SQUARE BUTTON TABS --- */
@@ -183,7 +183,7 @@ st.markdown("""
         flex: 1 !important; text-align: center !important; justify-content: center !important; 
         background: linear-gradient(135deg, #1e293b, #0f111a) !important; 
         color: #f8fafc !important; 
-        border-radius: 4px !important; /* SQUARE SHAPE */
+        border-radius: 2px !important; /* SHARP SQUARE SHAPE */
         font-weight: 800 !important; font-size: 0.95rem !important; 
         letter-spacing: 0.5px !important; padding: 14px 0 !important; margin: 0 !important; 
         border: 1px solid #334155 !important;
@@ -210,15 +210,17 @@ st.markdown("""
         background: linear-gradient(135deg, #ff416c, #ff4b2b) !important;
         color: white !important;
         border: none !important;
-        border-radius: 4px !important; /* Square Shape */
+        border-radius: 2px !important; /* Match Square Shape of Tabs */
         font-weight: 900 !important;
         font-size: 1rem !important;
         letter-spacing: 1px !important;
         box-shadow: 0 4px 15px rgba(255, 65, 108, 0.5) !important;
         transition: all 0.2s ease;
+        padding: 14px 0 !important;
+        height: 100% !important;
     }
     div[data-testid="column"]:nth-child(2) button:hover {
-        transform: scale(1.05) !important;
+        transform: translateY(-2px) !important;
         box-shadow: 0 6px 20px rgba(255, 65, 108, 0.7) !important;
     }
 
@@ -282,7 +284,7 @@ def get_angel_scrip_master():
     except Exception: return pd.DataFrame()
 
 # ==========================================
-# 3. ADVANCED TECHNICAL ANALYZER (RELAXED FOR MORE SIGNALS)
+# 3. ADVANCED TECHNICAL ANALYZER (RELAXED FOR EARLIER SIGNALS & PROFIT)
 # ==========================================
 class TechnicalAnalyzer:
     def get_atr(self, df, period=14):
@@ -297,7 +299,7 @@ class TechnicalAnalyzer:
         df = df.copy()
         df['vol_sma'] = df['volume'].rolling(20).mean()
         if is_index: df['vol_spike'] = True
-        else: df['vol_spike'] = df['volume'] > (df['vol_sma'] * 1.1)  # Relaxed from 1.5
+        else: df['vol_spike'] = df['volume'] > (df['vol_sma'] * 1.1)  # Relaxed from 1.5x to 1.1x for earlier signals
         
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -306,8 +308,7 @@ class TechnicalAnalyzer:
         
         atr = self.get_atr(df, 14)
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-        # RELAXED SIDEWAYS: Tighter RSI bounds and smaller ATR requirement for breakout
-        df['is_sideways'] = (df['rsi'].between(48, 52)) & (abs(df['close'] - df['ema21']) < (atr * 0.3))
+        df['is_sideways'] = (df['rsi'].between(48, 52)) & (abs(df['close'] - df['ema21']) < (atr * 0.3)) # Relaxed sideways logic
         df['inside_bar'] = (df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1))
         
         try:
@@ -329,7 +330,7 @@ class TechnicalAnalyzer:
         df = df.copy()
         df['body'] = abs(df['close'] - df['open'])
         avg_body = df['body'].rolling(10).mean()
-        strong_up = (df['close'] > df['open']) & (df['body'] > avg_body * 1.5) # Relaxed from 1.8
+        strong_up = (df['close'] > df['open']) & (df['body'] > avg_body * 1.5) # Relaxed from 1.8x
         strong_down = (df['close'] < df['open']) & (df['body'] > avg_body * 1.5)
         bob_h, bob_l, beob_h, beob_l = 0.0, 0.0, 0.0, 0.0
         
@@ -374,9 +375,9 @@ class TechnicalAnalyzer:
 
         trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
 
-        # RELAXED ICT: Allows deeper wicks into FVG (0.995 instead of 0.999)
+        # RELAXED ICT: Allows slightly deeper wicks (0.995) to grab earlier entries
         mitigated_bull = (last['low'] <= latest_bull_top.iloc[-1] * 1.002) and (last['low'] >= latest_bull_bot.iloc[-1] * 0.995)
-        bull_reversal = last['close'] > last['open'] # Removed strict ema9 requirement for entry to get in early
+        bull_reversal = last['close'] > last['open'] 
 
         if mitigated_bull and bull_reversal and (last['stoch_k'] > last['stoch_d']):
             trend, signal = "ICT BULL FVG REVERSAL CONFIRMED 🟢", "BUY_CE"
@@ -405,25 +406,35 @@ class TechnicalAnalyzer:
         df_ta = df.copy()
         df_ta.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
         
+        # Restored original data variables to ensure nothing is lost for the chart/tracking
+        df_ta['EMA_5'] = ta.ema(df_ta['Close'], length=5)
         df_ta['EMA_13'] = ta.ema(df_ta['Close'], length=13)
         df_ta['EMA_21'] = ta.ema(df_ta['Close'], length=21)
+        df_ta['EMA_34'] = ta.ema(df_ta['Close'], length=34)
         df_ta['EMA_50'] = ta.ema(df_ta['Close'], length=50)
+        df_ta['EMA_72'] = ta.ema(df_ta['Close'], length=72)
+        
+        df_ta['HMA_9'] = ta.hma(df_ta['Close'], length=9)
         df_ta['HMA_21'] = ta.hma(df_ta['Close'], length=21)
         
         adx_df = ta.adx(df_ta['High'], df_ta['Low'], df_ta['Close'], length=14)
         df_ta['ADX'] = adx_df['ADX_14'] if adx_df is not None else 0
         
-        # RELAXED VIJAY RFF: Lowered ADX threshold from 20 to 15, Volume requirement from 1.3 to 0.9
+        # RELAXED RFF logic: Lowered ADX requirement to 15 to unblock early trends
         df_ta['is_choppy'] = df_ta['ADX'] < 15
-        
+
         sti = ta.supertrend(df_ta['High'], df_ta['Low'], df_ta['Close'], length=10, multiplier=2.0)
         df_ta['SuperTrend_Dir'] = sti['SUPERTd_10_2.0'] if sti is not None else 1
+        
+        df_ta['RSI_ta'] = ta.rsi(df_ta['Close'], length=14)
+        df_ta['RSI_SMA'] = ta.sma(df_ta['RSI_ta'], length=9)
         
         df_ta['VWAP'] = ta.vwap(df_ta['High'], df_ta['Low'], df_ta['Close'], df_ta['Volume'])
         if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all():
             df_ta['VWAP'] = df_ta['Close']
             
         df_ta['Vol_SMA'] = ta.sma(df_ta['Volume'], length=20)
+        # RELAXED Volume logic: Requires normal average volume instead of extreme spikes
         df_ta['is_strong_vol'] = df_ta['Volume'] >= (df_ta['Vol_SMA'] * 0.9)
         
         df_ta['Buy_Signal'] = False
@@ -475,7 +486,7 @@ class TechnicalAnalyzer:
         last, prev = df.iloc[-1], df.iloc[-2]
         signal, trend = "WAIT", "RANGING 🟡"
         
-        # RELAXED: RSI > 50 (instead of 55) and removed strict vol_spike logic for faster entries
+        # RELAXED Trend Rider: RSI > 50 (instead of 55) and removed strict vol_spike logic for faster entries
         if last['ema_fast'] > last['ema_trend'] and last['close'] > last['vwap']:
             trend = "STRONG UPTREND 🟢"
             if last['close'] > prev['high'] and last['rsi'] > 50:
@@ -506,7 +517,7 @@ class TechnicalAnalyzer:
         last = df.iloc[-1]
         signal, trend = "WAIT", "FLAT"
         
-        # RELAXED: Dropped 'is_sideways' block, rely only on direct Momentum and RSI alignment
+        # RELAXED Momentum Breakout: Removed `is_sideways` block to rely completely on momentum cross
         benchmark = last['ema_long'] if is_index else last['vwap']
         if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark) and last['rsi'] > 50: 
             trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
@@ -1188,8 +1199,8 @@ if not getattr(st.session_state, "bot", None):
     
     with login_col:
         st.markdown("""
-            <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI RAGHAVENDRA</h1>
+            <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 2px 2px 0 0; border-bottom: none;'>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI OM</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -1337,7 +1348,7 @@ else:
     with head_c1: 
         st.markdown(f"**👤 Session:** `<span style='color:#0284c7'>{bot.client_name}</span>` | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
     with head_c2:
-        # Beautiful, colorful, glowing square logout button applied perfectly here via exact column targeting
+        # Beautiful, glowing red/orange square logout button
         if st.button("🚪 LOGOUT", use_container_width=True):
             bot.state["is_running"] = False
             st.session_state.clear()
@@ -1352,7 +1363,7 @@ else:
         
         if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
         
-        CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE or BTCUSD").upper().strip()
+        CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE or BTCUSDT").upper().strip()
         st.session_state.custom_stock = CUSTOM_STOCK
         
         all_assets = list(st.session_state.user_lots.keys())
@@ -1448,7 +1459,7 @@ else:
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
         
         st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 2px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
                 <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">⚡ {INDEX}</h2>
                 <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
@@ -1464,7 +1475,7 @@ else:
         status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
         
         st.markdown(f"""
-            <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px; letter-spacing: 0.5px;">
+            <div style="text-align: center; padding: 10px; border-radius: 2px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px; letter-spacing: 0.5px;">
                 {status_text}
             </div>
         """, unsafe_allow_html=True)
@@ -1500,15 +1511,15 @@ else:
         
         st.markdown(f"""
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 2px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live Spot</div>
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
                 </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 2px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">ATR Base</div>
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{atr_val}</div>
                 </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                <div style="background: #ffffff; padding: 15px; border-radius: 2px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Quant Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
@@ -1535,35 +1546,35 @@ else:
                 pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
             
             st.markdown(f"""
-                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
+                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 2px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
                         <div>
-                            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;">{t['type']}</span>
+                            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 2px; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;">{t['type']}</span>
                             <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
                         </div>
-                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
+                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 2px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
                             {pnl_display}
                         </div>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 2px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br>
                             <b style="font-size: 1.1rem; color: #0f111a;">{t['entry']:.4f}</b>
                         </div>
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 2px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br>
                             <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
                         </div>
-                        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
+                        <div style="background: #f8fafc; padding: 10px; border-radius: 2px;">
                             <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Lot / Qty</span><br>
                             <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span>
                         </div>
-                        <div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;">
+                        <div style="background: #fef2f2; padding: 10px; border-radius: 2px; border: 1px solid #fecaca;">
                             <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br>
                             <b style="font-size: 1.1rem; color: #ef4444;">{t['sl']:.4f}</b>
                         </div>
                     </div>
-                    <div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700; letter-spacing: 0.5px;">
+                    <div style="background: #0f111a; padding: 10px; border-radius: 2px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700; letter-spacing: 0.5px;">
                         🎯 TP1: {t.get('tp1', 0):.2f} &nbsp;|&nbsp; TP2: {t.get('tp2', 0):.2f} &nbsp;|&nbsp; TP3: {t.get('tp3', 0):.2f}
                     </div>
                 </div>
