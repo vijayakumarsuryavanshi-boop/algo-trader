@@ -20,6 +20,7 @@ streamlit-lightweight-charts
 plyer
 XlsxWriter
 supabase
+kiteconnect
 
 
 
