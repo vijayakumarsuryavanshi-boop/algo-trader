@@ -93,8 +93,16 @@ def generate_delta_signature(method, endpoint, payload_string, secret):
     signature = hmac.new(secret.encode('utf-8'), signature_data.encode('utf-8'), hashlib.sha256).hexdigest()
     return timestamp, signature
 
+def get_usdt_inr_rate():
+    try:
+        res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
+        for coin in res:
+            if coin['market'] == 'USDTINR': return float(coin['last_price'])
+    except: pass
+    return 86.50 # Fallback INR rate
+
 # ==========================================
-# 1. DATABASE FUNCTIONS
+# 1. DATABASE FUNCTIONS (UPDATED FOR EMAIL/PHONE)
 # ==========================================
 def get_user_hash(user_id):
     if not user_id: return "guest"
@@ -142,26 +150,20 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
         except: pass
 
 # ==========================================
-# 2. UI & CONFIG (CLEAN THEME + MODERN TABS)
+# 2. UI & CONFIG 
 # ==========================================
-st.set_page_config(page_title="SHRI OM", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHRI RAGHAVENDRA", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
-    /* Clean Theme */
     [data-testid="stAppViewContainer"] { background-color: #f4f7f6; color: #0f111a; font-family: 'Inter', sans-serif; }
-    
     @media (max-width: 850px) {
         header[data-testid="stHeader"] { visibility: visible !important; height: auto !important; background-color: #0284c7 !important; }
         header[data-testid="stHeader"] svg { fill: white !important; }
         .main .block-container { padding-top: 50px !important; }
     }
-    
-    /* Sidebar Styling */
     [data-testid="stSidebar"] { background-color: #0284c7 !important; transition: all 0.4s ease; border-right: 1px solid #0369a1; }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
-    
-    /* Input Fields */
     div[data-baseweb="select"] * { color: #0f111a !important; font-weight: 600 !important; }
     div[data-baseweb="select"] { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important; }
     div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
@@ -169,43 +171,12 @@ st.markdown("""
     }
     .main .block-container { padding-bottom: 20px !important; }
 
-    /* --- MODERN IOS-STYLE SEGMENTED TABS --- */
-    div[data-baseweb="tab-list"] {
-        display: flex !important; width: 100% !important; 
-        background-color: #e2e8f0 !important; /* Light Gray Container */
-        border-radius: 14px !important; padding: 6px !important; gap: 6px !important; border: none !important;
-    }
-    div[data-baseweb="tab"] {
-        flex: 1 !important; text-align: center !important; justify-content: center !important;
-        background-color: transparent !important; color: #64748b !important;
-        border-radius: 10px !important; font-weight: 700 !important; font-size: 0.95rem !important;
-        letter-spacing: 0.5px !important; padding: 12px 0 !important; margin: 0 !important; border: none !important;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    }
-    div[data-baseweb="tab"]:hover {
-        color: #0284c7 !important; background-color: rgba(255,255,255,0.5) !important;
-    }
-    div[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #ffffff !important; /* Floating White Pill */
-        color: #0284c7 !important; 
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
-        transform: translateY(-1px) !important;
-    }
-
-    /* Cards and Glass Panels */
-    .broker-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.03); }
-    .glass-panel {
-        background: #ffffff;
-        border: 1px solid #cbd5e1;
-        border-radius: 16px;
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06);
-        padding: 30px;
-    }
+    div[data-baseweb="tab-list"] { display: flex !important; width: 100% !important; background-color: #e2e8f0 !important; border-radius: 14px !important; padding: 6px !important; gap: 6px !important; border: none !important; }
+    div[data-baseweb="tab"] { flex: 1 !important; text-align: center !important; justify-content: center !important; background-color: transparent !important; color: #64748b !important; border-radius: 10px !important; font-weight: 700 !important; font-size: 0.95rem !important; letter-spacing: 0.5px !important; padding: 12px 0 !important; margin: 0 !important; border: none !important; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important; }
+    div[data-baseweb="tab"]:hover { color: #0284c7 !important; background-color: rgba(255,255,255,0.5) !important; }
+    div[data-baseweb="tab"][aria-selected="true"] { background-color: #ffffff !important; color: #0284c7 !important; box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important; transform: translateY(-1px) !important; }
+    .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 16px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
     .bottom-dock-container { position: fixed !important; bottom: -500px !important; opacity: 0.01 !important; z-index: -1 !important; }
-    
-    /* Custom Logo formatting */
-    .logo-container { display: flex; align-items: center; justify-content: center; height: 100%; }
-    .logo-img { width: 45px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
 </style>
 """, unsafe_allow_html=True)
 
@@ -242,14 +213,17 @@ if 'custom_stock' not in st.session_state: st.session_state.custom_stock = ""
 def get_market_status():
     now_ist = get_ist()
     bot = getattr(st.session_state, 'bot', None)
-    is_crypto_active = bot and (bot.is_mt5_connected or bot.coindcx_api or bot.delta_api)
     
-    if now_ist.weekday() >= 5: 
-        if is_crypto_active: return True, "Crypto Live 🌍"
-        return False, "Market Closed (Weekend)"
+    # Identify if a 24/7 Crypto/Forex Broker is selected
+    is_crypto_active = bot and (bot.coindcx_api or bot.delta_api or bot.is_mt5_connected)
+    if is_crypto_active and bot.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange", "MT5"]:
+        return True, "Crypto/Forex Live 🌍"
+
+    # Strict Indian Market Hours
+    if now_ist.weekday() >= 5: return False, "Market Closed (Weekend)"
     if dt.time(9, 15) <= now_ist.time() <= dt.time(15, 30): return True, "Market Live 🟢"
-    if dt.time(17, 00) <= now_ist.time() <= dt.time(23, 30): return True, "Commodity/Forex Live 🟠"
-    if is_crypto_active: return True, "Forex/Crypto Live 🌍"
+    if dt.time(17, 00) <= now_ist.time() <= dt.time(23, 30): return True, "Commodity Live 🟠"
+    
     return False, "Market Closed (After Hours)"
 
 @st.cache_data(ttl=43200) 
@@ -369,7 +343,6 @@ class TechnicalAnalyzer:
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
 
     def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
-        """ VIJAY_RFF Custom Strategy Core with Pandas_TA """
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
         
@@ -524,7 +497,7 @@ class SniperBot:
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
         if HAS_NOTIFY:
-            try: notification.notify(title=title, message=message, app_name="SHRI OM", timeout=5)
+            try: notification.notify(title=title, message=message, app_name="QUANT", timeout=5)
             except: pass
         if self.tg_token and self.tg_chat:
             try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
@@ -560,7 +533,10 @@ class SniperBot:
                 res = requests.post("https://api.coindcx.com/exchange/v1/users/balances", headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature}, json=payload)
                 if res.status_code == 200:
                     for b in res.json():
-                        if b['currency'] == 'USDT': b_str.append(f"DCX: $ {round(float(b['balance']),2)}")
+                        if b['currency'] == 'USDT': 
+                            bal = float(b['balance'])
+                            if self.settings.get('show_inr_crypto', True): b_str.append(f"DCX: ₹ {round(bal * get_usdt_inr_rate(),2)}")
+                            else: b_str.append(f"DCX: $ {round(bal,2)}")
             except: pass
         if self.delta_api:
             try:
@@ -569,7 +545,10 @@ class SniperBot:
                 res = requests.get("https://api.delta.exchange/v2/wallet/balances", headers=headers)
                 if res.status_code == 200:
                     for b in res.json().get('result', []):
-                        if b['asset_symbol'] == 'USDT': b_str.append(f"Delta: $ {round(float(b['balance']),2)}")
+                        if b['asset_symbol'] == 'USDT': 
+                            bal = float(b['balance'])
+                            if self.settings.get('show_inr_crypto', True): b_str.append(f"Delta: ₹ {round(bal * get_usdt_inr_rate(),2)}")
+                            else: b_str.append(f"Delta: $ {round(bal,2)}")
             except: pass
         if self.is_mt5_connected:
             try:
@@ -684,13 +663,20 @@ class SniperBot:
             try:
                 res = requests.get(f"https://api.coindcx.com/exchange/ticker").json()
                 for coin in res:
-                    if coin['market'] == symbol: return float(coin['last_price'])
+                    target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
+                    if coin['market'] == target or coin['market'] == f"B-{target}": 
+                        price = float(coin['last_price'])
+                        return price
             except: return None
             
         if exchange == "DELTA" and self.delta_api:
             try:
-                res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={symbol}").json()
-                if res.get('success'): return float(res['result']['close'])
+                # Delta uses perpetual names primarily like BTCUSD or BTCUSDT
+                target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
+                res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={target}").json()
+                if res.get('success'): 
+                    price = float(res['result']['close'])
+                    return price
             except: return None
 
         if self.kite and self.settings.get("primary_broker") == "Zerodha":
@@ -770,13 +756,27 @@ class SniperBot:
 
     def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
         if not is_hero_zero or df is None or len(df) < 14: return True, ""
+        
         last = df.iloc[-1]
         atr = self.analyzer.get_atr(df).iloc[-1]
         body = abs(last['close'] - last['open'])
-        if last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.5 and body > atr:
-            if signal == "BUY_CE" and last['close'] > last['open']: return True, "🔥 OI Support Shifted Up. Gamma Blast Probable!"
-            elif signal == "BUY_PE" and last['close'] < last['open']: return True, "🩸 OI Resistance Shifted Down. Gamma Blast Probable!"
-        return False, "⚠️ Blocked: High Theta Decay Risk / Consolidation."
+        vol_sma = df['volume'].rolling(20).mean().iloc[-1]
+        
+        # THETA DECAY CHECK: Block if market consolidates < 1.5x ATR
+        recent_range = df['high'].rolling(5).max().iloc[-1] - df['low'].rolling(5).min().iloc[-1]
+        is_choppy = recent_range < (atr * 1.5)
+        
+        if is_choppy and last['volume'] < vol_sma:
+            return False, "⚠️ Blocked: Consolidating Market. High Theta Decay Risk."
+            
+        # GAMMA BLAST CHECK: Sudden volume expansion + directional push
+        if last['volume'] > (vol_sma * 1.5) and body > (atr * 0.8):
+            if signal == "BUY_CE" and last['close'] > last['open']: 
+                return True, "🔥 Gamma Blast Detected! Buying OTM Bottom."
+            elif signal == "BUY_PE" and last['close'] < last['open']: 
+                return True, "🩸 Gamma Blast Detected! Buying OTM Bottom."
+                
+        return False, "⏳ Waiting for Volatility Expansion (Avoid Theta)."
 
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
         if self.is_mock: return "MOCK_" + uuid.uuid4().hex[:6].upper()
@@ -787,13 +787,15 @@ class SniperBot:
         
         if exchange == "DELTA":
             try:
-                payload = {"product_id": symbol, "size": int(float(qty)), "side": "buy" if side == "BUY" else "sell", "order_type": "market"}
+                # Delta uses exact derivative names for orders
+                target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
+                payload = {"product_id": target, "size": int(float(qty)), "side": "buy" if side == "BUY" else "sell", "order_type": "market"}
                 payload_str = json.dumps(payload)
                 ts, sig = generate_delta_signature('POST', '/v2/orders', payload_str, self.delta_secret)
                 headers = {'api-key': self.delta_api, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
                 res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
                 if res.status_code == 200: 
-                    self.log(f"🟢 ENTRY: {symbol} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
+                    self.log(f"🟢 ENTRY: {target} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
                     return res.json().get('result', {}).get('id')
                 else: 
                     self.log(f"❌ Delta Order Failed: {res.text}"); return None
@@ -805,11 +807,13 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 
-                if market_type in ["Futures", "Options"] or "-" in symbol or "FUT" in symbol:
-                    payload = {"side": side.lower(), "order_type": "market", "market": symbol, "total_quantity": float(qty), "timestamp": ts}
+                target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
+                
+                if market_type in ["Futures", "Options"] or "-" in target or "FUT" in target:
+                    payload = {"side": side.lower(), "order_type": "market", "market": target, "total_quantity": float(qty), "timestamp": ts}
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/orders/create"
                 else:
-                    payload = {"side": side.lower(), "order_type": "market", "market": symbol, "total_quantity": float(qty), "timestamp": ts}
+                    payload = {"side": side.lower(), "order_type": "market", "market": target, "total_quantity": float(qty), "timestamp": ts}
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
@@ -817,7 +821,7 @@ class SniperBot:
                 res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature}, json=payload)
                 
                 if res.status_code == 200: 
-                    self.log(f"🟢 ENTRY: {symbol} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
+                    self.log(f"🟢 ENTRY: {target} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
                     response_data = res.json()
                     order_id = response_data.get('orders', [{}])[0].get('id', response_data.get('id', 'DCX_ORDER_OK'))
                     return order_id
@@ -831,7 +835,7 @@ class SniperBot:
                 action_type = mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL
                 tick = mt5.symbol_info_tick(symbol)
                 price = tick.ask if side == "BUY" else tick.bid
-                request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty), "type": action_type, "price": price, "deviation": 20, "magic": 234000, "comment": "SHRI OM Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
+                request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty), "type": action_type, "price": price, "deviation": 20, "magic": 234000, "comment": "QUANT Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
                 result = mt5.order_send(request)
                 if result.retcode != mt5.TRADE_RETCODE_DONE: self.log(f"❌ MT5 Order Failed: {result.comment}"); return None
                 return result.order
@@ -880,9 +884,13 @@ class SniperBot:
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
         
         if self.settings.get("hero_zero"):
-            candidates = subset[subset['strike'] > spot] if opt_type == "CE" else subset[subset['strike'] < spot]
-            candidates = candidates.sort_values('dist_to_spot', ascending=True).head(5)
-        else: candidates = subset.sort_values('dist_to_spot', ascending=True).head(10)
+            # Force Hero/Zero to look at least 0.3% Out of The Money (OTM)
+            otm_margin = spot * 0.003 
+            if opt_type == "CE": candidates = subset[subset['strike'] > (spot + otm_margin)]
+            else: candidates = subset[subset['strike'] < (spot - otm_margin)]
+            candidates = candidates.sort_values('dist_to_spot', ascending=True).head(15)
+        else: 
+            candidates = subset.sort_values('dist_to_spot', ascending=True).head(10)
             
         for _, row in candidates.iterrows():
             ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
@@ -918,8 +926,9 @@ class SniperBot:
                 is_mt5_asset = (exch == "MT5")
                 is_crypto = (exch in ["COINDCX", "DELTA"])
 
+                # Indian Markets close at 15:15. Crypto/MT5 never close during the day
                 cutoff_time = dt.time(15, 15) if index not in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] else dt.time(23, 15)
-                if is_mt5_asset or is_crypto or self.is_mock: cutoff_time = dt.time(23, 59) 
+                if is_mt5_asset or is_crypto or self.is_mock: cutoff_time = dt.time(23, 59, 59) 
                 
                 spot = self.get_live_price(exch, index, token)
                 if spot is None and self.is_mock: spot = self.get_live_price("NSE", index, "12345")
@@ -1026,7 +1035,6 @@ class SniperBot:
                             ltp = trade['entry'] + delta + np.random.uniform(-1, 2)
                             
                         if ltp:
-                            # CRITICAL PNL MATH: Both CE & PE Options Profit by Premium Rising. Spot/Futures allows shorting.
                             if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
                                 pnl = (ltp - trade['entry']) * trade['qty'] if trade['type'] == "BUY" else (trade['entry'] - ltp) * trade['qty']
                             else:
@@ -1039,7 +1047,16 @@ class SniperBot:
                             
                             if ltp > trade.get('highest_price', trade['entry']):
                                 trade['highest_price'] = ltp
-                                if not trade['is_hz']:
+                                
+                                # HERO ZERO DYNAMIC PERCENTAGE TRAILING
+                                if trade['is_hz']:
+                                    if ltp >= trade['entry'] * 3.0:    new_sl = ltp * 0.85 # 200% Profit -> Trail 15%
+                                    elif ltp >= trade['entry'] * 2.0:  new_sl = ltp * 0.80 # 100% Profit -> Trail 20%
+                                    elif ltp >= trade['entry'] * 1.5:  new_sl = trade['entry'] * 1.10 # 50% Profit -> BE + 10%
+                                    else:                              new_sl = trade['sl']
+                                    
+                                    if new_sl > trade['sl']: trade['sl'] = new_sl
+                                else:
                                     tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
                                     new_sl = ltp - tsl_buffer
                                     if new_sl > trade['sl']: trade['sl'] = new_sl
@@ -1057,7 +1074,7 @@ class SniperBot:
                                         trade['scaled_out'] = True
                                         trade['sl'] = trade['entry'] 
                                         self.log(f"💥 PARTIAL BOOKED 50% at {ltp}. SL trailed to BE.")
-                                        self.push_notify("Partial Profit", f"Booked 50% of {trade['symbol']}. Remainder running risk-free.")
+                                        self.push_notify("Partial Profit", f"Booked 50% of {trade['symbol']}. Remainder risk-free.")
                             
                             hit_tp = False if ("Trend Rider" in strategy and not trade['is_hz']) else (ltp >= trade['tgt'])
                             hit_sl = ltp <= trade['sl']
@@ -1118,7 +1135,7 @@ if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("ui
         alert = st.session_state.bot.state["ui_popups"].popleft()
         st.toast(alert.get("message", ""), icon="🔔")
 
-# --- LOGIN SCREEN (Hidden Advanced Switches & Clean UI) ---
+# --- LOGIN SCREEN ---
 if not getattr(st.session_state, "bot", None):
     if not HAS_DB: st.error("⚠️ Database missing. Add SUPABASE_URL and SUPABASE_KEY to enable saving & logs.")
         
@@ -1128,7 +1145,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 20px 20px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI OM</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI RAGHAVENDRA</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -1159,10 +1176,8 @@ if not getattr(st.session_state, "bot", None):
                             if temp_bot.login():
                                 st.session_state.bot = temp_bot
                                 st.rerun()
-                            else:
-                                st.error("❌ Login Failed! Check API details or TOTP.")
-                    else:
-                        st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
+                            else: st.error("❌ Login Failed! Check API details or TOTP.")
+                    else: st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
                         
             elif auth_mode == "⚡ Real Trading":
                 st.warning("Ensure your Supabase 'user_credentials' table uses 'user_id' for lookup.")
@@ -1178,10 +1193,9 @@ if not getattr(st.session_state, "bot", None):
                 DCX_API, DCX_SEC = "", ""
                 DELTA_API, DELTA_SEC = "", ""
 
-                # --- ANGEL ONE BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=angelone.in&sz=128"></div>', unsafe_allow_html=True)
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
                     with col_t: use_angel = st.toggle("Angel One India", value=bool(creds.get("client_id")))
                     if use_angel:
                         ANGEL_API = st.text_input("Angel API Key", value=creds.get("angel_api", ""))
@@ -1190,45 +1204,41 @@ if not getattr(st.session_state, "bot", None):
                         with col_pin: PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
                         TOTP = st.text_input("TOTP Secret", value=creds.get("totp_secret", ""), type="password")
 
-                # --- ZERODHA BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=zerodha.com&sz=128"></div>', unsafe_allow_html=True)
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=zerodha.com&sz=128", width=40)
                     with col_t: use_zerodha = st.toggle("Zerodha Kite", value=bool(creds.get("zerodha_api")))
                     if use_zerodha:
                         Z_API = st.text_input("Kite API Key", value=creds.get("zerodha_api", ""))
                         Z_SEC = st.text_input("Kite API Secret", type="password", value=creds.get("zerodha_secret", ""))
                         Z_REQ = st.text_input("Today's Request Token", type="password")
 
-                # --- COINDCX BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=coindcx.com&sz=128"></div>', unsafe_allow_html=True)
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=coindcx.com&sz=128", width=40)
                     with col_t: use_coindcx = st.toggle("CoinDCX Crypto", value=bool(creds.get("coindcx_api")))
                     if use_coindcx:
                         DCX_API = st.text_input("CoinDCX API Key", value=creds.get("coindcx_api", ""))
                         DCX_SEC = st.text_input("CoinDCX API Secret", type="password", value=creds.get("coindcx_secret", ""))
 
-                # --- DELTA EXCHANGE BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=delta.exchange&sz=128"></div>', unsafe_allow_html=True)
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=delta.exchange&sz=128", width=40)
                     with col_t: use_delta = st.toggle("Delta Exchange", value=bool(creds.get("delta_api")))
                     if use_delta:
                         DELTA_API = st.text_input("Delta API Key", value=creds.get("delta_api", ""))
                         DELTA_SEC = st.text_input("Delta API Secret", type="password", value=creds.get("delta_secret", ""))
 
-                # --- MT5 BOX ---
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.markdown('<div class="logo-container"><img class="logo-img" src="https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128"></div>', unsafe_allow_html=True)
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128", width=40)
                     with col_t: use_mt5 = st.toggle("MetaTrader 5 (MT5)", value=bool(creds.get("mt5_acc")))
                     if use_mt5:
                         col_m1, col_m2 = st.columns(2)
                         with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
                         with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
                         MT5_SERVER = st.text_input("MT5 Server", value=creds.get("mt5_server", ""))
-
+                
                 st.divider()
                 with st.expander("📱 Notifications (Telegram/WhatsApp)"):
                     TG_TOKEN = st.text_input("Telegram Bot Token", value=creds.get("tg_token", ""))
@@ -1240,8 +1250,7 @@ if not getattr(st.session_state, "bot", None):
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("CONNECT MARKETS 🚀", type="primary", use_container_width=True):
-                    if not USER_ID:
-                        st.error("Please enter your System Login ID (Email or Phone) to proceed.")
+                    if not USER_ID: st.error("Please enter your System Login ID (Email or Phone) to proceed.")
                     else:
                         temp_bot = SniperBot(
                             api_key=ANGEL_API if use_angel else "", client_id=CLIENT_ID if use_angel else "", 
@@ -1265,7 +1274,7 @@ if not getattr(st.session_state, "bot", None):
                                 err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
                                 st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
             else:
-                st.info("📝 Paper Trading simulates live market movement without risking real capital. Real Option tracking fetches live API data if logged in.")
+                st.info("📝 Paper Trading simulates live market movement without risking real capital.")
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("START PAPER SESSION 📝", type="primary", use_container_width=True):
                     temp_bot = SniperBot(is_mock=True)
@@ -1275,11 +1284,11 @@ if not getattr(st.session_state, "bot", None):
                     
             st.markdown("</div>", unsafe_allow_html=True)
 
-# --- MAIN TERMINAL (VISIBLE AFTER LOGIN) ---
+# --- MAIN TERMINAL ---
 else:
     bot = st.session_state.bot
     
-    # --- 1. TOP HEADER (USER & LOGOUT) ---
+    # --- 1. TOP HEADER ---
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
         st.markdown(f"**👤 Session:** `<span style='color:#0284c7'>{bot.client_name}</span>` | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
@@ -1289,7 +1298,7 @@ else:
             st.session_state.clear()
             st.rerun()
 
-    # --- 2. THE SIDEBAR (ADVANCED TRIGGERS ONLY VISIBLE HERE) ---
+    # --- 2. THE SIDEBAR ---
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
         
@@ -1298,7 +1307,7 @@ else:
         
         if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
         
-        CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE or BTCUSDT").upper().strip()
+        CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE or BTCUSD").upper().strip()
         st.session_state.custom_stock = CUSTOM_STOCK
         
         all_assets = list(st.session_state.user_lots.keys())
@@ -1327,13 +1336,13 @@ else:
             st.divider()
             st.markdown("**🪙 Crypto Market Setup**")
             col_c1, col_c2 = st.columns(2)
-            with col_c1:
-                CRYPTO_MODE = st.selectbox("Market Type", ["Spot", "Futures", "Options"])
-            with col_c2:
-                LEVERAGE = st.number_input("Leverage (x)", min_value=1, max_value=100, value=10, step=1)
+            with col_c1: CRYPTO_MODE = st.selectbox("Market Type", ["Futures", "Spot", "Options"])
+            with col_c2: LEVERAGE = st.number_input("Leverage (x)", min_value=1, max_value=100, value=10, step=1)
+            SHOW_INR_CRYPTO = st.toggle("Convert Displays to ₹ INR", True)
         else:
             CRYPTO_MODE = "Options"
             LEVERAGE = 1
+            SHOW_INR_CRYPTO = False
 
         st.divider()
         st.markdown("**2. Risk Management**")
@@ -1352,12 +1361,19 @@ else:
         st.divider()
         st.markdown("**3. Advanced Triggers**")
         MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
-        HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Wait for Gamma Blast)", False)
+        HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
         FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
 
         render_signature()
 
-    bot.settings = {"primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": bot.is_mock, "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, "crypto_mode": CRYPTO_MODE, "leverage": LEVERAGE, "user_lots": st.session_state.user_lots.copy()}
+    bot.settings = {
+        "primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, 
+        "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, 
+        "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": bot.is_mock, 
+        "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, 
+        "crypto_mode": CRYPTO_MODE, "leverage": LEVERAGE, "show_inr_crypto": SHOW_INR_CRYPTO,
+        "user_lots": st.session_state.user_lots.copy()
+    }
 
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
         st.session_state.prev_index = INDEX
@@ -1410,18 +1426,14 @@ else:
         c1, c2, c_kill = st.columns([2, 2, 1])
         with c1:
             if st.button("▶️ FIRE ENGINE", use_container_width=True, type="primary", disabled=is_running):
-                components.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/button-09.mp3" type="audio/mpeg"></audio>""", height=0)
                 bot.state["is_running"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
                 add_script_run_ctx(t)
                 t.start()
-                time.sleep(0.5)
                 st.rerun()
         with c2:
             if st.button("🛑 HALT ENGINE", use_container_width=True, disabled=not is_running):
-                components.html("""<audio autoplay><source src="https://www.soundjay.com/buttons/button-10.mp3" type="audio/mpeg"></audio>""", height=0)
                 bot.state["is_running"] = False
-                time.sleep(0.5)
                 st.rerun()
         with c_kill:
             if st.button("☠️", use_container_width=True):
@@ -1433,18 +1445,26 @@ else:
         atr_val = round(bot.state['atr'], 4)
         trend_val = bot.state['current_trend']
         
+        # Crypto INR Conversion Display
+        currency_sym = "$" if exch in ["MT5", "DELTA", "COINDCX"] else "₹"
+        if exch in ["DELTA", "COINDCX"] and SHOW_INR_CRYPTO:
+            inr_val = ltp_val * get_usdt_inr_rate()
+            ltp_display = f"{currency_sym}{ltp_val} (₹ {round(inr_val, 2)})"
+        else:
+            ltp_display = f"{currency_sym}{ltp_val}"
+        
         st.markdown(f"""
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
                 <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live Spot</div>
-                    <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_val}</div>
+                    <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
                 </div>
                 <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">ATR Base</div>
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{atr_val}</div>
                 </div>
                 <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">SHRI OM Algorithm Sentiment</div>
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Quant Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
             </div>
@@ -1464,6 +1484,11 @@ else:
             exec_type = t['exch']
             buy_sell_color = "#22c55e" if t['type'] in ["CE", "BUY"] else "#ef4444"
             
+            pnl_display = round(pnl, 2)
+            if t['exch'] in ["DELTA", "COINDCX"] and SHOW_INR_CRYPTO:
+                inr_pnl = pnl * get_usdt_inr_rate()
+                pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+            
             st.markdown(f"""
                 <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 12px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
@@ -1472,7 +1497,7 @@ else:
                             <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
                         </div>
                         <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 8px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
-                            {pnl_sign}{round(pnl, 2)}
+                            {pnl_display}
                         </div>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
@@ -1696,7 +1721,6 @@ else:
     def cycle_strat():
         st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
 
-    # --- INVISIBLE ANDROID-STYLE NAVIGATION DOCK FOR APPLIIX (VISIBLE ONLY AFTER LOGIN) ---
     dock_container = st.container()
     with dock_container:
         st.markdown('<div id="bottom-dock-anchor" class="bottom-dock-container">', unsafe_allow_html=True)
@@ -1710,4 +1734,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
