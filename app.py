@@ -7,6 +7,8 @@ import time
 import requests
 import pyotp
 import hashlib
+import hmac
+import json
 import uuid
 import threading
 import io
@@ -16,6 +18,18 @@ from streamlit.runtime.scriptrunner import add_script_run_ctx
 from collections import deque
 from streamlit_lightweight_charts import renderLightweightCharts
 from supabase import create_client, Client
+
+try:
+    import pandas_ta as ta
+    HAS_PTA = True
+except ImportError:
+    HAS_PTA = False
+
+try:
+    from kiteconnect import KiteConnect
+    HAS_ZERODHA = True
+except ImportError:
+    HAS_ZERODHA = False
 
 try:
     import MetaTrader5 as mt5
@@ -57,7 +71,7 @@ def get_client_ip():
 
 def render_signature():
     st.sidebar.markdown(
-        f'<div style="text-align: center; color: #ffffff; font-size: 0.8rem; font-weight: bold; border-top: 1px solid #bae6fd; padding-top: 10px; margin-top: 10px;">'
+        f'<div style="text-align: center; color: #f8fafc; font-size: 0.8rem; font-weight: bold; border-top: 1px solid #bae6fd; padding-top: 15px; margin-top: 15px;">'
         f'🚀 Algo trade<br>Developed by: Vijayakumar Suryavanshi</div>', 
         unsafe_allow_html=True
     )
@@ -73,38 +87,54 @@ def check_btst_stbt(df):
     elif last['close'] < last['ema9'] < last['ema21'] and (last['close'] - last['low']) < (last['open'] - last['close']): return "🩸 STBT Suggested"
     return "⚖️ Neutral (No Hold)"
 
-# ==========================================
-# 1. DATABASE FUNCTIONS
-# ==========================================
-def get_user_hash(api_key):
-    if not api_key: return "guest"
-    return hashlib.md5(api_key.encode()).hexdigest()[:8]
+def generate_delta_signature(method, endpoint, payload_string, secret):
+    timestamp = str(int(time.time()))
+    signature_data = method + timestamp + endpoint + payload_string
+    signature = hmac.new(secret.encode('utf-8'), signature_data.encode('utf-8'), hashlib.sha256).hexdigest()
+    return timestamp, signature
 
-def load_creds(api_key):
-    if not api_key: return {}
+# ==========================================
+# 1. DATABASE FUNCTIONS (UPDATED FOR EMAIL/PHONE)
+# ==========================================
+# Note: Ensure your Supabase 'user_credentials' and 'trade_logs' tables have a 'user_id' and 'angel_api' column.
+def get_user_hash(user_id):
+    if not user_id: return "guest"
+    return hashlib.md5(user_id.encode()).hexdigest()[:8]
+
+def load_creds(user_id):
+    if not user_id: return {}
     if HAS_DB:
         try:
-            res = supabase.table("user_credentials").select("*").eq("api_key", api_key).execute()
+            res = supabase.table("user_credentials").select("*").eq("user_id", user_id).execute()
             if res.data: return res.data[0]
         except Exception as e:
             st.toast(f"DB Load Error: {e}")
-    return {"client_id": "", "pwd": "", "totp_secret": "", "api_key": api_key, "tg_token": "", "tg_chat": "", "wa_phone": "", "wa_api": "", "mt5_acc": "", "mt5_pass": "", "mt5_server": ""}
+    return {
+        "user_id": user_id, "angel_api": "", "client_id": "", "pwd": "", "totp_secret": "", 
+        "tg_token": "", "tg_chat": "", "wa_phone": "", "wa_api": "", 
+        "mt5_acc": "", "mt5_pass": "", "mt5_server": "",
+        "zerodha_api": "", "zerodha_secret": "", "coindcx_api": "", "coindcx_secret": "",
+        "delta_api": "", "delta_secret": ""
+    }
 
-def save_creds(client_id, pwd, totp_secret, api_key, tg_token, tg_chat, wa_phone, wa_api, mt5_acc, mt5_pass, mt5_server):
+def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_chat, wa_phone, wa_api, mt5_acc, mt5_pass, mt5_server, zerodha_api, zerodha_secret, coindcx_api, coindcx_secret, delta_api, delta_secret):
     if HAS_DB:
         data = {
-            "api_key": api_key, "client_id": client_id, "pwd": pwd, 
+            "user_id": user_id, "angel_api": angel_api, "client_id": client_id, "pwd": pwd, 
             "totp_secret": totp_secret, "tg_token": tg_token, "tg_chat": tg_chat, 
             "wa_phone": wa_phone, "wa_api": wa_api,
-            "mt5_acc": mt5_acc, "mt5_pass": mt5_pass, "mt5_server": mt5_server
+            "mt5_acc": mt5_acc, "mt5_pass": mt5_pass, "mt5_server": mt5_server,
+            "zerodha_api": zerodha_api, "zerodha_secret": zerodha_secret,
+            "coindcx_api": coindcx_api, "coindcx_secret": coindcx_secret,
+            "delta_api": delta_api, "delta_secret": delta_secret
         }
         try: supabase.table("user_credentials").upsert(data).execute()
         except: pass
 
-def save_trade(api_key, trade_date, trade_time, symbol, t_type, qty, entry, exit_price, pnl, result):
-    if HAS_DB and api_key and api_key != "mock_key_123":
+def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit_price, pnl, result):
+    if HAS_DB and user_id and user_id != "mock_user":
         data = {
-            "api_key": api_key, "trade_date": trade_date, "trade_time": trade_time,
+            "user_id": user_id, "trade_date": trade_date, "trade_time": trade_time,
             "symbol": symbol, "trade_type": t_type, "qty": qty,
             "entry_price": float(entry), "exit_price": float(exit_price),
             "pnl": float(pnl), "result": result
@@ -113,93 +143,96 @@ def save_trade(api_key, trade_date, trade_time, symbol, t_type, qty, entry, exit
         except: pass
 
 # ==========================================
-# 2. UI & CONFIG
+# 2. UI & CONFIG (CLEAN ANGEL THEME + MODERN TABS)
 # ==========================================
-st.set_page_config(page_title="ANGEL", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHRI RAGHAVENDRA", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
-# CUSTOM APPLIIX + STREAMLIT CSS
 st.markdown("""
 <style>
-    /* Base Streamlit overrides */
-    [data-testid="stAppViewContainer"] { background-color: #ffffff; color: #0f111a; font-family: 'Inter', sans-serif; }
+    /* Clean Angel Theme */
+    [data-testid="stAppViewContainer"] { background-color: #f4f7f6; color: #0f111a; font-family: 'Inter', sans-serif; }
     
-/* Hide Streamlit Header for Appliix, but keep it active for swipe/JS */
-   @media (max-width: 850px) {
-        header[data-testid="stHeader"] { 
-            visibility: visible !important; 
-            height: auto !important;
-            background-color: #0284c7 !important; /* Matches your blue theme */
-        }
-        
-        /* Make the 'Open Sidebar' icon white so it's visible on blue */
-        header[data-testid="stHeader"] svg {
-            fill: white !important;
-        }
-
-        .main .block-container {
-            padding-top: 50px !important; /* Adds space for the header */
-        }
+    @media (max-width: 850px) {
+        header[data-testid="stHeader"] { visibility: visible !important; height: auto !important; background-color: #0284c7 !important; }
+        header[data-testid="stHeader"] svg { fill: white !important; }
+        .main .block-container { padding-top: 50px !important; }
     }
     
-    [data-testid="stSidebar"] { background-color: #0284c7 !important; transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); }
+    /* Sidebar Styling */
+    [data-testid="stSidebar"] { background-color: #0284c7 !important; transition: all 0.4s ease; border-right: 1px solid #0369a1; }
     [data-testid="stSidebar"] * { color: #ffffff !important; }
     
+    /* Input Fields */
     div[data-baseweb="select"] * { color: #0f111a !important; font-weight: 600 !important; }
     div[data-baseweb="select"] { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important; }
     div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"] {
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 8px !important;
     }
-    
     .main .block-container { padding-bottom: 20px !important; }
-    
-    /* Smooth Font Rendering */
-    * { -webkit-font-smoothing: antialiased; letter-spacing: -0.01em; }
 
-    /* =========================================
-       NATIVE ANDROID SWIPEABLE TABS
-       ========================================= */
+    /* --- MODERN IOS-STYLE SEGMENTED TABS --- */
     div[data-baseweb="tab-list"] {
-        display: flex !important;
-        overflow-x: auto !important;
-        overflow-y: hidden !important;
-        white-space: nowrap !important;
-        -webkit-overflow-scrolling: touch !important; 
-        border-bottom: 2px solid #e2e8f0 !important;
-        gap: 5px !important;
-        padding-bottom: 0px !important;
-        background-color: #ffffff !important;
-        -ms-overflow-style: none !important;  
-        scrollbar-width: none !important;  
+        display: flex !important; width: 100% !important; 
+        background-color: #e2e8f0 !important; /* Light Gray Container */
+        border-radius: 14px !important; padding: 6px !important; gap: 6px !important; border: none !important;
     }
-    div[data-baseweb="tab-list"]::-webkit-scrollbar { display: none !important; }
-    
     div[data-baseweb="tab"] {
-        flex: 0 0 auto !important; 
-        white-space: nowrap !important;
-        padding: 12px 16px !important;
-        margin: 0 !important;
-        font-weight: 600 !important;
-        border-radius: 0px !important;
-        background: transparent !important;
-        border: none !important;
+        flex: 1 !important; text-align: center !important; justify-content: center !important;
+        background-color: transparent !important; color: #64748b !important;
+        border-radius: 10px !important; font-weight: 700 !important; font-size: 0.95rem !important;
+        letter-spacing: 0.5px !important; padding: 12px 0 !important; margin: 0 !important; border: none !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+    div[data-baseweb="tab"]:hover {
+        color: #0284c7 !important; background-color: rgba(255,255,255,0.5) !important;
+    }
+    div[data-baseweb="tab"][aria-selected="true"] {
+        background-color: #ffffff !important; /* Floating White Pill */
+        color: #0284c7 !important; 
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+        transform: translateY(-1px) !important;
     }
 
-    /* INVISIBLE BOTTOM DOCK FOR APPLIIX JS TRIGGERS */
-    .bottom-dock-container {
-        position: fixed !important;
-        bottom: -500px !important; /* Pushed off the screen */
-        opacity: 0.01 !important;  /* Technically visible to the system, invisible to you */
-        z-index: -1 !important;    /* Hidden behind everything else */
+    /* Cards and Glass Panels */
+    .broker-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.03); }
+    .glass-panel {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 16px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06);
+        padding: 30px;
     }
+    .bottom-dock-container { position: fixed !important; bottom: -500px !important; opacity: 0.01 !important; z-index: -1 !important; }
+    
+    /* Custom Logo formatting */
+    .logo-container { display: flex; align-items: center; justify-content: center; height: 100%; }
+    .logo-img { width: 45px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
 </style>
 """, unsafe_allow_html=True)
 
-DEFAULT_LOTS = {"NIFTY": 25, "BANKNIFTY": 15, "SENSEX": 10, "CRUDEOIL": 100, "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30, "XAUUSD": 0.01, "EURUSD": 0.01, "BTCUSD": 0.01, "ETHUSD": 0.1, "SOLUSD": 1.0, "INDIA VIX": 1}
-YF_TICKERS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", "NATURALGAS": "NG=F", "GOLD": "GC=F", "SILVER": "SI=F", "XAUUSD": "GC=F", "EURUSD": "EURUSD=X", "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD", "SOLUSD": "SOL-USD"}
+DEFAULT_LOTS = {
+    "NIFTY": 25, "BANKNIFTY": 15, "SENSEX": 10, "CRUDEOIL": 100, "NATURALGAS": 1250, 
+    "GOLD": 100, "SILVER": 30, "XAUUSD": 0.01, "EURUSD": 0.01, "BTCUSD": 0.01, 
+    "ETHUSD": 0.1, "SOLUSD": 1.0, "INDIA VIX": 1,
+    "XRPUSD": 10.0, "ARBUSD": 1.0, "ADAUSD": 10.0, "XAGUSD": 0.1, "DOGEUSD": 100.0, 
+    "BNBUSD": 0.05, "1000PEPEUSD": 1.0, "SUIUSD": 1.0, "NEARUSD": 1.0, "ENAUSD": 1.0, 
+    "TIAUSD": 1.0, "1000BONKUSD": 1.0, "MEUSD": 1.0,
+    "FETUSD": 1.0, "RNDRUSD": 1.0, "TAOUSD": 0.01, "INJUSD": 1.0, "AGIXUSD": 1.0
+}
+YF_TICKERS = {
+    "NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "CRUDEOIL": "CL=F", 
+    "NATURALGAS": "NG=F", "GOLD": "GC=F", "SILVER": "SI=F", "XAUUSD": "GC=F", "EURUSD": "EURUSD=X", 
+    "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD", "SOLUSD": "SOL-USD",
+    "XRPUSD": "XRP-USD", "ARBUSD": "ARB-USD", "ADAUSD": "ADA-USD", "XAGUSD": "SI=F", 
+    "DOGEUSD": "DOGE-USD", "BNBUSD": "BNB-USD", "1000PEPEUSD": "PEPE-USD", "SUIUSD": "SUI-USD", 
+    "NEARUSD": "NEAR-USD", "ENAUSD": "ENA-USD", "TIAUSD": "TIA-USD", "1000BONKUSD": "BONK-USD", 
+    "MEUSD": "ME-USD",
+    "FETUSD": "FET-USD", "RNDRUSD": "RNDR-USD", "TAOUSD": "TAO-USD", "INJUSD": "INJ-USD", "AGIXUSD": "AGIX-USD"
+}
 INDEX_SYMBOLS = {"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank", "SENSEX": "BSE SENSEX", "INDIA VIX": "INDIA VIX"}
 INDEX_TOKENS = {"NIFTY": ("NSE", "26000"), "BANKNIFTY": ("NSE", "26009"), "INDIA VIX": ("NSE", "26017"), "SENSEX": ("BSE", "99919000")}
 
-STRAT_LIST = ["Intraday Trend Rider", "All in One", "ICT", "Momentum Breakout + S&R", "Institutional FVG + SMC"]
+STRAT_LIST = ["VIJAY & RFF All-In-One", "Intraday Trend Rider", "ICT", "Momentum Breakout + S&R", "Institutional FVG + SMC"]
 
 if 'sb_index_input' not in st.session_state: st.session_state.sb_index_input = list(DEFAULT_LOTS.keys())[0]
 if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = STRAT_LIST[0]
@@ -209,12 +242,15 @@ if 'custom_stock' not in st.session_state: st.session_state.custom_stock = ""
 
 def get_market_status():
     now_ist = get_ist()
+    bot = getattr(st.session_state, 'bot', None)
+    is_crypto_active = bot and (bot.is_mt5_connected or bot.coindcx_api or bot.delta_api)
+    
     if now_ist.weekday() >= 5: 
-        if getattr(st.session_state, 'bot', None) and st.session_state.bot.is_mt5_connected: return True, "Crypto Live 🌍"
+        if is_crypto_active: return True, "Crypto Live 🌍"
         return False, "Market Closed (Weekend)"
     if dt.time(9, 15) <= now_ist.time() <= dt.time(15, 30): return True, "Market Live 🟢"
     if dt.time(17, 00) <= now_ist.time() <= dt.time(23, 30): return True, "Commodity/Forex Live 🟠"
-    if getattr(st.session_state, 'bot', None) and st.session_state.bot.is_mt5_connected: return True, "Forex/Crypto Live 🌍"
+    if is_crypto_active: return True, "Forex/Crypto Live 🌍"
     return False, "Market Closed (After Hours)"
 
 @st.cache_data(ttl=43200) 
@@ -288,39 +324,126 @@ class TechnicalAnalyzer:
             if bob_h != 0.0 and beob_h != 0.0: break
         return {"bob_high": bob_h, "bob_low": bob_l, "beob_high": beob_h, "beob_low": beob_l}
 
-    def apply_all_in_one_strategy(self, df, index_name="NIFTY"):
+    def apply_ict_smc_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
         df = self.calculate_indicators(df, is_index)
         df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
-        
+
+        df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+
         min_rsi = df['rsi'].rolling(14).min()
         max_rsi = df['rsi'].rolling(14).max()
         df['stoch_rsi'] = (df['rsi'] - min_rsi) / (max_rsi - min_rsi + 1e-10)
-        df['stoch_k'] = df['stoch_rsi'].rolling(3).mean()
+        df['stoch_k'] = df['stoch_rsi'].rolling(3).mean() * 100
         df['stoch_d'] = df['stoch_k'].rolling(3).mean()
-        
+
         df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
         df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
-        
-        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+
+        latest_bull_top = df['low'].where(df['fvg_bull']).ffill()
+        latest_bull_bot = df['high'].shift(2).where(df['fvg_bull']).ffill()
+        latest_bear_bot = df['high'].where(df['fvg_bear']).ffill()
+        latest_bear_top = df['low'].shift(2).where(df['fvg_bear']).ffill()
+
+        last = df.iloc[-1]
         atr = self.get_atr(df).iloc[-1]
-        df['alpha_up'] = df['close'].ewm(span=14).mean() + atr
-        df['sar_bull'] = df['close'] > df['close'].shift(1).rolling(5).min()
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        smc_blocks = self.detect_order_blocks(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
+
+        trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
+
+        mitigated_bull = (last['low'] <= latest_bull_top.iloc[-1]) and (last['low'] >= latest_bull_bot.iloc[-1] * 0.999)
+        bull_reversal = last['close'] > last['open'] and last['close'] > last['ema9']
+
+        if mitigated_bull and bull_reversal and (last['ema9'] > last['ema21']) and (last['stoch_k'] > last['stoch_d']):
+            trend, signal = "ICT BULL FVG REVERSAL CONFIRMED 🟢", "BUY_CE"
+
+        mitigated_bear = (last['high'] >= latest_bear_bot.iloc[-1]) and (last['high'] <= latest_bear_top.iloc[-1] * 1.001)
+        bear_reversal = last['close'] < last['open'] and last['close'] < last['ema9']
+
+        if mitigated_bear and bear_reversal and (last['ema9'] < last['ema21']) and (last['stoch_k'] < last['stoch_d']):
+            trend, signal = "ICT BEAR FVG REVERSAL CONFIRMED 🔴", "BUY_PE"
+
+        return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
+
+    def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
+        """ VIJAY_RFF Custom Strategy Core with Pandas_TA """
+        if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
         
+        df = self.calculate_indicators(df, is_index)
+        atr = self.get_atr(df).iloc[-1]
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
         smc_blocks = self.detect_order_blocks(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
         
-        last, prev = df.iloc[-1], df.iloc[-2]
-        signal, trend = "WAIT", "RANGING 🟡"
+        if not HAS_PTA:
+            return "WAIT (pandas_ta required)", "WAIT", df['close'].iloc[-1], df['close'].iloc[-1], df, atr, fib_data
+
+        df_ta = df.copy()
+        df_ta.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
         
-        bullish_confluence = (last['close'] > last['vwap'] and last['stoch_k'] > last['stoch_d'] and (last['fvg_bull'] or prev['fvg_bull'] or smc_blocks['bob_high'] != 0.0) and last['sar_bull'])
-        bearish_confluence = (last['close'] < last['vwap'] and last['stoch_k'] < last['stoch_d'] and (last['fvg_bear'] or prev['fvg_bear'] or smc_blocks['beob_low'] != 0.0) and not last['sar_bull'])
+        df_ta['EMA_5'] = ta.ema(df_ta['Close'], length=5)
+        df_ta['EMA_13'] = ta.ema(df_ta['Close'], length=13)
+        df_ta['EMA_21'] = ta.ema(df_ta['Close'], length=21)
+        df_ta['EMA_34'] = ta.ema(df_ta['Close'], length=34)
+        df_ta['EMA_50'] = ta.ema(df_ta['Close'], length=50)
+        df_ta['EMA_72'] = ta.ema(df_ta['Close'], length=72)
         
-        if bullish_confluence: trend, signal = "ALL-IN-ONE CONVERGENCE UPTREND 🟢", "BUY_CE"
-        elif bearish_confluence: trend, signal = "ALL-IN-ONE CONVERGENCE DOWNTREND 🔴", "BUY_PE"
+        df_ta['HMA_9'] = ta.hma(df_ta['Close'], length=9)
+        df_ta['HMA_21'] = ta.hma(df_ta['Close'], length=21)
+        
+        adx_df = ta.adx(df_ta['High'], df_ta['Low'], df_ta['Close'], length=14)
+        df_ta['ADX'] = adx_df['ADX_14'] if adx_df is not None else 0
+        df_ta['is_choppy'] = df_ta['ADX'] < 20
+
+        sti = ta.supertrend(df_ta['High'], df_ta['Low'], df_ta['Close'], length=10, multiplier=2.0)
+        df_ta['SuperTrend_Dir'] = sti['SUPERTd_10_2.0'] if sti is not None else 1
+        
+        df_ta['RSI_ta'] = ta.rsi(df_ta['Close'], length=14)
+        df_ta['RSI_SMA'] = ta.sma(df_ta['RSI_ta'], length=9)
+        
+        df_ta['VWAP'] = ta.vwap(df_ta['High'], df_ta['Low'], df_ta['Close'], df_ta['Volume'])
+        if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all():
+            df_ta['VWAP'] = df_ta['Close']
             
-        return trend, signal, last['vwap'], df['alpha_up'].iloc[-1], df, atr, fib_data
+        df_ta['Vol_SMA'] = ta.sma(df_ta['Volume'], length=20)
+        df_ta['is_strong_vol'] = df_ta['Volume'] > (df_ta['Vol_SMA'] * 1.3)
+        
+        df_ta['Buy_Signal'] = False
+        df_ta['Sell_Signal'] = False
+
+        bull_trend = (df_ta['Close'] > df_ta['HMA_21']) & (df_ta['Close'] > df_ta['VWAP'])
+        bear_trend = (df_ta['Close'] < df_ta['HMA_21']) & (df_ta['Close'] < df_ta['VWAP'])
+        
+        osv2_buy = (df_ta['SuperTrend_Dir'] == 1) & (df_ta['Close'] > df_ta['EMA_50'])
+        osv2_sell = (df_ta['SuperTrend_Dir'] == -1) & (df_ta['Close'] < df_ta['EMA_50'])
+
+        df_ta.loc[(bull_trend) & (osv2_buy) & (~df_ta['is_choppy']) & (df_ta['is_strong_vol']), 'Buy_Signal'] = True
+        df_ta.loc[(bear_trend) & (osv2_sell) & (~df_ta['is_choppy']) & (df_ta['is_strong_vol']), 'Sell_Signal'] = True
+        
+        df['vwap'] = df_ta['VWAP']
+        df['ema_fast'] = df_ta['EMA_13']
+        
+        last = df_ta.iloc[-1]
+        prev = df_ta.iloc[-2]
+        
+        signal = "WAIT"
+        trend = "RANGING 🟡 (VIJAY_RFF)"
+        
+        if last['Buy_Signal'] or prev['Buy_Signal']:
+            signal = "BUY_CE"
+            trend = "VIJAY_RFF BULL UPTREND 🟢"
+        elif last['Sell_Signal'] or prev['Sell_Signal']:
+            signal = "BUY_PE"
+            trend = "VIJAY_RFF BEAR DOWNTREND 🔴"
+        elif last['is_choppy']:
+            trend = "CHOPPY MARKET 🟡 (ADX < 20)"
+            
+        return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data
 
     def apply_trend_rider_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
@@ -374,11 +497,15 @@ class TechnicalAnalyzer:
 # 4. CORE BOT ENGINE
 # ==========================================
 class SniperBot:
-    def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", is_mock=False):
+    def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", is_mock=False):
         self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
         self.tg_token, self.tg_chat, self.wa_phone, self.wa_api = tg_token, tg_chat, wa_phone, wa_api
         self.mt5_acc, self.mt5_pass, self.mt5_server = mt5_acc, mt5_pass, mt5_server
-        self.api, self.token_map, self.is_mock = None, None, is_mock
+        self.zerodha_api, self.zerodha_secret, self.request_token = zerodha_api, zerodha_secret, request_token
+        self.coindcx_api, self.coindcx_secret = coindcx_api, coindcx_secret
+        self.delta_api, self.delta_secret = delta_api, delta_secret
+        
+        self.api, self.kite, self.token_map, self.is_mock = None, None, None, is_mock
         self.is_mt5_connected = False
         self.client_name = "Offline User"
         self.client_ip = get_client_ip()
@@ -391,14 +518,14 @@ class SniperBot:
             "spot": 0.0, "vwap": 0.0, "ema": 0.0, "atr": 0.0, "fib_data": {}, "latest_data": None,
             "ui_popups": deque(maxlen=10), "loop_count": 0, "daily_pnl": 0.0, "trades_today": 0,
             "manual_exit": False,
-            "ghost_memory": {} # Tracks last traded timestamps to prevent duplicates
+            "ghost_memory": {} 
         }
         self.settings = {}
 
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
         if HAS_NOTIFY:
-            try: notification.notify(title=title, message=message, app_name="ANGEL", timeout=5)
+            try: notification.notify(title=title, message=message, app_name="QUANT", timeout=5)
             except: pass
         if self.tg_token and self.tg_chat:
             try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
@@ -411,28 +538,56 @@ class SniperBot:
         self.state["logs"].appendleft(f"[{get_ist().strftime('%H:%M:%S')}] {msg}")
 
     def get_balance(self):
-        if self.is_mock: return "₹ 10,00,000 (Paper)"
+        if self.is_mock: 
+            cap = self.settings.get("max_capital", 15000.0) if self.settings else 15000.0
+            return f"₹ {cap:,.2f} (Paper)"
         b_str = []
         if self.api:
             try:
                 rms = self.api.rms()
-                if rms and rms.get('status'): b_str.append(f"🇮🇳 ₹ {rms['data'].get('availablecash', 0)}")
+                if rms and rms.get('status'): b_str.append(f"Angel: ₹ {rms['data'].get('availablecash', 0)}")
+            except: pass
+        if self.kite:
+            try:
+                margins = self.kite.margins()
+                b_str.append(f"Zerodha: ₹ {margins['equity']['available']['live_balance']}")
+            except: pass
+        if self.coindcx_api:
+            try:
+                ts = int(round(time.time() * 1000))
+                payload = {"timestamp": ts}
+                secret_bytes = bytes(self.coindcx_secret, 'utf-8')
+                signature = hmac.new(secret_bytes, json.dumps(payload).encode('utf-8'), hashlib.sha256).hexdigest()
+                res = requests.post("https://api.coindcx.com/exchange/v1/users/balances", headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature}, json=payload)
+                if res.status_code == 200:
+                    for b in res.json():
+                        if b['currency'] == 'USDT': b_str.append(f"DCX: $ {round(float(b['balance']),2)}")
+            except: pass
+        if self.delta_api:
+            try:
+                ts, sig = generate_delta_signature('GET', '/v2/wallet/balances', '', self.delta_secret)
+                headers = {'api-key': self.delta_api, 'signature': sig, 'timestamp': ts}
+                res = requests.get("https://api.delta.exchange/v2/wallet/balances", headers=headers)
+                if res.status_code == 200:
+                    for b in res.json().get('result', []):
+                        if b['asset_symbol'] == 'USDT': b_str.append(f"Delta: $ {round(float(b['balance']),2)}")
             except: pass
         if self.is_mt5_connected:
             try:
                 acc = mt5.account_info()
-                if acc: b_str.append(f"🌍 $ {acc.balance}")
+                if acc: b_str.append(f"MT5: $ {acc.balance}")
             except: pass
         return " | ".join(b_str) if b_str else "N/A"
 
     def login(self):
         if self.is_mock: 
-            self.client_name, self.api_key = "Paper Trading User", "mock_key_123"
+            self.client_name, self.api_key = "Paper Trading User", "mock_user"
             self.user_hash = get_user_hash(self.api_key)
-            self.push_notify("🟢 Session Started", f"Paper Trading from IP: {self.client_ip}")
+            self.push_notify("🟢 Session Started", f"Paper Trading active.")
             return True
         
         success = False
+        # Angel One
         if self.api_key and self.totp_secret:
             try:
                 obj = SmartConnect(api_key=self.api_key)
@@ -440,24 +595,44 @@ class SniperBot:
                 if res['status']:
                     self.api = obj
                     self.client_name = res['data'].get('name', self.client_id)
-                    self.log(f"✅ Angel One Connected | User: {self.client_name}")
+                    self.log(f"✅ Angel One Connected")
                     success = True
                 else: self.log(f"❌ Angel Login failed: {res.get('message', 'Check credentials')}")
             except Exception as e: self.log(f"❌ Angel Login Exception: {e}")
 
+        # Zerodha
+        if self.zerodha_api and self.zerodha_secret and self.request_token and HAS_ZERODHA:
+            try:
+                self.kite = KiteConnect(api_key=self.zerodha_api)
+                data = self.kite.generate_session(self.request_token, api_secret=self.zerodha_secret)
+                self.kite.set_access_token(data["access_token"])
+                self.log(f"✅ Zerodha Kite Connected")
+                success = True
+            except Exception as e: self.log(f"❌ Zerodha Exception: {e}")
+
+        # MT5
         if self.mt5_acc and self.mt5_server and HAS_MT5:
             try:
                 if mt5.initialize():
                     if mt5.login(int(self.mt5_acc), password=self.mt5_pass, server=self.mt5_server):
-                        self.log(f"🌍 MT5 Connected | Account: {self.mt5_acc}")
+                        self.log(f"✅ MT5 Connected")
                         self.is_mt5_connected = True
                         success = True
                     else: self.log(f"❌ MT5 Login failed: {mt5.last_error()}")
                 else: self.log(f"❌ MT5 Init failed: {mt5.last_error()}")
             except Exception as e: self.log(f"❌ MT5 Exception: {e}")
+
+        # CoinDCX & Delta
+        if self.coindcx_api and self.coindcx_secret:
+            self.log(f"✅ CoinDCX Credentials Loaded")
+            success = True
+            
+        if self.delta_api and self.delta_secret:
+            self.log(f"✅ Delta Exchange Credentials Loaded")
+            success = True
                 
         if success:
-            self.push_notify("🟢 Gateway Active", f"Connections established for user: {self.client_name}")
+            self.push_notify("🟢 Gateway Active", f"Connections established.")
             return True
         return False
 
@@ -466,8 +641,14 @@ class SniperBot:
         return self.token_map
 
     def get_token_info(self, index_name):
-        if index_name in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", "SOLUSD"] or (self.is_mt5_connected and len(index_name) >= 6):
+        if index_name in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", "SOLUSD"] and self.settings.get("primary_broker") == "MT5":
             return "MT5", index_name
+        
+        if self.settings.get("primary_broker") == "Delta Exchange" or ("USD" in index_name and "Delta" in self.settings.get("primary_broker", "")):
+            return "DELTA", index_name
+        if self.settings.get("primary_broker") == "CoinDCX" or "USDT" in index_name or "INR" in index_name:
+            return "COINDCX", index_name
+            
         if index_name in INDEX_TOKENS: return INDEX_TOKENS[index_name]
         df_map = self.get_master()
         if df_map is not None and not df_map.empty:
@@ -481,7 +662,7 @@ class SniperBot:
         return "NSE", "12345"
 
     def get_market_data_oi(self, exchange, token):
-        if self.is_mock or exchange == "MT5": return np.random.randint(50000, 150000), np.random.randint(1000, 10000)
+        if self.is_mock or exchange in ["MT5", "COINDCX", "DELTA"]: return np.random.randint(50000, 150000), np.random.randint(1000, 10000)
         if not self.api: return 0, 0
         try:
             res = self.api.marketData({"mode": "FULL", "exchangeTokens": { exchange: [str(token)] }})
@@ -490,7 +671,7 @@ class SniperBot:
         return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
-        if self.is_mock: 
+        if self.is_mock and token == "12345": 
             base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
             base = base_prices.get(symbol, 500)
             return float(np.random.uniform(base - 10, base + 10))
@@ -499,17 +680,37 @@ class SniperBot:
             tick = mt5.symbol_info_tick(symbol)
             if tick: return (tick.bid + tick.ask) / 2.0
             return None
+            
+        if exchange == "COINDCX" and self.coindcx_api:
+            try:
+                res = requests.get(f"https://api.coindcx.com/exchange/ticker").json()
+                for coin in res:
+                    if coin['market'] == symbol: return float(coin['last_price'])
+            except: return None
+            
+        if exchange == "DELTA" and self.delta_api:
+            try:
+                res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={symbol}").json()
+                if res.get('success'): return float(res['result']['close'])
+            except: return None
 
-        if not self.api: return None
-        try:
-            trading_symbol = INDEX_SYMBOLS.get(symbol, symbol)
-            res = self.api.ltpData(exchange, trading_symbol, str(token))
-            if res and res.get('status'): return float(res['data']['ltp'])
-        except: pass
+        if self.kite and self.settings.get("primary_broker") == "Zerodha":
+            try:
+                tsym = f"{exchange}:{symbol}"
+                res = self.kite.quote([tsym])
+                return float(res[tsym]['last_price'])
+            except: pass
+
+        if self.api:
+            try:
+                trading_symbol = INDEX_SYMBOLS.get(symbol, symbol)
+                res = self.api.ltpData(exchange, trading_symbol, str(token))
+                if res and res.get('status'): return float(res['data']['ltp'])
+            except: pass
         return None
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
-        if self.is_mock: return self._fallback_yfinance(symbol, interval)
+        if self.is_mock and token == "12345": return self._fallback_yfinance(symbol, interval)
         if exchange == "MT5" and self.is_mt5_connected:
             try:
                 mt5_interval_map = {"1m": mt5.TIMEFRAME_M1, "3m": mt5.TIMEFRAME_M3, "5m": mt5.TIMEFRAME_M5, "15m": mt5.TIMEFRAME_M15}
@@ -524,21 +725,32 @@ class SniperBot:
             except: pass
             return self._fallback_yfinance(symbol, interval)
             
-        if not self.api: return None
+        if not self.api and not self.kite: return self._fallback_yfinance(symbol, interval)
+        
         try:
-            interval_map = {"1m": "ONE_MINUTE", "3m": "THREE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE"}
-            api_interval = interval_map.get(interval, "FIVE_MINUTE")
             now_ist = get_ist()
             fromdate = now_ist - dt.timedelta(days=10) 
-            res = self.api.getCandleData({"exchange": exchange, "symboltoken": str(token), "interval": api_interval, "fromdate": fromdate.strftime("%Y-%m-%d %H:%M"), "todate": now_ist.strftime("%Y-%m-%d %H:%M")})
-            if res and res.get('status') and res.get('data'):
-                df = pd.DataFrame(res['data'], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                if df.empty: return self._fallback_yfinance(symbol, interval)
+            
+            if self.kite and self.settings.get("primary_broker") == "Zerodha":
+                z_int_map = {"1m": "minute", "3m": "3minute", "5m": "5minute", "15m": "15minute"}
+                records = self.kite.historical_data(int(token), fromdate.strftime("%Y-%m-%d"), now_ist.strftime("%Y-%m-%d"), z_int_map.get(interval, "5minute"))
+                df = pd.DataFrame(records)
+                df.rename(columns={'date': 'timestamp'}, inplace=True)
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                 df.index = df['timestamp']
                 return df
-            return self._fallback_yfinance(symbol, interval)
-        except: return self._fallback_yfinance(symbol, interval)
+            elif self.api:
+                interval_map = {"1m": "ONE_MINUTE", "3m": "THREE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE"}
+                api_interval = interval_map.get(interval, "FIVE_MINUTE")
+                res = self.api.getCandleData({"exchange": exchange, "symboltoken": str(token), "interval": api_interval, "fromdate": fromdate.strftime("%Y-%m-%d %H:%M"), "todate": now_ist.strftime("%Y-%m-%d %H:%M")})
+                if res and res.get('status') and res.get('data'):
+                    df = pd.DataFrame(res['data'], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    if df.empty: return self._fallback_yfinance(symbol, interval)
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                    df.index = df['timestamp']
+                    return df
+        except: pass
+        return self._fallback_yfinance(symbol, interval)
             
     def _fallback_yfinance(self, symbol, interval):
         yf_int = interval if interval in ["1m", "5m", "15m"] else "5m" 
@@ -557,69 +769,130 @@ class SniperBot:
         df.index = df['timestamp']
         return df
 
-    # --- GREEK/OI SIMULATION ---
     def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
         if not is_hero_zero or df is None or len(df) < 14: return True, ""
-        
         last = df.iloc[-1]
         atr = self.analyzer.get_atr(df).iloc[-1]
         body = abs(last['close'] - last['open'])
-        
-        # Proxies: High volume + large body near end of day = Gamma Blast Probability
         if last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.5 and body > atr:
-            if signal == "BUY_CE" and last['close'] > last['open']:
-                return True, "🔥 OI Support Shifted Up. Gamma Blast Probable!"
-            elif signal == "BUY_PE" and last['close'] < last['open']:
-                return True, "🩸 OI Resistance Shifted Down. Gamma Blast Probable!"
-                
+            if signal == "BUY_CE" and last['close'] > last['open']: return True, "🔥 OI Support Shifted Up. Gamma Blast Probable!"
+            elif signal == "BUY_PE" and last['close'] < last['open']: return True, "🩸 OI Resistance Shifted Down. Gamma Blast Probable!"
         return False, "⚠️ Blocked: High Theta Decay Risk / Consolidation."
 
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
         if self.is_mock: return "MOCK_" + uuid.uuid4().hex[:6].upper()
+        broker = self.settings.get("primary_broker", "Angel One")
         
+        # Real Order Indian Broker Fix: Force purely to integer string to prevent 25.0 error
+        formatted_qty = str(int(float(qty))) if exchange in ["NFO", "NSE", "BFO", "MCX"] else str(qty)
+        
+        if exchange == "DELTA":
+            try:
+                payload = {"product_id": symbol, "size": int(float(qty)), "side": "buy" if side == "BUY" else "sell", "order_type": "market"}
+                payload_str = json.dumps(payload)
+                ts, sig = generate_delta_signature('POST', '/v2/orders', payload_str, self.delta_secret)
+                headers = {'api-key': self.delta_api, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
+                res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
+                if res.status_code == 200: 
+                    self.log(f"🟢 ENTRY: {symbol} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
+                    return res.json().get('result', {}).get('id')
+                else: 
+                    self.log(f"❌ Delta Order Failed: {res.text}"); return None
+            except Exception as e: 
+                self.log(f"❌ Delta Exception: {e}"); return None
+
+        if exchange == "COINDCX":
+            try:
+                ts = int(round(time.time() * 1000))
+                market_type = self.settings.get("crypto_mode", "Spot")
+                
+                if market_type in ["Futures", "Options"] or "-" in symbol or "FUT" in symbol:
+                    payload = {"side": side.lower(), "order_type": "market", "market": symbol, "total_quantity": float(qty), "timestamp": ts}
+                    endpoint = "https://api.coindcx.com/exchange/v1/derivatives/orders/create"
+                else:
+                    payload = {"side": side.lower(), "order_type": "market", "market": symbol, "total_quantity": float(qty), "timestamp": ts}
+                    endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
+
+                secret_bytes = bytes(self.coindcx_secret, 'utf-8')
+                signature = hmac.new(secret_bytes, json.dumps(payload).encode('utf-8'), hashlib.sha256).hexdigest()
+                res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature}, json=payload)
+                
+                if res.status_code == 200: 
+                    self.log(f"🟢 ENTRY: {symbol} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
+                    response_data = res.json()
+                    order_id = response_data.get('orders', [{}])[0].get('id', response_data.get('id', 'DCX_ORDER_OK'))
+                    return order_id
+                else: 
+                    self.log(f"❌ CoinDCX Order Failed: {res.text}"); return None
+            except Exception as e: 
+                self.log(f"❌ CoinDCX Exception: {e}"); return None
+
         if exchange == "MT5" and self.is_mt5_connected:
             try:
                 action_type = mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL
                 tick = mt5.symbol_info_tick(symbol)
                 price = tick.ask if side == "BUY" else tick.bid
-                request = {
-                    "action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty),
-                    "type": action_type, "price": price, "deviation": 20, "magic": 234000,
-                    "comment": "ANGEL Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC,
-                }
+                request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty), "type": action_type, "price": price, "deviation": 20, "magic": 234000, "comment": "QUANT Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
                 result = mt5.order_send(request)
-                if result.retcode != mt5.TRADE_RETCODE_DONE:
-                    self.log(f"❌ MT5 Order Failed: {result.comment}")
-                    return None
+                if result.retcode != mt5.TRADE_RETCODE_DONE: self.log(f"❌ MT5 Order Failed: {result.comment}"); return None
                 return result.order
-            except Exception as e: return None
+            except Exception as e: self.log(f"❌ MT5 Exception: {e}"); return None
 
-        try: return self.api.placeOrder({"variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token), "transactiontype": side, "exchange": exchange, "ordertype": "MARKET", "producttype": "INTRADAY", "duration": "DAY", "quantity": str(qty)})
-        except: return None
+        if broker == "Zerodha" and self.kite:
+            try:
+                z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
+                order_id = self.kite.place_order(variety=self.kite.VARIETY_REGULAR, exchange=exchange, tradingsymbol=symbol, transaction_type=z_side, quantity=int(float(qty)), product=self.kite.PRODUCT_MIS, order_type=self.kite.ORDER_TYPE_MARKET)
+                return order_id
+            except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
+
+        try: 
+            order_params = {"variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token), "transactiontype": side, "exchange": exchange, "ordertype": "MARKET", "producttype": "INTRADAY", "duration": "DAY", "quantity": formatted_qty}
+            res = self.api.placeOrder(order_params)
+            if res and not res.get('status'): self.log(f"❌ Angel API Error: {res.get('message', 'Unknown Error')}"); return None
+            return res
+        except Exception as e: self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
 
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
-        if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium) 
+        
+        if self.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange"] and self.settings.get("crypto_mode") == "Options":
+            rounder = 500 if "BTC" in symbol else (50 if "ETH" in symbol else 1)
+            strike_price = round(spot / rounder) * rounder
+            expiry_str = (get_ist() + dt.timedelta(days=(4 - get_ist().weekday()) % 7)).strftime("%d%b%y").upper() 
+            crypto_sym = f"{symbol.replace('USDT', '').replace('USD', '')}-{expiry_str}-{int(strike_price)}-{opt_type}"
+            exch_target = "COINDCX" if self.settings.get("primary_broker") == "CoinDCX" else "DELTA"
+            return crypto_sym, crypto_sym, exch_target, spot * 0.02
+            
         df = self.get_master()
-        if df is None or df.empty: return None, None, None, 0.0
+        if df is None or df.empty: 
+            if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
+            return None, None, None, 0.0
+
         today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
         mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
         subset = df[mask].copy()
-        if subset.empty: return None, None, None, 0.0
+        
+        if subset.empty: 
+            if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
+            return None, None, None, 0.0
+
         closest_expiry = subset['expiry'].min()
         subset = subset[subset['expiry'] == closest_expiry]
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
         
-        # For Hero/Zero, target slightly lower premium (OTM)
         if self.settings.get("hero_zero"):
             candidates = subset[subset['strike'] > spot] if opt_type == "CE" else subset[subset['strike'] < spot]
             candidates = candidates.sort_values('dist_to_spot', ascending=True).head(5)
-        else:
-            candidates = subset.sort_values('dist_to_spot', ascending=True).head(10)
+        else: candidates = subset.sort_values('dist_to_spot', ascending=True).head(10)
             
         for _, row in candidates.iterrows():
             ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
-            if ltp and ltp <= max_premium: return row['symbol'], row['token'], row['exch_seg'], ltp
+            if ltp is None and self.is_mock:
+                ltp = max_premium * 0.85
+            if ltp and ltp <= max_premium: 
+                return row['symbol'], row['token'], row['exch_seg'], ltp
+
+        if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
         return None, None, None, 0.0
 
     def trading_loop(self):
@@ -641,13 +914,13 @@ class SniperBot:
                     time.sleep(10)
                     continue
 
-                index, timeframe, paper, strategy = s['index'], s['timeframe'], s['paper_mode'], s['strategy']
+                index, timeframe, is_mock_mode, strategy = s['index'], s['timeframe'], s['paper_mode'], s['strategy']
                 exch, token = self.get_token_info(index)
                 is_mt5_asset = (exch == "MT5")
+                is_crypto = (exch in ["COINDCX", "DELTA"])
 
-                # SILVER included in commodity late cutoff
                 cutoff_time = dt.time(15, 15) if index not in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] else dt.time(23, 15)
-                if is_mt5_asset or self.is_mock: cutoff_time = dt.time(23, 59) 
+                if is_mt5_asset or is_crypto or self.is_mock: cutoff_time = dt.time(23, 59) 
                 
                 spot = self.get_live_price(exch, index, token)
                 if spot is None and self.is_mock: spot = self.get_live_price("NSE", index, "12345")
@@ -655,17 +928,17 @@ class SniperBot:
                 df_candles = self.get_historical_data(exch, token, symbol=index, interval=timeframe) if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval=timeframe)
                 
                 user_lots_dict = s.get('user_lots', DEFAULT_LOTS)
-                base_lot_size = user_lots_dict.get(index, 25) if not is_mt5_asset else 0.01
+                base_lot_size = user_lots_dict.get(index, 25) if not (is_mt5_asset or is_crypto) else 0.01
                 
                 if spot and df_candles is not None and not df_candles.empty:
                     self.state["spot"] = spot
                     last_candle = df_candles.iloc[-1]
                     
-                    if "All in One" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_all_in_one_strategy(df_candles, index)
+                    if "VIJAY & RFF" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_vijay_rff_strategy(df_candles, index)
+                    elif "Institutional FVG" in strategy or "ICT" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_ict_smc_strategy(df_candles, index)
                     elif "Trend Rider" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_trend_rider_strategy(df_candles, index)
                     else: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
 
-                    # FOMO MOMENTUM TRIGGER
                     if s.get("fomo_entry"):
                         body = abs(last_candle['close'] - last_candle['open'])
                         avg_body = df_candles['close'].diff().abs().rolling(14).mean().iloc[-1]
@@ -675,14 +948,12 @@ class SniperBot:
                             if self.state["active_trade"] is None:
                                 self.push_notify("🚨 FOMO ALERT", f"High Momentum Detected on {index}!")
 
-                    # GHOST LOGIC (ANTI-DUPLICATE)
                     if signal != "WAIT":
                         last_trade_time = self.state["ghost_memory"].get(f"{index}_{signal}")
-                        if last_trade_time and (get_ist() - last_trade_time).seconds < 900: # 15 min cool-off
+                        if last_trade_time and (get_ist() - last_trade_time).seconds < 900:
                             signal = "WAIT"
-                            trend += " | 👻 Ghost Blocked (Avoid Chop)"
+                            trend += " | 👻 Ghost Blocked"
 
-                    # MULTI-TF CONFIRMATION
                     if s.get("mtf_confirm") and signal != "WAIT":
                         df_htf = self.get_historical_data(exch, token, symbol=index, interval="15m") if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval="15m")
                         if df_htf is not None and len(df_htf) > 5:
@@ -691,29 +962,27 @@ class SniperBot:
                             if signal == "BUY_CE" and htf_close < htf_ema: signal = "WAIT"; trend = "MTF Blocked: 15m Bearish"
                             elif signal == "BUY_PE" and htf_close > htf_ema: signal = "WAIT"; trend = "MTF Blocked: 15m Bullish"
 
-                    # HERO/ZERO & OI CHECK
                     is_hz = s.get("hero_zero")
                     if is_hz and signal != "WAIT":
-                        if not self.is_mock and not is_mt5_asset:
+                        if not self.is_mock and not (is_mt5_asset or is_crypto):
                             live_oi, live_vol = self.get_market_data_oi(exch, token)
-                            if live_vol < 50000: 
-                                signal, trend = "WAIT", "Hero/Zero Blocked: Low Volume/OI"
+                            if live_vol < 50000: signal, trend = "WAIT", "Hero/Zero Blocked: Low Volume/OI"
                         
-                        # Simulate Greek checking
                         greek_pass, greek_msg = self.analyze_oi_and_greeks(df_candles, is_hz, signal)
-                        if not greek_pass:
-                            signal = "WAIT"
-                            trend = greek_msg
-                        else:
-                            trend += f" | {greek_msg}"
+                        if not greek_pass: signal = "WAIT"; trend = greek_msg
+                        else: trend += f" | {greek_msg}"
 
                     self.state.update({"current_trend": trend, "current_signal": signal, "vwap": vwap, "ema": ema, "atr": current_atr, "fib_data": fib_data, "latest_data": df_chart})
 
                     if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time:
                         qty = s['lots']
                         
-                        if is_mt5_asset:
-                            strike_sym, strike_token, strike_exch = index, index, "MT5"
+                        if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
+                            strike_sym = index
+                            if is_crypto and s.get('crypto_mode') == "Futures":
+                                if exch == "DELTA" and not strike_sym.endswith("USD"):
+                                    strike_sym = f"{strike_sym}USD" 
+                            strike_token, strike_exch = strike_sym, exch
                             entry_ltp = spot
                         else:
                             max_prem = s['max_capital'] / qty if qty > 0 else 0
@@ -726,7 +995,7 @@ class SniperBot:
                             tp3 = entry_ltp + (s['tgt_pts'] * 3)
                             
                             trade_type = "CE" if signal == "BUY_CE" else "PE"
-                            if is_mt5_asset: trade_type = "BUY" if signal == "BUY_CE" else "SELL"
+                            if is_mt5_asset or is_crypto: trade_type = "BUY" if signal == "BUY_CE" else "SELL"
 
                             new_trade = {
                                 "symbol": strike_sym, "token": strike_token, "exch": strike_exch, 
@@ -736,11 +1005,10 @@ class SniperBot:
                                 "scaled_out": False, "is_hz": is_hz
                             }
 
-                            if not paper and not self.is_mock: 
+                            if not is_mock_mode: 
                                 exec_side = "BUY" if new_trade['type'] in ["CE", "BUY"] else "SELL"
                                 self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch)
                                 
-                            self.log(f"🟢 ENTRY: {strike_sym} @ {entry_ltp}")
                             self.push_notify("Trade Entered", f"Entered {qty} {strike_sym} @ {entry_ltp}")
                             self.state["active_trade"] = new_trade
                             self.state["trades_today"] += 1
@@ -749,45 +1017,49 @@ class SniperBot:
                     elif self.state["active_trade"]:
                         trade = self.state["active_trade"]
                         
-                        if not self.is_mock: ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
+                        if not self.is_mock or (self.is_mock and trade['token'] != "12345" and self.api):
+                            ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
+                            if ltp is None and self.is_mock:
+                                delta = (spot - self.state["spot"]) * (0.5 if trade['type'] in ["CE", "BUY"] else -0.5)
+                                ltp = trade['entry'] + delta + np.random.uniform(-1, 2)
                         else:
                             delta = (spot - self.state["spot"]) * (0.5 if trade['type'] in ["CE", "BUY"] else -0.5) 
                             ltp = trade['entry'] + delta + np.random.uniform(-1, 2)
                             
                         if ltp:
-                            pnl = (ltp - trade['entry']) * trade['qty'] if trade['type'] in ["CE", "BUY"] else (trade['entry'] - ltp) * trade['qty']
+                            # CRITICAL PNL MATH: Both CE & PE Options Profit by Premium Rising. Spot/Futures allows shorting.
+                            if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
+                                pnl = (ltp - trade['entry']) * trade['qty'] if trade['type'] == "BUY" else (trade['entry'] - ltp) * trade['qty']
+                            else:
+                                pnl = (ltp - trade['entry']) * trade['qty']
+                                
                             if is_mt5_asset: pnl = pnl * 100000 if "USD" in trade['symbol'] else pnl 
 
                             self.state["active_trade"]["current_ltp"] = ltp
                             self.state["active_trade"]["floating_pnl"] = pnl
                             
-                            # Update Highest Reached for Trailing
                             if ltp > trade.get('highest_price', trade['entry']):
                                 trade['highest_price'] = ltp
-                                if not trade['is_hz']: # Don't trail Hero/Zero, let it hit target or SL
+                                if not trade['is_hz']:
                                     tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
                                     new_sl = ltp - tsl_buffer
                                     if new_sl > trade['sl']: trade['sl'] = new_sl
 
-                            # 50% PARTIAL PROFIT SCALING (NIFTY/SENSEX/XAUUSD)
                             if ltp >= trade['tp1'] and not trade['scaled_out'] and not trade['is_hz']:
-                                if index in ["NIFTY", "SENSEX", "XAUUSD"]:
+                                if index in ["NIFTY", "SENSEX", "XAUUSD"] or is_crypto:
                                     lots_held = trade['qty'] / base_lot_size
-                                    half_lots = int(lots_held / 2) if not is_mt5_asset else round(trade['qty']/2, 2)
-                                    
+                                    half_lots = int(lots_held / 2) if not (is_mt5_asset or is_crypto) else round(trade['qty']/2, 2)
                                     if half_lots > 0:
-                                        qty_to_sell = half_lots * base_lot_size if not is_mt5_asset else half_lots
-                                        if not paper and not self.is_mock:
+                                        qty_to_sell = half_lots * base_lot_size if not (is_mt5_asset or is_crypto) else half_lots
+                                        if not is_mock_mode:
                                             exec_side = "SELL" if trade['type'] in ["CE", "BUY"] else "BUY"
                                             self.place_real_order(trade['symbol'], trade['token'], qty_to_sell, exec_side, trade['exch'])
-                                        
                                         trade['qty'] -= qty_to_sell
                                         trade['scaled_out'] = True
-                                        trade['sl'] = trade['entry'] # Trail remainder to Break-Even
+                                        trade['sl'] = trade['entry'] 
                                         self.log(f"💥 PARTIAL BOOKED 50% at {ltp}. SL trailed to BE.")
                                         self.push_notify("Partial Profit", f"Booked 50% of {trade['symbol']}. Remainder running risk-free.")
                             
-                            # EXIT LOGIC
                             hit_tp = False if ("Trend Rider" in strategy and not trade['is_hz']) else (ltp >= trade['tgt'])
                             hit_sl = ltp <= trade['sl']
                             market_close = current_time >= cutoff_time
@@ -797,7 +1069,7 @@ class SniperBot:
                                 self.state["manual_exit"] = False
                             
                             if hit_tp or hit_sl or market_close:
-                                if not paper and not self.is_mock: 
+                                if not is_mock_mode: 
                                     exec_side = "SELL" if trade['type'] in ["CE", "BUY"] else "BUY"
                                     self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'])
                                 
@@ -814,7 +1086,9 @@ class SniperBot:
                                 self.log(f"🛑 EXIT {trade['symbol']} | PnL: {round(pnl, 2)} [{win_text}]")
                                 self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: {round(pnl, 2)}")
                                 
-                                if not self.is_mock: save_trade(self.api_key, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
+                                if not self.is_mock: 
+                                    user_id = getattr(self, "system_user_id", self.api_key)
+                                    save_trade(user_id, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
                                 else:
                                     if "paper_history" not in self.state: self.state["paper_history"] = []
                                     self.state["paper_history"].append({
@@ -845,7 +1119,7 @@ if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("ui
         alert = st.session_state.bot.state["ui_popups"].popleft()
         st.toast(alert.get("message", ""), icon="🔔")
 
-# --- LOGIN SCREEN ---
+# --- LOGIN SCREEN (Hidden Advanced Switches & Clean UI) ---
 if not getattr(st.session_state, "bot", None):
     if not HAS_DB: st.error("⚠️ Database missing. Add SUPABASE_URL and SUPABASE_KEY to enable saving & logs.")
         
@@ -854,53 +1128,108 @@ if not getattr(st.session_state, "bot", None):
     
     with login_col:
         st.markdown("""
-            <div style='text-align: center; background: linear-gradient(135deg, #0b1120, #0284c7); padding: 20px; border-radius: 12px 12px 0 0; border: 1px solid #0284c7; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 800; letter-spacing: 2px;'>⚡ ANGEL</h1>
-                <p style='color: #bae6fd; margin:0; font-size: 0.9rem;'>SECURE CLOUD GATEWAY</p>
+            <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 20px 20px 0 0; border-bottom: none;'>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI RAGHAVENDRA</h1>
+                <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
         
-        with st.container(border=True):
+        with st.container():
+            st.markdown("<div class='glass-panel'>", unsafe_allow_html=True)
             auth_mode = st.radio("Operating Mode", ["📝 Paper Trading", "⚡ Real Trading", "👆 Quick Auth"], horizontal=True, label_visibility="collapsed")
             st.divider()
             
             if auth_mode == "👆 Quick Auth":
-                st.info("💡 **Quick Login:** Paste your API Key. The system will auto-fetch your Cloud profile to log you in instantly.")
-                API_KEY = st.text_input("Enter your API Key", type="password")
+                st.info("💡 **Quick Login:** Enter your registered Email or Phone. The system will auto-fetch your Cloud profile.")
+                USER_ID = st.text_input("Enter Email ID or Phone Number")
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("👆 Authenticate & Connect", type="primary", use_container_width=True):
-                    creds = load_creds(API_KEY)
-                    if creds and creds.get("client_id"):
+                    creds = load_creds(USER_ID)
+                    if creds and (creds.get("client_id") or creds.get("zerodha_api") or creds.get("coindcx_api") or creds.get("delta_api")):
                         temp_bot = SniperBot(
-                            api_key=API_KEY, client_id=creds.get("client_id"), pwd=creds.get("pwd"), 
+                            api_key=creds.get("angel_api", ""), client_id=creds.get("client_id"), pwd=creds.get("pwd"), 
                             totp_secret=creds.get("totp_secret"), mt5_acc=creds.get("mt5_acc"), 
-                            mt5_pass=creds.get("mt5_pass"), mt5_server=creds.get("mt5_server"), is_mock=False
+                            mt5_pass=creds.get("mt5_pass"), mt5_server=creds.get("mt5_server"),
+                            zerodha_api=creds.get("zerodha_api"), zerodha_secret=creds.get("zerodha_secret"),
+                            coindcx_api=creds.get("coindcx_api"), coindcx_secret=creds.get("coindcx_secret"),
+                            delta_api=creds.get("delta_api"), delta_secret=creds.get("delta_secret"),
+                            is_mock=False
                         )
+                        temp_bot.system_user_id = USER_ID
                         with st.spinner("Authenticating via Cloud..."):
                             if temp_bot.login():
                                 st.session_state.bot = temp_bot
                                 st.rerun()
                             else:
-                                st.error("❌ Login Failed! API or TOTP Error.")
+                                st.error("❌ Login Failed! Check API details or TOTP.")
                     else:
                         st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
                         
             elif auth_mode == "⚡ Real Trading":
-                st.markdown("### 🇮🇳 Angel One Credentials")
-                API_KEY = st.text_input("SmartAPI Key", type="password", placeholder="Enter Angel One API Key")
-                creds = load_creds(API_KEY) if API_KEY else {}
-                col_id, col_pin = st.columns(2)
-                with col_id: CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
-                with col_pin: PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
-                TOTP = st.text_input("TOTP Secret", value=creds.get("totp_secret", ""), type="password")
+                st.warning("Ensure your Supabase 'user_credentials' table uses 'user_id' for lookup.")
+                USER_ID = st.text_input("System Login ID (Email or Phone Number)")
+                creds = load_creds(USER_ID) if USER_ID else {}
 
-                st.divider()
-                st.markdown("### 🌍 Forex (MT5) Credentials")
-                col_m1, col_m2 = st.columns(2)
-                with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
-                with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
-                MT5_SERVER = st.text_input("MT5 Server", value=creds.get("mt5_server", ""))
+                st.markdown("### 🏦 Select Brokers to Connect")
+                st.info("Toggle the brokers you want to activate. You can connect multiple simultaneously.")
                 
+                ANGEL_API, CLIENT_ID, PIN, TOTP = "", "", "", ""
+                Z_API, Z_SEC, Z_REQ = "", "", ""
+                MT5_ACC, MT5_PASS, MT5_SERVER = "", "", ""
+                DCX_API, DCX_SEC = "", ""
+                DELTA_API, DELTA_SEC = "", ""
+
+           # --- ANGEL ONE BOX ---
+                with st.container(border=True):
+                    col_img, col_t = st.columns([1, 6])
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
+                    with col_t: use_angel = st.toggle("Angel One India", value=bool(creds.get("client_id")))
+                    if use_angel:
+                        ANGEL_API = st.text_input("Angel API Key", value=creds.get("angel_api", ""))
+                        col_id, col_pin = st.columns(2)
+                        with col_id: CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
+                        with col_pin: PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
+                        TOTP = st.text_input("TOTP Secret", value=creds.get("totp_secret", ""), type="password")
+
+                # --- ZERODHA BOX ---
+                with st.container(border=True):
+                    col_img, col_t = st.columns([1, 6])
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=zerodha.com&sz=128", width=40)
+                    with col_t: use_zerodha = st.toggle("Zerodha Kite", value=bool(creds.get("zerodha_api")))
+                    if use_zerodha:
+                        Z_API = st.text_input("Kite API Key", value=creds.get("zerodha_api", ""))
+                        Z_SEC = st.text_input("Kite API Secret", type="password", value=creds.get("zerodha_secret", ""))
+                        Z_REQ = st.text_input("Today's Request Token", type="password")
+
+                # --- COINDCX BOX ---
+                with st.container(border=True):
+                    col_img, col_t = st.columns([1, 6])
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=coindcx.com&sz=128", width=40)
+                    with col_t: use_coindcx = st.toggle("CoinDCX Crypto", value=bool(creds.get("coindcx_api")))
+                    if use_coindcx:
+                        DCX_API = st.text_input("CoinDCX API Key", value=creds.get("coindcx_api", ""))
+                        DCX_SEC = st.text_input("CoinDCX API Secret", type="password", value=creds.get("coindcx_secret", ""))
+
+                # --- DELTA EXCHANGE BOX ---
+                with st.container(border=True):
+                    col_img, col_t = st.columns([1, 6])
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=delta.exchange&sz=128", width=40)
+                    with col_t: use_delta = st.toggle("Delta Exchange", value=bool(creds.get("delta_api")))
+                    if use_delta:
+                        DELTA_API = st.text_input("Delta API Key", value=creds.get("delta_api", ""))
+                        DELTA_SEC = st.text_input("Delta API Secret", type="password", value=creds.get("delta_secret", ""))
+
+                # --- MT5 BOX ---
+                with st.container(border=True):
+                    col_img, col_t = st.columns([1, 6])
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128", width=40)
+                    with col_t: use_mt5 = st.toggle("MetaTrader 5 (MT5)", value=bool(creds.get("mt5_acc")))
+                    if use_mt5:
+                        col_m1, col_m2 = st.columns(2)
+                        with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
+                        with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
+                        MT5_SERVER = st.text_input("MT5 Server", value=creds.get("mt5_server", ""))
+                st.divider()
                 with st.expander("📱 Notifications (Telegram/WhatsApp)"):
                     TG_TOKEN = st.text_input("Telegram Bot Token", value=creds.get("tg_token", ""))
                     TG_CHAT = st.text_input("Telegram Chat ID", value=creds.get("tg_chat", ""))
@@ -911,66 +1240,101 @@ if not getattr(st.session_state, "bot", None):
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("CONNECT MARKETS 🚀", type="primary", use_container_width=True):
-                    temp_bot = SniperBot(
-                        api_key=API_KEY, client_id=CLIENT_ID, pwd=PIN, totp_secret=TOTP, 
-                        tg_token=TG_TOKEN, tg_chat=TG_CHAT, wa_phone=WA_PHONE, wa_api=WA_API, 
-                        mt5_acc=MT5_ACC, mt5_pass=MT5_PASS, mt5_server=MT5_SERVER, is_mock=False
-                    )
-                    with st.spinner("Authenticating Secure Connections..."):
-                        if temp_bot.login():
-                            if SAVE_CREDS: save_creds(CLIENT_ID, PIN, TOTP, API_KEY, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER)
-                            st.session_state.bot = temp_bot
-                            st.rerun()
-                        else:
-                            err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
-                            st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
+                    if not USER_ID:
+                        st.error("Please enter your System Login ID (Email or Phone) to proceed.")
+                    else:
+                        temp_bot = SniperBot(
+                            api_key=ANGEL_API if use_angel else "", client_id=CLIENT_ID if use_angel else "", 
+                            pwd=PIN if use_angel else "", totp_secret=TOTP if use_angel else "", 
+                            tg_token=TG_TOKEN, tg_chat=TG_CHAT, wa_phone=WA_PHONE, wa_api=WA_API, 
+                            mt5_acc=MT5_ACC if use_mt5 else "", mt5_pass=MT5_PASS if use_mt5 else "", 
+                            mt5_server=MT5_SERVER if use_mt5 else "",
+                            zerodha_api=Z_API if use_zerodha else "", zerodha_secret=Z_SEC if use_zerodha else "", 
+                            request_token=Z_REQ if use_zerodha else "",
+                            coindcx_api=DCX_API if use_coindcx else "", coindcx_secret=DCX_SEC if use_coindcx else "",
+                            delta_api=DELTA_API if use_delta else "", delta_secret=DELTA_SEC if use_delta else "",
+                            is_mock=False
+                        )
+                        temp_bot.system_user_id = USER_ID
+                        with st.spinner("Authenticating Secure Connections..."):
+                            if temp_bot.login():
+                                if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC)
+                                st.session_state.bot = temp_bot
+                                st.rerun()
+                            else:
+                                err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
+                                st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
             else:
-                st.info("Paper Trading simulates live market movement without risking real capital.")
+                st.info("📝 Paper Trading simulates live market movement without risking real capital. Real Option tracking fetches live API data if logged in.")
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("START PAPER SESSION 📝", type="primary", use_container_width=True):
                     temp_bot = SniperBot(is_mock=True)
                     temp_bot.login()
                     st.session_state.bot = temp_bot
                     st.rerun()
-        
-        render_signature()
+                    
+            st.markdown("</div>", unsafe_allow_html=True)
 
-# --- MAIN TERMINAL ---
+# --- MAIN TERMINAL (VISIBLE AFTER LOGIN) ---
 else:
     bot = st.session_state.bot
     
     # --- 1. TOP HEADER (USER & LOGOUT) ---
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
-        st.markdown(f"**👤 User:** `{bot.client_name}`")
+        st.markdown(f"**👤 Session:** `<span style='color:#0284c7'>{bot.client_name}</span>` | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
     with head_c2:
         if st.button("🚪 Logout", use_container_width=True):
             bot.state["is_running"] = False
             st.session_state.clear()
             st.rerun()
 
-    # --- 2. THE SIDEBAR (NOW UNIFIED) ---
+    # --- 2. THE SIDEBAR (ADVANCED TRIGGERS ONLY VISIBLE HERE) ---
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
         
         st.markdown("**1. Market Setup**")
+        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5"], index=0)
+        
         if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
         
-        CUSTOM_STOCK = st.text_input("Add Custom Stock (NSE/BSE/FX)", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE").upper().strip()
+        CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE or BTCUSDT").upper().strip()
         st.session_state.custom_stock = CUSTOM_STOCK
         
-        asset_list = list(st.session_state.user_lots.keys())
-        if CUSTOM_STOCK and CUSTOM_STOCK not in asset_list:
-            asset_list.append(CUSTOM_STOCK)
-            st.session_state.user_lots[CUSTOM_STOCK] = 0.01 if len(CUSTOM_STOCK) == 6 else 1 
+        all_assets = list(st.session_state.user_lots.keys())
+        if CUSTOM_STOCK and CUSTOM_STOCK not in all_assets:
+            all_assets.append(CUSTOM_STOCK)
+            st.session_state.user_lots[CUSTOM_STOCK] = 0.01 if len(CUSTOM_STOCK) == 6 or "USD" in CUSTOM_STOCK else 1 
         
-        st.session_state.asset_options = asset_list
-        if st.session_state.sb_index_input not in asset_list: st.session_state.sb_index_input = asset_list[0]
+        if BROKER in ["Angel One", "Zerodha"]:
+            valid_assets = [a for a in all_assets if a in ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "INDIA VIX"] or ("USD" not in a and "USDT" not in a)]
+        elif BROKER in ["CoinDCX", "Delta Exchange"]:
+            valid_assets = [a for a in all_assets if a in ["BTCUSD", "ETHUSD", "SOLUSD"] or "USD" in a or "USDT" in a or "INR" in a]
+        else: # MT5
+            valid_assets = [a for a in all_assets if a in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", "SOLUSD"] or "USD" in a]
+            
+        if CUSTOM_STOCK and CUSTOM_STOCK not in valid_assets: valid_assets.append(CUSTOM_STOCK)
+        if not valid_assets: valid_assets = ["NIFTY"] if BROKER in ["Angel One", "Zerodha"] else ["BTCUSD"]
         
-        INDEX = st.selectbox("Watchlist Asset", asset_list, index=asset_list.index(st.session_state.sb_index_input), key="sb_index_input")
+        st.session_state.asset_options = valid_assets
+        if st.session_state.sb_index_input not in valid_assets: st.session_state.sb_index_input = valid_assets[0]
+        
+        INDEX = st.selectbox("Watchlist Asset", valid_assets, index=valid_assets.index(st.session_state.sb_index_input), key="sb_index_input")
         STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
         TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
         
+        if BROKER in ["CoinDCX", "Delta Exchange"]:
+            st.divider()
+            st.markdown("**🪙 Crypto Market Setup**")
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                CRYPTO_MODE = st.selectbox("Market Type", ["Spot", "Futures", "Options"])
+            with col_c2:
+                LEVERAGE = st.number_input("Leverage (x)", min_value=1, max_value=100, value=10, step=1)
+        else:
+            CRYPTO_MODE = "Options"
+            LEVERAGE = 1
+
         st.divider()
         st.markdown("**2. Risk Management**")
         col_r1, col_r2 = st.columns(2)
@@ -978,7 +1342,7 @@ else:
             default_lot_val = float(st.session_state.user_lots.get(INDEX, 1.0))
             LOTS = st.number_input("Base Lots / Vol", 0.01, 10000.0, value=default_lot_val, step=0.01, key=f"lot_input_{INDEX}")
             MAX_TRADES = st.number_input("Max Trades/Day", 1, 50, 5)
-            MAX_CAPITAL = st.number_input("Max Cap/Trade (₹)", 1000, 500000, 15000, step=1000)
+            MAX_CAPITAL = st.number_input("Max Cap/Trade (₹/$)", 10.0, 500000.0, 15000.0, step=100.0)
         with col_r2:
             SL_PTS = st.number_input("SL Points/Pips", 5.0, 500.0, 20.0)
             TSL_PTS = st.number_input("Trail SL Pts/Pips", 5.0, 500.0, 15.0)
@@ -987,16 +1351,13 @@ else:
         
         st.divider()
         st.markdown("**3. Advanced Triggers**")
-        PAPER = st.toggle("📝 Paper Trade Mode", True, disabled=True if bot.is_mock else False)
         MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
         HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Wait for Gamma Blast)", False)
         FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
-        
-        
 
         render_signature()
 
-    bot.settings = {"strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": PAPER, "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, "user_lots": st.session_state.user_lots.copy()}
+    bot.settings = {"primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": bot.is_mock, "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, "crypto_mode": CRYPTO_MODE, "leverage": LEVERAGE, "user_lots": st.session_state.user_lots.copy()}
 
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
         st.session_state.prev_index = INDEX
@@ -1007,32 +1368,34 @@ else:
                 df_preload = bot.get_historical_data(exch, token, symbol=INDEX, interval=TIMEFRAME) if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval=TIMEFRAME)
                 if df_preload is not None and not df_preload.empty:
                     bot.state["spot"] = df_preload['close'].iloc[-1]
-                    if "All in One" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_all_in_one_strategy(df_preload, INDEX)
+                    if "VIJAY & RFF" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vijay_rff_strategy(df_preload, INDEX)
+                    elif "Institutional FVG" in STRATEGY or "ICT" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_ict_smc_strategy(df_preload, INDEX)
                     elif "Trend Rider" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_trend_rider_strategy(df_preload, INDEX)
                     else: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
                     bot.state.update({"current_trend": t, "current_signal": s, "vwap": v, "ema": e, "atr": atr, "fib_data": fib, "latest_data": df_c})
 
     if not is_mkt_open: st.error(f"😴 {mkt_status_msg}")
         
-    tab1, tab2, tab3, tab4 = st.tabs(["⚡ Live Dashboard", "🔎 Scanners", "📜 Reports", "🚀 Crypto & Forex Analysis"])
+    tab1, tab2, tab3, tab4 = st.tabs(["⚡ Dashboard", "🔎 Deep Scanners", "📜 Server Logs", "🚀 Crypto & FX"])
 
     with tab1:
-        # 1. BEAUTIFUL HEADER & BALANCE CARD
         exch, _ = bot.get_token_info(INDEX)
-        term_type = "🌍 MT5 Forex Terminal" if exch == "MT5" else "🇮🇳 Angel One Options"
+        if exch == "MT5": term_type = "🌍 MT5 Forex Terminal"
+        elif exch == "COINDCX": term_type = f"⚡ CoinDCX {CRYPTO_MODE}"
+        elif exch == "DELTA": term_type = f"🔺 Delta Exchange {CRYPTO_MODE}"
+        else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
         
         st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 12px; color: white; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <h2 style="margin: 0; color: white; font-weight: 800; letter-spacing: 1px;">⚡ {INDEX}</h2>
-                <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #bae6fd; font-weight: 500;">{term_type}</p>
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
-                    <span style="font-size: 0.85rem; color: #e0f2fe;">Live Balance:</span><br>
+            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 12px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">⚡ {INDEX}</h2>
+                <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
+                    <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
                     <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
                 </div>
             </div>
         """, unsafe_allow_html=True)
 
-        # 2. ENGINE CONTROLS & STATUS
         is_running = bot.state["is_running"]
         status_color = "#22c55e" if is_running else "#ef4444"
         status_bg = "#f0fdf4" if is_running else "#fef2f2"
@@ -1046,14 +1409,14 @@ else:
 
         c1, c2, c_kill = st.columns([2, 2, 1])
         with c1:
-            if st.button("▶️ START", use_container_width=True, type="primary", disabled=is_running):
+            if st.button("▶️ FIRE ENGINE", use_container_width=True, type="primary", disabled=is_running):
                 bot.state["is_running"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
                 add_script_run_ctx(t)
                 t.start()
                 st.rerun()
         with c2:
-            if st.button("🛑 STOP", use_container_width=True, disabled=not is_running):
+            if st.button("🛑 HALT ENGINE", use_container_width=True, disabled=not is_running):
                 bot.state["is_running"] = False
                 st.rerun()
         with c_kill:
@@ -1062,33 +1425,30 @@ else:
                 if bot.state["active_trade"]: bot.state["manual_exit"] = True
                 st.toast("System Terminated & Trades Closed", icon="☠️")
 
-        # 3. MODERN 2x2 METRICS GRID
         ltp_val = round(bot.state['spot'], 4)
         atr_val = round(bot.state['atr'], 4)
         trend_val = bot.state['current_trend']
-        smc_val = "Active" if bot.state['fib_data'] else "Wait"
         
         st.markdown(f"""
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
-                <div style="background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">LTP</div>
-                    <div style="font-size: 1.3rem; color: #0f111a; font-weight: 800; margin-top: 4px;">{ltp_val}</div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live Spot</div>
+                    <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_val}</div>
                 </div>
-                <div style="background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">Volatility (ATR)</div>
-                    <div style="font-size: 1.3rem; color: #0f111a; font-weight: 800; margin-top: 4px;">{atr_val}</div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">ATR Base</div>
+                    <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{atr_val}</div>
                 </div>
-                <div style="background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.02); grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 700; letter-spacing: 0.5px;">Market Sentiment</div>
-                    <div style="font-size: 1.1rem; color: #0ea5e9; font-weight: 800; margin-top: 4px;">{trend_val}</div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 12px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Quant Algorithm Sentiment</div>
+                    <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
             </div>
         """, unsafe_allow_html=True)
 
-        # 4. ACTIVE TRADE TICKET (BEAUTIFUL UI)
-        st.markdown("### 🎯 Live Position")
+        st.markdown("### 🎯 Live Position Tracker")
         daily_pnl = bot.state.get("daily_pnl", 0.0)
-        st.markdown(f"**Today's Realized PnL:** {'🟢' if daily_pnl >= 0 else '🔴'} `{round(daily_pnl, 2)}`")
+        st.markdown(f"**Session Net Yield:** {'<span style="color:#22c55e">🟢' if daily_pnl >= 0 else '<span style="color:#ef4444">🔴'} `{round(daily_pnl, 2)}`</span>", unsafe_allow_html=True)
         
         if bot.state["active_trade"]:
             t = bot.state["active_trade"]
@@ -1097,17 +1457,17 @@ else:
             pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
             pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
             pnl_sign = "+" if pnl >= 0 else ""
-            exec_type = "MT5 Spot" if t['exch'] == "MT5" else "Options"
+            exec_type = t['exch']
             buy_sell_color = "#22c55e" if t['type'] in ["CE", "BUY"] else "#ef4444"
             
             st.markdown(f"""
-                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 12px; padding: 16px; box-shadow: 0 6px 12px rgba(0,0,0,0.08); margin-bottom: 15px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #f1f5f9; padding-bottom: 12px; margin-bottom: 12px;">
+                <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 12px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
                         <div>
                             <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;">{t['type']}</span>
                             <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
                         </div>
-                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 8px; font-weight: 900; font-size: 1.3rem; border: 1px solid {pnl_color};">
+                        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 8px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
                             {pnl_sign}{round(pnl, 2)}
                         </div>
                     </div>
@@ -1117,15 +1477,15 @@ else:
                             <b style="font-size: 1.1rem; color: #0f111a;">{t['entry']:.4f}</b>
                         </div>
                         <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">
-                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Price</span><br>
+                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br>
                             <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
                         </div>
                         <div style="background: #f8fafc; padding: 10px; border-radius: 8px;">
-                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Quantity</span><br>
-                            <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem;">({exec_type})</span>
+                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Lot / Qty</span><br>
+                            <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span>
                         </div>
                         <div style="background: #fef2f2; padding: 10px; border-radius: 8px; border: 1px solid #fecaca;">
-                            <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Trail SL</span><br>
+                            <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br>
                             <b style="font-size: 1.1rem; color: #ef4444;">{t['sl']:.4f}</b>
                         </div>
                     </div>
@@ -1135,17 +1495,16 @@ else:
                 </div>
             """, unsafe_allow_html=True)
             
-            if st.button("🛑 FORCE MANUAL EXIT", type="primary", use_container_width=True):
+            if st.button("🛑 KILL TRADE", type="primary", use_container_width=True):
                 bot.state["manual_exit"] = True
                 st.toast("Forcing trade closure...", icon="🛑")
         else:
-            st.info("⏳ Waiting for optimal entry setup...")
+            st.info("⏳ Radar Active: Waiting for High-Probability Setup...")
 
-        # 5. CHART SECTION
-        st.markdown("<br>### 📈 Live Market Chart", unsafe_allow_html=True)
+        st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
         c_h1, c_h2 = st.columns(2)
-        with c_h1: SHOW_CHART = st.toggle("📊 Show Chart", True)
-        with c_h2: FULL_CHART = st.toggle("⛶ Large Mode", False)
+        with c_h1: SHOW_CHART = st.toggle("📊 Render Chart", True)
+        with c_h2: FULL_CHART = st.toggle("⛶ Cinema Mode", False)
         
         if SHOW_CHART and bot.state["latest_data"] is not None:
             chart_df = bot.state["latest_data"].copy()
@@ -1163,23 +1522,21 @@ else:
                 ]
             
             chartOptions = {
-                "height": 700 if FULL_CHART else 400,
-                "layout": { "textColor": '#1e293b', "background": { "type": 'solid', "color": '#ffffff' } },
-                "grid": { "vertLines": { "color": 'rgba(226, 232, 240, 0.8)' }, "horzLines": { "color": 'rgba(226, 232, 240, 0.8)' } },
-                "crosshair": { "mode": 0 }, "timeScale": { "timeVisible": True, "secondsVisible": False }
+                "height": 700 if FULL_CHART else 400, 
+                "layout": { "textColor": '#1e293b', "background": { "type": 'solid', "color": '#ffffff' } }, 
+                "grid": { "vertLines": { "color": 'rgba(226, 232, 240, 0.8)' }, "horzLines": { "color": 'rgba(226, 232, 240, 0.8)' } }, 
+                "crosshair": { "mode": 0 }, 
+                "timeScale": { "timeVisible": True, "secondsVisible": False }
             }
-            
             chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
 
             if 'avwap' in chart_df.columns:
                 avwap_data = chart_df[['time', 'avwap']].dropna().rename(columns={'avwap': 'value'}).to_dict('records')
                 if avwap_data: chart_series.append({"type": 'Line', "data": avwap_data, "options": { "color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP' }})
-
             if 'vwap' in chart_df.columns:
                 vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
                 if vwap_data: chart_series.append({"type": 'Line', "data": vwap_data, "options": { "color": '#ff9800', "lineWidth": 2, "title": 'VWAP' }})
-
-            ema_col = 'ema_fast' if 'ema_fast' in chart_df.columns else 'ema_short'
+            ema_col = 'ema_fast' if 'ema_fast' in chart_df.columns else 'ema9'
             if ema_col in chart_df.columns:
                 ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
                 if ema_data: chart_series.append({"type": 'Line', "data": ema_data, "options": { "color": '#0ea5e9', "lineWidth": 2, "title": 'EMA' }})
@@ -1189,7 +1546,7 @@ else:
     with tab2:
         colA, colB, colC = st.columns(3)
         with colA:
-            st.subheader("📊 52W High/Low & Intraday")
+            st.subheader("📊 52W High/Low")
             if st.button("🔍 Scan Top NSE Stocks"):
                 with st.spinner("Analyzing Volatility..."):
                     try:
@@ -1231,7 +1588,7 @@ else:
                     st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
 
         with colC:
-            st.subheader("🪙 Low Cap / Penny Stocks")
+            st.subheader("🪙 Penny Stocks")
             if st.button("🚀 Scan Penny Stocks"):
                 with st.spinner("Scanning penny stocks..."):
                     penny_list = ["SUZLON.NS", "YESBANK.NS", "IDEA.NS", "JPPOWER.NS", "RPOWER.NS", "GTLINFRA.NS"]
@@ -1251,38 +1608,35 @@ else:
     with tab3:
         log_col, pnl_col = st.columns([1, 2])
         with log_col:
-            st.subheader("System Logs (IST Time)")
+            st.subheader("System Console")
             for l in bot.state["logs"]: st.text(l)
             
         with pnl_col:
             if bot.is_mock:
-                st.subheader("📊 Paper Trade History (Session Memory)")
+                st.subheader("📊 Mock Ledger (Session)")
                 if bot.state.get("paper_history"):
                     df_paper = pd.DataFrame(bot.state["paper_history"])
                     st.dataframe(df_paper.iloc[::-1], use_container_width=True)
-                else:
-                    st.info("No paper trades recorded yet in this session.")
+                else: st.info("No paper trades recorded yet in this session.")
             else:
-                st.subheader("📊 Live Trade History (Cloud DB)")
+                st.subheader("📊 Live Trade Matrix (Cloud DB)")
                 if HAS_DB:
                     try:
-                        res = supabase.table("trade_logs").select("*").eq("api_key", bot.api_key).execute()
+                        user_id = getattr(bot, "system_user_id", bot.api_key)
+                        res = supabase.table("trade_logs").select("*").eq("user_id", user_id).execute()
                         if res.data:
                             df_db = pd.DataFrame(res.data)
-                            df_db = df_db.drop(columns=["id", "api_key"], errors="ignore")
+                            df_db = df_db.drop(columns=["id", "user_id"], errors="ignore")
                             st.dataframe(df_db.iloc[::-1], use_container_width=True)
-                            
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='xlsxwriter') as writer: df_db.to_excel(writer, index=False)
-                            st.download_button("📥 Download Excel (.xlsx)", data=output.getvalue(), file_name=f"Trade_Log_IST.xlsx")
+                            st.download_button("📥 Export Log (.xlsx)", data=output.getvalue(), file_name=f"Trade_Log_IST.xlsx")
                         else: st.info("No real trades recorded yet.")
                     except Exception as e: st.error(f"Could not load trades: {e}")
-                else:
-                    st.error("Cloud DB not connected.")
+                else: st.error("Cloud DB disconnected.")
                     
     with tab4:
         c_dx, c_bias = st.columns(2)
-        
         with c_dx:
             st.subheader("⚡ CoinDCX Intraday Momentum")
             if st.button("Scan CoinDCX 🔥", use_container_width=True):
@@ -1330,44 +1684,25 @@ else:
                         except: pass
                     if bias_results: st.dataframe(pd.DataFrame(bias_results), use_container_width=True, hide_index=True)
 
-def cycle_asset():
-    assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
-    if st.session_state.sb_index_input in assets: st.session_state.sb_index_input = assets[(assets.index(st.session_state.sb_index_input) + 1) % len(assets)]
-    else: st.session_state.sb_index_input = assets[0]
+    def cycle_asset():
+        assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
+        if st.session_state.sb_index_input in assets: st.session_state.sb_index_input = assets[(assets.index(st.session_state.sb_index_input) + 1) % len(assets)]
+        else: st.session_state.sb_index_input = assets[0]
 
-def cycle_strat():
-    st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
+    def cycle_strat():
+        st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
 
-# --- INVISIBLE ANDROID-STYLE NAVIGATION DOCK FOR APPLIIX ---
-dock_container = st.container()
-with dock_container:
-    st.markdown('<div id="bottom-dock-anchor" class="bottom-dock-container">', unsafe_allow_html=True)
-    dock_c1, dock_c2, dock_c3 = st.columns(3)
-    
-    with dock_c1: 
-        st.button("◀️", key="btn_back", on_click=cycle_asset, use_container_width=True)
-    
-    with dock_c2: 
-        if st.button("🏠", key="btn_home", use_container_width=True): 
-            st.rerun()
-                    
-    with dock_c3: 
-        st.button("🔲", key="btn_recent", on_click=cycle_strat, use_container_width=True)
-        
-    st.markdown('</div>', unsafe_allow_html=True)
+    # --- INVISIBLE ANDROID-STYLE NAVIGATION DOCK FOR APPLIIX (VISIBLE ONLY AFTER LOGIN) ---
+    dock_container = st.container()
+    with dock_container:
+        st.markdown('<div id="bottom-dock-anchor" class="bottom-dock-container">', unsafe_allow_html=True)
+        dock_c1, dock_c2, dock_c3 = st.columns(3)
+        with dock_c1: st.button("◀️", key="btn_back", on_click=cycle_asset, use_container_width=True)
+        with dock_c2: 
+            if st.button("🏠", key="btn_home", use_container_width=True): st.rerun()
+        with dock_c3: st.button("🔲", key="btn_recent", on_click=cycle_strat, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("is_running"):
-    time.sleep(2)
-    st.rerun()
-
-
-
-
-
-
-
-
-
-
-
-
+    if bot.state.get("is_running"):
+        time.sleep(2)
+        st.rerun()
