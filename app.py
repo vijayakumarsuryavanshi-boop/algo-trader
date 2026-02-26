@@ -180,7 +180,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS 
 # ==========================================
-st.set_page_config(page_title="shree", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -913,7 +913,6 @@ class SniperBot:
                             break
                 except: pass
 
-                # COINDCX 400 ERROR FIX: Leverage parameter is stripped from payload for Futures order execution
                 if market_type in ["Futures", "Options"]:
                     payload = {
                         "side": side.lower(), 
@@ -938,6 +937,14 @@ class SniperBot:
                 signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
                 
                 res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
+                
+                if res.status_code == 404 and market_type in ["Futures", "Options"]:
+                    self.log(f"⚠️ Futures 404 on {exact_pair}. Falling back to Margin API...")
+                    payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts}
+                    endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
+                    payload_str = json.dumps(payload, separators=(',', ':'))
+                    signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+                    res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
 
                 if res.status_code == 200: 
                     response_data = res.json()
@@ -1306,14 +1313,14 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ shree</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ shree</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
         
         with st.container():
             st.markdown("<div class='glass-panel'>", unsafe_allow_html=True)
-            auth_mode = st.radio("Operating Mode", ["📝 Paper Trading", "⚡ Real Trading", "👆 Quick Auth"], horizontal=True, label_visibility="collapsed")
+            auth_mode = st.radio("Operating Mode", ["📝 Paper Trading", "🕉️ Real Trading", "👆 Quick Auth"], horizontal=True, label_visibility="collapsed")
             st.divider()
             
             if auth_mode == "👆 Quick Auth":
@@ -1340,7 +1347,7 @@ if not getattr(st.session_state, "bot", None):
                             else: st.error("❌ Login Failed! Check API details or TOTP.")
                     else: st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
                         
-            elif auth_mode == "⚡ Real Trading":
+            elif auth_mode == "🕉️ Real Trading":
                 st.info("ℹ️ **Note:** Supabase does NOT process trades. All real trades execute directly from this app via official Broker APIs.")
                 USER_ID = st.text_input("System Login ID (Email or Phone Number)")
                 creds = load_creds(USER_ID) if USER_ID else {}
@@ -1586,18 +1593,18 @@ else:
     if not is_mkt_open: 
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
-    tab1, tab2, tab3, tab4 = st.tabs(["⚡ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX"])
 
     with tab1:
         exch, _ = bot.get_token_info(INDEX)
         if exch == "MT5": term_type = "🌍 MT5 Forex Terminal"
-        elif exch == "COINDCX": term_type = f"⚡ CoinDCX {CRYPTO_MODE}"
+        elif exch == "COINDCX": term_type = f"🕉️ CoinDCX {CRYPTO_MODE}"
         elif exch == "DELTA": term_type = f"🔺 Delta Exchange {CRYPTO_MODE}"
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
         
         st.markdown(f"""
             <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">⚡ {INDEX}</h2>
+                <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
                 <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
                     <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
@@ -1855,9 +1862,6 @@ else:
     with tab3:
         log_col, pnl_col = st.columns([1, 2])
         with log_col:
-            st.subheader("System Console")
-            for l in bot.state["logs"]: st.markdown(f"`{l}`")
-                with log_col:
             col_title, col_btn = st.columns([2, 1])
             with col_title:
                 st.subheader("System Console")
@@ -1878,6 +1882,18 @@ else:
                     output_mock = io.BytesIO()
                     with pd.ExcelWriter(output_mock, engine='xlsxwriter') as writer: df_paper.to_excel(writer, index=False)
                     st.download_button("📥 Export Mock Ledger (.xlsx)", data=output_mock.getvalue(), file_name=f"Mock_Trade_Log_{bot.client_name}.xlsx")
+                    
+                    with st.expander("📈 View Daily & Weekly Reports"):
+                        df_paper['temp_date'] = pd.to_datetime(df_paper['Date'], errors='coerce')
+                        df_paper['temp_pnl'] = pd.to_numeric(df_paper['PnL'], errors='coerce').fillna(0)
+                        rep_mode = st.radio("Select Report Interval", ["Daily", "Weekly"], horizontal=True, label_visibility="collapsed", key="mock_rep")
+                        if rep_mode == "Daily":
+                            report = df_paper.groupby(df_paper['temp_date'].dt.date)['temp_pnl'].sum().reset_index()
+                            report.columns = ["Day", "Total PnL"]
+                        else:
+                            report = df_paper.groupby(df_paper['temp_date'].dt.strftime('%Y-W%V'))['temp_pnl'].sum().reset_index()
+                            report.columns = ["Week", "Total PnL"]
+                        st.dataframe(report.style.map(lambda x: 'color: #22c55e; font-weight: bold;' if x > 0 else ('color: #ef4444; font-weight: bold;' if x < 0 else ''), subset=['Total PnL']), use_container_width=True, hide_index=True)
                 else: st.info("No paper trades recorded yet in this session.")
             else:
                 user_id = getattr(bot, "system_user_id", bot.api_key)
@@ -1889,47 +1905,31 @@ else:
                             df_db = pd.DataFrame(res.data)
                             df_db = df_db.drop(columns=["id", "user_id"], errors="ignore")
                             st.dataframe(df_db.iloc[::-1], use_container_width=True)
+                            
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='xlsxwriter') as writer: df_db.to_excel(writer, index=False)
                             st.download_button("📥 Export Live Log (.xlsx)", data=output.getvalue(), file_name=f"Live_Trade_Log_{user_id}.xlsx")
+                            
+                            with st.expander("📈 View Daily & Weekly Reports"):
+                                df_db['temp_date'] = pd.to_datetime(df_db['trade_date'], errors='coerce')
+                                df_db['temp_pnl'] = pd.to_numeric(df_db['pnl'], errors='coerce').fillna(0)
+                                rep_mode = st.radio("Select Report Interval", ["Daily", "Weekly"], horizontal=True, label_visibility="collapsed", key="live_rep")
+                                if rep_mode == "Daily":
+                                    report = df_db.groupby(df_db['temp_date'].dt.date)['temp_pnl'].sum().reset_index()
+                                    report.columns = ["Day", "Total PnL"]
+                                else:
+                                    report = df_db.groupby(df_db['temp_date'].dt.strftime('%Y-W%V'))['temp_pnl'].sum().reset_index()
+                                    report.columns = ["Week", "Total PnL"]
+                                st.dataframe(report.style.map(lambda x: 'color: #22c55e; font-weight: bold;' if x > 0 else ('color: #ef4444; font-weight: bold;' if x < 0 else ''), subset=['Total PnL']), use_container_width=True, hide_index=True)
+                                
                         else: st.info("No real trades recorded yet.")
                     except Exception as e: st.error(f"Could not load trades: {e}")
                 else: st.error("Cloud DB disconnected.")
-                    # --- ADD THIS REPORT SECTION UNDER YOUR EXISTING DATAFRAMES ---
-            # Determine which dataframe to use based on mode
-            working_df = df_paper if bot.is_mock else (df_db if 'df_db' in locals() else None)
-            
-            if working_df is not None and not working_df.empty:
-                with st.expander("📈 View Daily & Weekly Reports"):
-                    # Standardize column names for processing
-                    date_col = 'Date' if bot.is_mock else 'trade_date'
-                    pnl_col_name = 'PnL' if bot.is_mock else 'pnl'
-                    
-                    # Convert to datetime and numeric safely
-                    working_df['temp_date'] = pd.to_datetime(working_df[date_col], errors='coerce')
-                    working_df['temp_pnl'] = pd.to_numeric(working_df[pnl_col_name], errors='coerce').fillna(0)
-                    
-                    rep_mode = st.radio("Select Report Interval", ["Daily", "Weekly"], horizontal=True, label_visibility="collapsed")
-                    
-                    if rep_mode == "Daily":
-                        report = working_df.groupby(working_df['temp_date'].dt.date)['temp_pnl'].sum().reset_index()
-                        report.columns = ["Day", "Total PnL"]
-                    else:
-                        # Groups by Year and Week Number (e.g., 2024-W23)
-                        report = working_df.groupby(working_df['temp_date'].dt.strftime('%Y-W%V'))['temp_pnl'].sum().reset_index()
-                        report.columns = ["Week", "Total PnL"]
-                    
-                    # Style the PnL colors green/red in the dataframe
-                    st.dataframe(
-                        report.style.map(lambda x: 'color: #22c55e; font-weight: bold;' if x > 0 else ('color: #ef4444; font-weight: bold;' if x < 0 else ''), subset=['Total PnL']), 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
                     
     with tab4:
         c_dx, c_bias = st.columns(2)
         with c_dx:
-            st.subheader("⚡ CoinDCX Intraday Momentum")
+            st.subheader("🕉️ CoinDCX Intraday Momentum")
             if st.button("Scan CoinDCX 🔥", use_container_width=True):
                 with st.spinner("Fetching live market data..."):
                     try:
@@ -1996,4 +1996,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
