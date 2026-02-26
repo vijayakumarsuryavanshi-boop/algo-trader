@@ -115,25 +115,20 @@ def get_all_crypto_pairs():
     except: pass
     return sorted(pairs)
 
-# CRITICAL FIX: Market Status explicitly linked to the ASSET, not the overall broker
 def get_market_status(asset_name):
     now_ist = get_ist()
     
-    # 24/7 Crypto/Forex markets
     if "USD" in asset_name or "USDT" in asset_name or "INR" in asset_name and asset_name != "INDIA VIX":
         return True, "Crypto/Forex Live 🌍"
         
-    # Weekends block Indian Markets
     if now_ist.weekday() >= 5: 
         return False, "Market Closed (Weekend)"
         
-    # Commodities
     if asset_name in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]:
         if dt.time(9, 0) <= now_ist.time() <= dt.time(23, 30): 
             return True, "Commodity Live 🟠"
         return False, "Commodity Market Closed"
         
-    # Indian Equity (Nifty, BankNifty, Sensex, Stocks)
     if dt.time(9, 15) <= now_ist.time() <= dt.time(15, 30): 
         return True, "Equity Market Live 🟢"
         
@@ -188,7 +183,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
         except: pass
 
 # ==========================================
-# 2. UI & CUSTOM CSS (VIBRANT SQUARE TABS & BUTTONS)
+# 2. UI & CUSTOM CSS 
 # ==========================================
 st.set_page_config(page_title="SHREE ॐ", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
@@ -211,39 +206,33 @@ st.markdown("""
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important;
     }
 
-    div[data-baseweb="tab-list"] { 
-        display: flex !important; width: 100% !important; 
-        background-color: transparent !important; 
-        padding: 0 !important; gap: 12px !important; border: none !important; 
+    /* MODERN TABS STYLING */
+    div[data-testid="stTabs"] button[data-baseweb="tab"] {
+        font-size: 1rem !important;
+        font-weight: 700 !important;
+        padding: 12px 24px !important;
+        border-radius: 8px 8px 0px 0px !important;
+        border: none !important;
+        background-color: #e2e8f0 !important;
+        color: #475569 !important;
+        margin-right: 6px !important;
+        transition: all 0.3s ease !important;
+        box-shadow: inset 0 -2px 5px rgba(0,0,0,0.05) !important;
+    }
+    div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
+        background-color: #0284c7 !important;
+        color: #ffffff !important;
+        border-bottom: 3px solid #0369a1 !important;
+        box-shadow: 0 -4px 10px rgba(2, 132, 199, 0.2) !important;
+        transform: translateY(-2px);
+    }
+    div[data-testid="stTabs"] button[data-baseweb="tab"]:hover {
+        background-color: #bae6fd !important;
+        color: #0c4a6e !important;
     }
     div[data-baseweb="tab-highlight"] { display: none !important; }
-    
-    button[data-baseweb="tab"] { 
-        flex: 1 !important; text-align: center !important; justify-content: center !important; 
-        background: linear-gradient(135deg, #1e293b, #0f111a) !important; 
-        color: #f8fafc !important; 
-        border-radius: 2px !important; 
-        font-weight: 800 !important; font-size: 0.95rem !important; 
-        letter-spacing: 0.5px !important; padding: 14px 0 !important; margin: 0 !important; 
-        border: 1px solid #334155 !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.15) !important;
-        transition: all 0.2s ease-in-out !important; 
-    }
-    button[data-baseweb="tab"]:hover { 
-        background: linear-gradient(135deg, #0ea5e9, #0284c7) !important; 
-        color: #ffffff !important; 
-        transform: translateY(-2px) !important; 
-        box-shadow: 0 6px 12px rgba(2, 132, 199, 0.4) !important; 
-    }
-    button[data-baseweb="tab"][aria-selected="true"] { 
-        background: linear-gradient(135deg, #22c55e, #16a34a) !important; 
-        color: #ffffff !important; 
-        border: 1px solid #16a34a !important;
-        box-shadow: 0 4px 15px rgba(34, 197, 94, 0.5) !important; 
-        transform: translateY(-1px) !important; 
-    }
 
-    .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
+    .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
     .bottom-dock-container { position: fixed !important; bottom: -500px !important; opacity: 0.01 !important; z-index: -1 !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -564,7 +553,6 @@ class SniperBot:
             return f"₹ {cap:,.2f} (Paper)"
         b_str = []
         
-        # CRITICAL FIX: Aggressive parsing for Angel One live balance
         if self.api:
             try:
                 rms = self.api.rms()
@@ -800,6 +788,12 @@ class SniperBot:
     def _fallback_yfinance(self, symbol, interval):
         yf_int = interval if interval in ["1m", "5m", "15m"] else "5m" 
         yf_ticker = YF_TICKERS.get(symbol)
+        
+        # FIX 2: Ensure Crypto symbols can map to yfinance for signals if not hardcoded
+        if not yf_ticker and ("USD" in symbol or "USDT" in symbol):
+            base_coin = symbol.replace("USDT", "").replace("USD", "")
+            yf_ticker = f"{base_coin}-USD"
+            
         if yf_ticker:
             try:
                 df = yf.Ticker(yf_ticker).history(period="5d" if interval == "1m" else "10d", interval=yf_int)
@@ -864,11 +858,14 @@ class SniperBot:
                 market_type = self.settings.get("crypto_mode", "Spot")
                 target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
                 
+                # FIX 6: Clean quantity for CoinDCX Spot floating points
+                clean_qty = float(round(float(qty), 4))
+                
                 if market_type in ["Futures", "Options"] or "-" in target or "FUT" in target:
-                    payload = {"side": side.lower(), "order_type": "market_order", "market": target, "total_quantity": float(qty), "timestamp": ts}
+                    payload = {"side": side.lower(), "order_type": "market_order", "market": target, "total_quantity": clean_qty, "timestamp": ts}
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/orders/create"
                 else:
-                    payload = {"side": side.lower(), "order_type": "market", "market": target, "total_quantity": float(qty), "timestamp": ts}
+                    payload = {"side": side.lower(), "order_type": "market", "market": target, "total_quantity": clean_qty, "timestamp": ts}
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
@@ -904,7 +901,9 @@ class SniperBot:
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
         try: 
-            order_params = {"variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token), "transactiontype": side, "exchange": exchange, "ordertype": "MARKET", "producttype": "INTRADAY", "duration": "DAY", "quantity": formatted_qty}
+            # FIX 1: Ensure Options use CARRYFORWARD so Angel One doesn't block them with INTRADAY margin rules
+            p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
+            order_params = {"variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token), "transactiontype": side, "exchange": exchange, "ordertype": "MARKET", "producttype": p_type, "duration": "DAY", "quantity": formatted_qty}
             res = self.api.placeOrder(order_params)
             if res and not res.get('status'): self.log(f"❌ Angel API Error: {res.get('message', 'Unknown Error')}"); return None
             return res
@@ -972,7 +971,6 @@ class SniperBot:
 
                 index, timeframe, is_mock_mode, strategy = s['index'], s['timeframe'], s['paper_mode'], s['strategy']
                 
-                # CRITICAL FIX: Check Market Status explicitly for the Selected Asset
                 is_open, mkt_msg = get_market_status(index)
                 if not is_open:
                     time.sleep(10)
@@ -982,7 +980,6 @@ class SniperBot:
                 is_mt5_asset = (exch == "MT5")
                 is_crypto = (exch in ["COINDCX", "DELTA"])
 
-                # CRITICAL FIX: Strict 3:15 cutoff tied strictly to the asset, NOT mock status
                 if index in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]:
                     cutoff_time = dt.time(15, 15)
                 elif index in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]:
@@ -1007,7 +1004,6 @@ class SniperBot:
                     elif "Trend Rider" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_trend_rider_strategy(df_candles, index)
                     else: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
 
-                    # CRITICAL FIX: Restored & Fixed FOMO execution logic
                     if s.get("fomo_entry"):
                         body = abs(last_candle['close'] - last_candle['open'])
                         avg_body = abs(df_candles['close'] - df_candles['open']).rolling(14).mean().iloc[-1]
@@ -1047,7 +1043,6 @@ class SniperBot:
 
                     if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time:
                         
-                        # CRITICAL FIX: Ensure quantity is at least 1 base lot (never 0)
                         qty = max(float(s['lots']), float(base_lot_size))
                         
                         if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
@@ -1163,7 +1158,6 @@ class SniperBot:
                                 elif pnl > 0: win_text = "profit👍"
                                 else: win_text = "sl hit 🛑"
                                 
-                                # Logs explicitly if auto-exited at 3:15 PM
                                 if market_close: win_text += " (Force Exit 3:15)"
                                 if trade['scaled_out']: win_text += " (Scaled Out)"
                                 
@@ -1192,7 +1186,6 @@ class SniperBot:
 # ==========================================
 # 5. STREAMLIT UI 
 # ==========================================
-# UI now calls get_market_status based specifically on Watchlist ASSET (INDEX)
 is_mkt_open, mkt_status_msg = get_market_status(st.session_state.sb_index_input)
 
 def play_sound():
@@ -1249,7 +1242,6 @@ if not getattr(st.session_state, "bot", None):
                     else: st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
                         
             elif auth_mode == "⚡ Real Trading":
-                st.warning("Ensure your Supabase 'user_credentials' table uses 'user_id' for lookup.")
                 USER_ID = st.text_input("System Login ID (Email or Phone Number)")
                 creds = load_creds(USER_ID) if USER_ID else {}
 
@@ -1360,7 +1352,8 @@ else:
     # --- 1. TOP HEADER & LOGOUT ---
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
-        st.markdown(f"**👤 Session:** `<span style='color:#0284c7'>{bot.client_name}</span>` | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
+        # FIX 3: HTML tag issue resolved so name actually shows correctly formatted.
+        st.markdown(f"**👤 Session:** <span style='color:#0284c7; font-weight:800;'>{bot.client_name}</span> | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
     
     with head_c2:
         st.markdown("""
@@ -1483,7 +1476,6 @@ else:
                     else: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
                     bot.state.update({"current_trend": t, "current_signal": s, "vwap": v, "ema": e, "atr": atr, "fib_data": fib, "latest_data": df_c})
 
-    # Display clear banner if Market is Closed
     if not is_mkt_open: 
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
@@ -1736,16 +1728,21 @@ else:
             
         with pnl_col:
             if bot.is_mock:
-                st.subheader("📊 Mock Ledger (Session)")
+                st.subheader(f"📊 Mock Ledger (Session: {bot.client_name})")
                 if bot.state.get("paper_history"):
                     df_paper = pd.DataFrame(bot.state["paper_history"])
                     st.dataframe(df_paper.iloc[::-1], use_container_width=True)
+                    
+                    # FIX 4: Separate Mock Ledger File Generator tied to Session Client
+                    output_mock = io.BytesIO()
+                    with pd.ExcelWriter(output_mock, engine='xlsxwriter') as writer: df_paper.to_excel(writer, index=False)
+                    st.download_button("📥 Export Mock Ledger (.xlsx)", data=output_mock.getvalue(), file_name=f"Mock_Trade_Log_{bot.client_name}.xlsx")
                 else: st.info("No paper trades recorded yet in this session.")
             else:
-                st.subheader("📊 Live Trade Matrix (Cloud DB)")
+                user_id = getattr(bot, "system_user_id", bot.api_key)
+                st.subheader(f"📊 Live Trade Matrix (Cloud DB - ID: {user_id})")
                 if HAS_DB:
                     try:
-                        user_id = getattr(bot, "system_user_id", bot.api_key)
                         res = supabase.table("trade_logs").select("*").eq("user_id", user_id).execute()
                         if res.data:
                             df_db = pd.DataFrame(res.data)
@@ -1753,7 +1750,7 @@ else:
                             st.dataframe(df_db.iloc[::-1], use_container_width=True)
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='xlsxwriter') as writer: df_db.to_excel(writer, index=False)
-                            st.download_button("📥 Export Log (.xlsx)", data=output.getvalue(), file_name=f"Trade_Log_IST.xlsx")
+                            st.download_button("📥 Export Live Log (.xlsx)", data=output.getvalue(), file_name=f"Live_Trade_Log_{user_id}.xlsx")
                         else: st.info("No real trades recorded yet.")
                     except Exception as e: st.error(f"Could not load trades: {e}")
                 else: st.error("Cloud DB disconnected.")
