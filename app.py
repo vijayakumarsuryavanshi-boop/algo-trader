@@ -99,7 +99,7 @@ def get_usdt_inr_rate():
         for coin in res:
             if coin['market'] == 'USDTINR': return float(coin['last_price'])
     except: pass
-    return 86.50 # Fallback INR rate
+    return 86.50 
 
 @st.cache_data(ttl=3600)
 def get_all_crypto_pairs():
@@ -114,6 +114,30 @@ def get_all_crypto_pairs():
                     pairs.append(base)
     except: pass
     return sorted(pairs)
+
+# CRITICAL FIX: Market Status explicitly linked to the ASSET, not the overall broker
+def get_market_status(asset_name):
+    now_ist = get_ist()
+    
+    # 24/7 Crypto/Forex markets
+    if "USD" in asset_name or "USDT" in asset_name or "INR" in asset_name and asset_name != "INDIA VIX":
+        return True, "Crypto/Forex Live 🌍"
+        
+    # Weekends block Indian Markets
+    if now_ist.weekday() >= 5: 
+        return False, "Market Closed (Weekend)"
+        
+    # Commodities
+    if asset_name in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]:
+        if dt.time(9, 0) <= now_ist.time() <= dt.time(23, 30): 
+            return True, "Commodity Live 🟠"
+        return False, "Commodity Market Closed"
+        
+    # Indian Equity (Nifty, BankNifty, Sensex, Stocks)
+    if dt.time(9, 15) <= now_ist.time() <= dt.time(15, 30): 
+        return True, "Equity Market Live 🟢"
+        
+    return False, "Equity Market Closed (After Hours)"
 
 # ==========================================
 # 1. DATABASE FUNCTIONS 
@@ -166,7 +190,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS (VIBRANT SQUARE TABS & BUTTONS)
 # ==========================================
-st.set_page_config(page_title="SHRI OM", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHREE ॐ", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -187,7 +211,6 @@ st.markdown("""
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important;
     }
 
-    /* --- BEAUTIFUL SQUARE BUTTON TABS --- */
     div[data-baseweb="tab-list"] { 
         display: flex !important; width: 100% !important; 
         background-color: transparent !important; 
@@ -199,7 +222,7 @@ st.markdown("""
         flex: 1 !important; text-align: center !important; justify-content: center !important; 
         background: linear-gradient(135deg, #1e293b, #0f111a) !important; 
         color: #f8fafc !important; 
-        border-radius: 2px !important; /* SHARP SQUARE SHAPE */
+        border-radius: 2px !important; 
         font-weight: 800 !important; font-size: 0.95rem !important; 
         letter-spacing: 0.5px !important; padding: 14px 0 !important; margin: 0 !important; 
         border: 1px solid #334155 !important;
@@ -255,21 +278,6 @@ if 'bot' not in st.session_state: st.session_state.bot = None
 if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
 if 'custom_stock' not in st.session_state: st.session_state.custom_stock = ""
 
-def get_market_status():
-    now_ist = get_ist()
-    bot = getattr(st.session_state, 'bot', None)
-    
-    is_crypto_active = bot and (bot.coindcx_api or bot.delta_api or bot.is_mt5_connected)
-    if is_crypto_active and bot.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange", "MT5"]:
-        return True, "Crypto/Forex Live 🌍"
-
-    if now_ist.weekday() >= 5: return False, "Market Closed (Weekend)"
-    if dt.time(9, 15) <= now_ist.time() <= dt.time(15, 30): return True, "Market Live 🟢"
-    if dt.time(17, 00) <= now_ist.time() <= dt.time(23, 30): return True, "Commodity Live 🟠"
-    
-    return False, "Market Closed (After Hours)"
-
-# CRITICAL FIX: Increased timeout to 45 seconds to prevent silent Angel One strike fetching failures
 @st.cache_data(ttl=43200) 
 def get_angel_scrip_master():
     try:
@@ -281,7 +289,7 @@ def get_angel_scrip_master():
     except Exception: return pd.DataFrame()
 
 # ==========================================
-# 3. ADVANCED TECHNICAL ANALYZER (MAXIMUM RELAXATION)
+# 3. ADVANCED TECHNICAL ANALYZER 
 # ==========================================
 class TechnicalAnalyzer:
     def get_atr(self, df, period=14):
@@ -296,14 +304,17 @@ class TechnicalAnalyzer:
         df = df.copy()
         df['vol_sma'] = df['volume'].rolling(20).mean()
         if is_index: df['vol_spike'] = True
-        else: df['vol_spike'] = df['volume'] >= (df['vol_sma'] * 0.9) # Extremely relaxed volume
+        else: df['vol_spike'] = df['volume'] >= (df['vol_sma'] * 0.9) 
         
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         df['rsi'] = 100 - (100 / (1 + (gain / loss)))
         
+        atr = self.get_atr(df, 14)
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+        df['is_sideways'] = (df['rsi'].between(48, 52)) & (abs(df['close'] - df['ema21']) < (atr * 0.3)) 
+        df['inside_bar'] = (df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1))
         
         try:
             df['date'] = df.index.date
@@ -399,7 +410,6 @@ class TechnicalAnalyzer:
         df_ta = df.copy()
         df_ta.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
         
-        # Restored Variables for accurate technical plotting
         df_ta['EMA_5'] = ta.ema(df_ta['Close'], length=5)
         df_ta['EMA_13'] = ta.ema(df_ta['Close'], length=13)
         df_ta['EMA_21'] = ta.ema(df_ta['Close'], length=21)
@@ -409,17 +419,23 @@ class TechnicalAnalyzer:
         df_ta['HMA_9'] = ta.hma(df_ta['Close'], length=9)
         df_ta['HMA_21'] = ta.hma(df_ta['Close'], length=21)
         
+        adx_df = ta.adx(df_ta['High'], df_ta['Low'], df_ta['Close'], length=14)
+        df_ta['ADX'] = adx_df['ADX_14'] if adx_df is not None else 0
+        df_ta['is_choppy'] = df_ta['ADX'] < 15
+
+        sti = ta.supertrend(df_ta['High'], df_ta['Low'], df_ta['Close'], length=10, multiplier=2.0)
+        df_ta['SuperTrend_Dir'] = sti['SUPERTd_10_2.0'] if sti is not None else 1
+        
         df_ta['VWAP'] = ta.vwap(df_ta['High'], df_ta['Low'], df_ta['Close'], df_ta['Volume'])
         if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all():
             df_ta['VWAP'] = df_ta['Close']
             
         df_ta['Vol_SMA'] = ta.sma(df_ta['Volume'], length=20)
-        df_ta['is_strong_vol'] = df_ta['Volume'] >= (df_ta['Vol_SMA'] * 0.8) # Hyper-relaxed Volume
+        df_ta['is_strong_vol'] = df_ta['Volume'] >= (df_ta['Vol_SMA'] * 0.8) 
         
         df_ta['Buy_Signal'] = False
         df_ta['Sell_Signal'] = False
 
-        # CRITICAL FIX: Removed ADX, SuperTrend, and HMA filters to allow rapid breakout execution
         bull_trend = (df_ta['Close'] > df_ta['VWAP']) & (df_ta['Close'] > df_ta['EMA_13'])
         bear_trend = (df_ta['Close'] < df_ta['VWAP']) & (df_ta['Close'] < df_ta['EMA_13'])
 
@@ -547,16 +563,29 @@ class SniperBot:
             cap = self.settings.get("max_capital", 15000.0) if self.settings else 15000.0
             return f"₹ {cap:,.2f} (Paper)"
         b_str = []
+        
+        # CRITICAL FIX: Aggressive parsing for Angel One live balance
         if self.api:
             try:
                 rms = self.api.rms()
-                if rms and rms.get('status'): b_str.append(f"Angel: ₹ {rms['data'].get('availablecash', 0)}")
+                if rms and rms.get('status') and rms.get('data'):
+                    data = rms['data']
+                    bal = data.get('availablecash', data.get('net', 0))
+                    try: bal = float(bal)
+                    except: bal = 0.0
+                    b_str.append(f"Angel: ₹ {round(bal, 2)}")
             except: pass
+            
         if self.kite:
             try:
                 margins = self.kite.margins()
-                b_str.append(f"Zerodha: ₹ {margins['equity']['available']['live_balance']}")
+                eq = margins.get('equity', {})
+                bal = eq.get('available', {}).get('live_balance', eq.get('net', 0))
+                try: bal = float(bal)
+                except: bal = 0.0
+                b_str.append(f"Zerodha: ₹ {round(bal, 2)}")
             except: pass
+            
         if self.coindcx_api:
             try:
                 ts = int(round(time.time() * 1000))
@@ -571,6 +600,7 @@ class SniperBot:
                             if self.settings.get('show_inr_crypto', True): b_str.append(f"DCX: ₹ {round(bal * get_usdt_inr_rate(),2)}")
                             else: b_str.append(f"DCX: $ {round(bal,2)}")
             except: pass
+            
         if self.delta_api:
             try:
                 ts, sig = generate_delta_signature('GET', '/v2/wallet/balances', '', self.delta_secret)
@@ -583,11 +613,13 @@ class SniperBot:
                             if self.settings.get('show_inr_crypto', True): b_str.append(f"Delta: ₹ {round(bal * get_usdt_inr_rate(),2)}")
                             else: b_str.append(f"Delta: $ {round(bal,2)}")
             except: pass
+            
         if self.is_mt5_connected:
             try:
                 acc = mt5.account_info()
-                if acc: b_str.append(f"MT5: $ {acc.balance}")
+                if acc: b_str.append(f"MT5: $ {round(acc.balance, 2)}")
             except: pass
+            
         return " | ".join(b_str) if b_str else "N/A"
 
     def login(self):
@@ -693,7 +725,6 @@ class SniperBot:
                 res = requests.get(f"https://api.coindcx.com/exchange/ticker").json()
                 for coin in res:
                     target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-                    # CRITICAL FIX: Match the exact CoinDCX naming convention for Spot and Futures
                     if coin['market'] == target or target in coin['market'].replace('_', ''): 
                         price = float(coin['last_price'])
                         return price
@@ -833,7 +864,6 @@ class SniperBot:
                 market_type = self.settings.get("crypto_mode", "Spot")
                 target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
                 
-                # CRITICAL FIX: CoinDCX derivatives requires "market_order", Spot requires "market"
                 if market_type in ["Futures", "Options"] or "-" in target or "FUT" in target:
                     payload = {"side": side.lower(), "order_type": "market_order", "market": target, "total_quantity": float(qty), "timestamp": ts}
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/orders/create"
@@ -940,18 +970,25 @@ class SniperBot:
                     self.state["is_running"] = False
                     break
 
-                is_open, mkt_msg = get_market_status()
+                index, timeframe, is_mock_mode, strategy = s['index'], s['timeframe'], s['paper_mode'], s['strategy']
+                
+                # CRITICAL FIX: Check Market Status explicitly for the Selected Asset
+                is_open, mkt_msg = get_market_status(index)
                 if not is_open:
                     time.sleep(10)
                     continue
 
-                index, timeframe, is_mock_mode, strategy = s['index'], s['timeframe'], s['paper_mode'], s['strategy']
                 exch, token = self.get_token_info(index)
                 is_mt5_asset = (exch == "MT5")
                 is_crypto = (exch in ["COINDCX", "DELTA"])
 
-                cutoff_time = dt.time(15, 15) if index not in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] else dt.time(23, 15)
-                if is_mt5_asset or is_crypto or self.is_mock: cutoff_time = dt.time(23, 59, 59) 
+                # CRITICAL FIX: Strict 3:15 cutoff tied strictly to the asset, NOT mock status
+                if index in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]:
+                    cutoff_time = dt.time(15, 15)
+                elif index in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]:
+                    cutoff_time = dt.time(23, 15)
+                else:
+                    cutoff_time = dt.time(23, 59, 59)
                 
                 spot = self.get_live_price(exch, index, token)
                 if spot is None and self.is_mock: spot = self.get_live_price("NSE", index, "12345")
@@ -970,10 +1007,13 @@ class SniperBot:
                     elif "Trend Rider" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_trend_rider_strategy(df_candles, index)
                     else: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
 
+                    # CRITICAL FIX: Restored & Fixed FOMO execution logic
                     if s.get("fomo_entry"):
                         body = abs(last_candle['close'] - last_candle['open'])
-                        avg_body = df_candles['close'].diff().abs().rolling(14).mean().iloc[-1]
-                        if body > (avg_body * 2.5) and last_candle.get('vol_spike', False): 
+                        avg_body = abs(df_candles['close'] - df_candles['open']).rolling(14).mean().iloc[-1]
+                        vol_spike = last_candle['volume'] > (df_candles['volume'].rolling(20).mean().iloc[-1] * 1.2)
+                        
+                        if body > (avg_body * 2.0) and vol_spike: 
                             signal = "BUY_CE" if last_candle['close'] > last_candle['open'] else "BUY_PE"
                             trend = "🚨 FOMO BREAKOUT ACTIVE"
                             if self.state["active_trade"] is None:
@@ -1006,7 +1046,8 @@ class SniperBot:
                     self.state.update({"current_trend": trend, "current_signal": signal, "vwap": vwap, "ema": ema, "atr": current_atr, "fib_data": fib_data, "latest_data": df_chart})
 
                     if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time:
-                        # CRITICAL FIX: Ensure quantity is at least 1 base lot
+                        
+                        # CRITICAL FIX: Ensure quantity is at least 1 base lot (never 0)
                         qty = max(float(s['lots']), float(base_lot_size))
                         
                         if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
@@ -1046,7 +1087,6 @@ class SniperBot:
                             self.state["trades_today"] += 1
                             self.state["ghost_memory"][f"{index}_{signal}"] = get_ist()
                         
-                        # CRITICAL FIX: Log if strike/premium lookup fails so user knows it's blocked
                         elif not is_mock_mode:
                             self.log(f"⚠️ Trade Blocked: Failed to fetch valid Strike/Premium for {index}.")
 
@@ -1123,7 +1163,8 @@ class SniperBot:
                                 elif pnl > 0: win_text = "profit👍"
                                 else: win_text = "sl hit 🛑"
                                 
-                                if market_close: win_text += " (Force Exit)"
+                                # Logs explicitly if auto-exited at 3:15 PM
+                                if market_close: win_text += " (Force Exit 3:15)"
                                 if trade['scaled_out']: win_text += " (Scaled Out)"
                                 
                                 self.log(f"🛑 EXIT {trade['symbol']} | PnL: {round(pnl, 2)} [{win_text}]")
@@ -1151,7 +1192,8 @@ class SniperBot:
 # ==========================================
 # 5. STREAMLIT UI 
 # ==========================================
-is_mkt_open, mkt_status_msg = get_market_status()
+# UI now calls get_market_status based specifically on Watchlist ASSET (INDEX)
+is_mkt_open, mkt_status_msg = get_market_status(st.session_state.sb_index_input)
 
 def play_sound():
     components.html("""<audio autoplay><source src="https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3" type="audio/mpeg"></audio>""", height=0)
@@ -1172,7 +1214,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHRI OM</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHREE ॐ</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -1441,7 +1483,9 @@ else:
                     else: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
                     bot.state.update({"current_trend": t, "current_signal": s, "vwap": v, "ema": e, "atr": atr, "fib_data": fib, "latest_data": df_c})
 
-    if not is_mkt_open: st.error(f"😴 {mkt_status_msg}")
+    # Display clear banner if Market is Closed
+    if not is_mkt_open: 
+        st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
     tab1, tab2, tab3, tab4 = st.tabs(["⚡ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX"])
 
