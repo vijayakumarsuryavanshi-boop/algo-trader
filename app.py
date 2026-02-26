@@ -1857,6 +1857,16 @@ else:
         with log_col:
             st.subheader("System Console")
             for l in bot.state["logs"]: st.markdown(f"`{l}`")
+                with log_col:
+            col_title, col_btn = st.columns([2, 1])
+            with col_title:
+                st.subheader("System Console")
+            with col_btn:
+                if st.button("🗑️ Clear", use_container_width=True):
+                    bot.state["logs"].clear()
+                    st.rerun()
+                    
+            for l in bot.state["logs"]: st.markdown(f"`{l}`")
             
         with pnl_col:
             if bot.is_mock:
@@ -1885,6 +1895,36 @@ else:
                         else: st.info("No real trades recorded yet.")
                     except Exception as e: st.error(f"Could not load trades: {e}")
                 else: st.error("Cloud DB disconnected.")
+                    # --- ADD THIS REPORT SECTION UNDER YOUR EXISTING DATAFRAMES ---
+            # Determine which dataframe to use based on mode
+            working_df = df_paper if bot.is_mock else (df_db if 'df_db' in locals() else None)
+            
+            if working_df is not None and not working_df.empty:
+                with st.expander("📈 View Daily & Weekly Reports"):
+                    # Standardize column names for processing
+                    date_col = 'Date' if bot.is_mock else 'trade_date'
+                    pnl_col_name = 'PnL' if bot.is_mock else 'pnl'
+                    
+                    # Convert to datetime and numeric safely
+                    working_df['temp_date'] = pd.to_datetime(working_df[date_col], errors='coerce')
+                    working_df['temp_pnl'] = pd.to_numeric(working_df[pnl_col_name], errors='coerce').fillna(0)
+                    
+                    rep_mode = st.radio("Select Report Interval", ["Daily", "Weekly"], horizontal=True, label_visibility="collapsed")
+                    
+                    if rep_mode == "Daily":
+                        report = working_df.groupby(working_df['temp_date'].dt.date)['temp_pnl'].sum().reset_index()
+                        report.columns = ["Day", "Total PnL"]
+                    else:
+                        # Groups by Year and Week Number (e.g., 2024-W23)
+                        report = working_df.groupby(working_df['temp_date'].dt.strftime('%Y-W%V'))['temp_pnl'].sum().reset_index()
+                        report.columns = ["Week", "Total PnL"]
+                    
+                    # Style the PnL colors green/red in the dataframe
+                    st.dataframe(
+                        report.style.map(lambda x: 'color: #22c55e; font-weight: bold;' if x > 0 else ('color: #ef4444; font-weight: bold;' if x < 0 else ''), subset=['Total PnL']), 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
                     
     with tab4:
         c_dx, c_bias = st.columns(2)
@@ -1956,3 +1996,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
