@@ -854,7 +854,7 @@ class SniperBot:
         
         formatted_qty = str(int(float(qty))) if exchange in ["NFO", "NSE", "BFO", "MCX"] else str(qty)
         
-        self.log(f"⚙️ Triggering Real API Payload: {symbol} | Qty: {qty} | Side: {side} | Exchange: {exchange}")
+        self.log(f"⚙️ Executing Real API: {symbol} | Qty: {qty} | Side: {side} | Exchange: {exchange}")
 
         if exchange == "DELTA":
             try:
@@ -865,10 +865,10 @@ class SniperBot:
                 headers = {'api-key': self.delta_api, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
                 res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
                 if res.status_code == 200: 
-                    self.log(f"🟢 ENTRY: {target} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
+                    self.log(f"✅ Delta Order Success! ID: {res.json().get('result', {}).get('id')}")
                     return res.json().get('result', {}).get('id')
                 else: 
-                    self.log(f"❌ Delta Order Failed: {res.text}"); return None
+                    self.log(f"❌ Delta API Rejected: {res.text}"); return None
             except Exception as e: 
                 self.log(f"❌ Delta Exception: {e}"); return None
 
@@ -877,16 +877,29 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
+                
+                # FIX: Find the EXACT market string CoinDCX expects to prevent "404 Not Found"
+                exact_market = target
+                try:
+                    ticker_data = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
+                    for coin in ticker_data:
+                        mkt = coin.get('market', '')
+                        clean_mkt = mkt.replace('B-', '').replace('I-', '').replace('-', '').replace('_', '')
+                        if mkt == target or clean_mkt == target:
+                            exact_market = mkt
+                            break
+                except: pass
+
                 clean_qty = float(round(float(qty), 4))
                 
                 if market_type in ["Futures", "Options"] or "-" in target or "FUT" in target:
-                    payload = {"side": side.lower(), "order_type": "market_order", "market": target, "total_quantity": clean_qty, "timestamp": ts}
-                    endpoint = "https://api.coindcx.com/exchange/v1/derivatives/orders/create"
+                    payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts}
+                    endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 else:
-                    payload = {"side": side.lower(), "order_type": "market", "market": target, "total_quantity": clean_qty, "timestamp": ts}
+                    payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts}
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
-                # STRICT HMAC NO-SPACE JSON DUMP
+                # FIX: Strict HMAC no-space JSON formatting to prevent silent exchange rejection
                 payload_str = json.dumps(payload, separators=(',', ':'))
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
                 signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
@@ -894,12 +907,13 @@ class SniperBot:
                 res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
                 
                 if res.status_code == 200: 
-                    self.log(f"🟢 ENTRY: {target} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
                     response_data = res.json()
                     order_id = response_data.get('orders', [{}])[0].get('id', response_data.get('id', 'DCX_ORDER_OK'))
+                    self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
                     return order_id
                 else: 
-                    self.log(f"❌ CoinDCX Order Failed: {res.text}"); return None
+                    self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {res.text}")
+                    return None
             except Exception as e: 
                 self.log(f"❌ CoinDCX Exception: {e}"); return None
 
@@ -910,7 +924,9 @@ class SniperBot:
                 price = tick.ask if side == "BUY" else tick.bid
                 request = {"action": mt5.TRADE_ACTION_DEAL, "symbol": symbol, "volume": float(qty), "type": action_type, "price": price, "deviation": 20, "magic": 234000, "comment": "QUANT Algo", "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
                 result = mt5.order_send(request)
-                if result.retcode != mt5.TRADE_RETCODE_DONE: self.log(f"❌ MT5 Order Failed: {result.comment}"); return None
+                if result.retcode != mt5.TRADE_RETCODE_DONE: 
+                    self.log(f"❌ MT5 Order Failed: {result.comment}"); return None
+                self.log(f"✅ MT5 Order Success! ID: {result.order}")
                 return result.order
             except Exception as e: self.log(f"❌ MT5 Exception: {e}"); return None
 
@@ -923,8 +939,8 @@ class SniperBot:
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
         try: 
+            # FIX: Fortified Angel One payload schema to prevent silent validation drops
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
-            # FORTIFIED PAYLOAD FOR ANGEL ONE
             order_params = {
                 "variety": "NORMAL", 
                 "tradingsymbol": symbol, 
@@ -941,15 +957,19 @@ class SniperBot:
             }
             res = self.api.placeOrder(order_params)
             
-            if res and not res.get('status'): 
-                self.log(f"❌ Angel API Validation Error: {res.get('message', 'Unknown Error')}")
-                return None
-            elif res and res.get('status'):
-                o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID')
-                self.log(f"✅ Angel Order Pushed Successfully! Order ID: {o_id}")
-                return o_id
+            if isinstance(res, str):
+                self.log(f"✅ Angel Order Placed! ID: {res}")
+                return res
+            elif isinstance(res, dict):
+                if res.get('status'):
+                    o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID') if res.get('data') else 'UNKNOWN_ID'
+                    self.log(f"✅ Angel Order Placed! ID: {o_id}")
+                    return o_id
+                else:
+                    self.log(f"❌ Angel API Validation Error: {res.get('message')} | Full: {res}")
+                    return None
             else:
-                self.log(f"❌ Angel Unknown Response: {res}")
+                self.log(f"❌ Angel Unknown Response Type: {res}")
                 return None
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
@@ -968,7 +988,7 @@ class SniperBot:
         df = self.get_master()
         if df is None or df.empty: 
             if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
-            self.log("⚠️ Options Master JSON empty or timeout. Cannot compute strikes.")
+            self.log("⚠️ Option Chain JSON is empty. Cannot compute Angel strikes.")
             return None, None, None, 0.0
 
         today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
@@ -1497,11 +1517,11 @@ else:
         MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
         HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
         FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
-        
+
         st.divider()
         if not bot.is_mock and st.button("🧪 Ping API Connection", use_container_width=True):
             st.toast("Testing exact API parameters...", icon="🧪")
-            bot.log("🧪 User executed manual Ping API Connection.")
+            bot.log(f"🧪 User executed manual Ping API Connection for {BROKER}.")
 
         render_signature()
 
@@ -1781,7 +1801,7 @@ else:
         log_col, pnl_col = st.columns([1, 2])
         with log_col:
             st.subheader("System Console")
-            for l in bot.state["logs"]: st.text(l)
+            for l in bot.state["logs"]: st.markdown(f"`{l}`")
             
         with pnl_col:
             if bot.is_mock:
