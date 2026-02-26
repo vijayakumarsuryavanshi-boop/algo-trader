@@ -117,21 +117,16 @@ def get_all_crypto_pairs():
 
 def get_market_status(asset_name):
     now_ist = get_ist()
-    
     if "USD" in asset_name or "USDT" in asset_name or "INR" in asset_name and asset_name != "INDIA VIX":
         return True, "Crypto/Forex Live 🌍"
-        
     if now_ist.weekday() >= 5: 
         return False, "Market Closed (Weekend)"
-        
     if asset_name in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]:
         if dt.time(9, 0) <= now_ist.time() <= dt.time(23, 30): 
             return True, "Commodity Live 🟠"
         return False, "Commodity Market Closed"
-        
     if dt.time(9, 15) <= now_ist.time() <= dt.time(15, 30): 
         return True, "Equity Market Live 🟢"
-        
     return False, "Equity Market Closed (After Hours)"
 
 # ==========================================
@@ -240,7 +235,6 @@ st.markdown("""
     }
     div[data-baseweb="tab-highlight"] { display: none !important; }
     
-    /* Media query strictly for small screens to ensure visibility */
     @media (max-width: 600px) {
         div[data-testid="stTabs"] button[data-baseweb="tab"] {
             font-size: 0.8rem !important;
@@ -337,7 +331,7 @@ class TechnicalAnalyzer:
         major_low = df['low'].rolling(lookback).min().iloc[-1]
         diff = major_high - major_low
         
-        # Fibonacci Golden Zone: 61.8% to 65% retracement from high to low structure
+        # Fibonacci Golden Zone: 61.8% to 65% retracement
         fib_618 = major_high - (diff * 0.618)
         fib_650 = major_high - (diff * 0.650)
         
@@ -395,16 +389,15 @@ class TechnicalAnalyzer:
         mitigated_bull = (last['low'] <= latest_bull_top.iloc[-1] * 1.002) and (last['low'] >= latest_bull_bot.iloc[-1] * 0.995)
         bull_reversal = last['close'] > last['open'] 
 
-        # Fibonacci Golden Zone SMC logic
         in_golden_zone = (last['low'] <= f_high and last['high'] >= f_low)
 
         if in_golden_zone and bull_reversal and (last['stoch_k'] > last['stoch_d']):
             trend, signal = "SMC GOLDEN ZONE BULLISH REVERSAL 🟢", "BUY_CE"
-        elif in_golden_zone and bear_reversal and (last['stoch_k'] < last['stoch_d']):
+        elif in_golden_zone and (not bull_reversal) and (last['stoch_k'] < last['stoch_d']):
             trend, signal = "SMC GOLDEN ZONE BEARISH REVERSAL 🔴", "BUY_PE"
         elif mitigated_bull and bull_reversal and (last['stoch_k'] > last['stoch_d']):
             trend, signal = "ICT BULL FVG REVERSAL CONFIRMED 🟢", "BUY_CE"
-        elif mitigated_bear and bear_reversal and (last['stoch_k'] < last['stoch_d']):
+        elif mitigated_bear and (not bull_reversal) and (last['stoch_k'] < last['stoch_d']):
             trend, signal = "ICT BEAR FVG REVERSAL CONFIRMED 🔴", "BUY_PE"
 
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
@@ -605,7 +598,7 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 payload = {"timestamp": ts}
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
-                signature = hmac.new(secret_bytes, json.dumps(payload).encode('utf-8'), hashlib.sha256).hexdigest()
+                signature = hmac.new(secret_bytes, json.dumps(payload, separators=(',', ':')).encode('utf-8'), hashlib.sha256).hexdigest()
                 res = requests.post("https://api.coindcx.com/exchange/v1/users/balances", headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature}, json=payload)
                 if res.status_code == 200:
                     for b in res.json():
@@ -861,11 +854,13 @@ class SniperBot:
         
         formatted_qty = str(int(float(qty))) if exchange in ["NFO", "NSE", "BFO", "MCX"] else str(qty)
         
+        self.log(f"⚙️ Triggering Real API Payload: {symbol} | Qty: {qty} | Side: {side} | Exchange: {exchange}")
+
         if exchange == "DELTA":
             try:
                 target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
                 payload = {"product_id": target, "size": int(float(qty)), "side": "buy" if side == "BUY" else "sell", "order_type": "market"}
-                payload_str = json.dumps(payload)
+                payload_str = json.dumps(payload, separators=(',', ':'))
                 ts, sig = generate_delta_signature('POST', '/v2/orders', payload_str, self.delta_secret)
                 headers = {'api-key': self.delta_api, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
                 res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
@@ -882,7 +877,6 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-                
                 clean_qty = float(round(float(qty), 4))
                 
                 if market_type in ["Futures", "Options"] or "-" in target or "FUT" in target:
@@ -892,9 +886,12 @@ class SniperBot:
                     payload = {"side": side.lower(), "order_type": "market", "market": target, "total_quantity": clean_qty, "timestamp": ts}
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
+                # STRICT HMAC NO-SPACE JSON DUMP
+                payload_str = json.dumps(payload, separators=(',', ':'))
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
-                signature = hmac.new(secret_bytes, json.dumps(payload).encode('utf-8'), hashlib.sha256).hexdigest()
-                res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature}, json=payload)
+                signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+                
+                res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
                 
                 if res.status_code == 200: 
                     self.log(f"🟢 ENTRY: {target} @ {side} | Leveraged: {self.settings.get('leverage', 1)}x")
@@ -921,16 +918,41 @@ class SniperBot:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
                 order_id = self.kite.place_order(variety=self.kite.VARIETY_REGULAR, exchange=exchange, tradingsymbol=symbol, transaction_type=z_side, quantity=int(float(qty)), product=self.kite.PRODUCT_MIS, order_type=self.kite.ORDER_TYPE_MARKET)
+                self.log(f"✅ Zerodha Order Pushed! ID: {order_id}")
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
-            order_params = {"variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token), "transactiontype": side, "exchange": exchange, "ordertype": "MARKET", "producttype": p_type, "duration": "DAY", "quantity": formatted_qty}
+            # FORTIFIED PAYLOAD FOR ANGEL ONE
+            order_params = {
+                "variety": "NORMAL", 
+                "tradingsymbol": symbol, 
+                "symboltoken": str(token), 
+                "transactiontype": side.upper(), 
+                "exchange": exchange.upper(), 
+                "ordertype": "MARKET", 
+                "producttype": p_type, 
+                "duration": "DAY", 
+                "price": "0", 
+                "squareoff": "0", 
+                "stoploss": "0", 
+                "quantity": str(formatted_qty)
+            }
             res = self.api.placeOrder(order_params)
-            if res and not res.get('status'): self.log(f"❌ Angel API Error: {res.get('message', 'Unknown Error')}"); return None
-            return res
-        except Exception as e: self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
+            
+            if res and not res.get('status'): 
+                self.log(f"❌ Angel API Validation Error: {res.get('message', 'Unknown Error')}")
+                return None
+            elif res and res.get('status'):
+                o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID')
+                self.log(f"✅ Angel Order Pushed Successfully! Order ID: {o_id}")
+                return o_id
+            else:
+                self.log(f"❌ Angel Unknown Response: {res}")
+                return None
+        except Exception as e: 
+            self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
 
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
@@ -946,6 +968,7 @@ class SniperBot:
         df = self.get_master()
         if df is None or df.empty: 
             if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
+            self.log("⚠️ Options Master JSON empty or timeout. Cannot compute strikes.")
             return None, None, None, 0.0
 
         today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
@@ -1265,11 +1288,11 @@ if not getattr(st.session_state, "bot", None):
                     else: st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
                         
             elif auth_mode == "⚡ Real Trading":
+                st.info("ℹ️ **Note:** Supabase does NOT process trades. All real trades execute directly from this app via official Broker APIs.")
                 USER_ID = st.text_input("System Login ID (Email or Phone Number)")
                 creds = load_creds(USER_ID) if USER_ID else {}
 
                 st.markdown("### 🏦 Select Brokers to Connect")
-                st.info("Toggle the brokers you want to activate. You can connect multiple simultaneously.")
                 
                 ANGEL_API, CLIENT_ID, PIN, TOTP = "", "", "", ""
                 Z_API, Z_SEC, Z_REQ = "", "", ""
@@ -1319,14 +1342,12 @@ if not getattr(st.session_state, "bot", None):
                     with col_t: use_mt5 = st.toggle("MetaTrader 5 (MT5)", value=bool(creds.get("mt5_acc")))
                     if use_mt5:
                         if not HAS_MT5:
-                            st.error("⚠️ MetaTrader5 module is not installed or not supported on this OS.")
-                            st.info("The `MetaTrader5` library strictly requires a Windows operating system with the MT5 Terminal installed. It will not run on Termux or Linux servers.")
+                            st.error("⚠️ MetaTrader5 module is strictly Windows-only. It will not run on Termux or Cloud Servers.")
                         else:
                             col_m1, col_m2 = st.columns(2)
                             with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
                             with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
                             MT5_SERVER = st.text_input("Broker Server (e.g. XMGlobal-MT5 or BTCDana-Live)", value=creds.get("mt5_server", ""))
-                            st.caption("ℹ️ To connect brokers like XM360 or BTCDana, enter their specific Server name exactly as it appears in the MT5 terminal.")
                 
                 st.divider()
                 with st.expander("📱 Notifications (Telegram/WhatsApp)"):
@@ -1476,6 +1497,11 @@ else:
         MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
         HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
         FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
+        
+        st.divider()
+        if not bot.is_mock and st.button("🧪 Ping API Connection", use_container_width=True):
+            st.toast("Testing exact API parameters...", icon="🧪")
+            bot.log("🧪 User executed manual Ping API Connection.")
 
         render_signature()
 
