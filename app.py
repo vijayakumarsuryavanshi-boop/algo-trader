@@ -913,7 +913,6 @@ class SniperBot:
                             break
                 except: pass
 
-                # COINDCX 400 ERROR FIX: Leverage param removed from Futures, Spot uses correct keys
                 if market_type in ["Futures", "Options"]:
                     payload = {
                         "side": side.lower(), 
@@ -939,6 +938,14 @@ class SniperBot:
                 
                 res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
                 
+                if res.status_code == 404 and market_type in ["Futures", "Options"]:
+                    self.log(f"⚠️ Futures 404 on {exact_pair}. Falling back to Margin API...")
+                    payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts, "leverage": int(self.settings.get('leverage', 1))}
+                    endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
+                    payload_str = json.dumps(payload, separators=(',', ':'))
+                    signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+                    res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
+
                 if res.status_code == 200: 
                     response_data = res.json()
                     order_id = response_data.get('orders', [{}])[0].get('id', response_data.get('id', 'DCX_ORDER_OK'))
