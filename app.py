@@ -575,7 +575,7 @@ class SniperBot:
             try: notification.notify(title=title, message=message, app_name="QUANT", timeout=5)
             except: pass
         if self.tg_token and self.tg_chat:
-            try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"*{title}*\n{message}", "parse_mode": "Markdown"}, timeout=3)
+            try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"<b>{title}</b>\n{message}", "parse_mode": "HTML"}, timeout=3)
             except: pass
         if self.wa_phone and self.wa_api:
             try: requests.get("https://api.callmebot.com/whatsapp.php", params={"phone": self.wa_phone, "text": f"{title}\n{message}", "apikey": self.wa_api}, timeout=3)
@@ -989,10 +989,10 @@ class SniperBot:
                 "ordertype": "MARKET",
                 "producttype": p_type,
                 "duration": "DAY",
-                "price": "0",
-                "squareoff": "0",
-                "stoploss": "0",
-                "quantity": str(int(float(qty)))
+                "price": 0,
+                "squareoff": 0,
+                "stoploss": 0,
+                "quantity": int(float(qty))
             }
             res = self.api.placeOrder(order_params)
             
@@ -1348,7 +1348,6 @@ if not getattr(st.session_state, "bot", None):
                     else: st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
                         
             elif auth_mode == "🕉️ Real Trading":
-                st.info("ℹ️ **Note:** Supabase does NOT process trades. All real trades execute directly from this app via official Broker APIs.")
                 USER_ID = st.text_input("System Login ID (Email or Phone Number)")
                 creds = load_creds(USER_ID) if USER_ID else {}
 
@@ -2013,4 +2012,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
