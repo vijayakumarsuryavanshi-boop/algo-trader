@@ -180,7 +180,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS 
 # ==========================================
-st.set_page_config(page_title="SHREE ॐ", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="shree", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -562,6 +562,7 @@ class SniperBot:
             "is_running": False, "order_in_flight": False, "active_trade": None, "last_trade": None,
             "logs": deque(maxlen=50), "current_trend": "WAIT", "current_signal": "WAIT",
             "spot": 0.0, "vwap": 0.0, "ema": 0.0, "atr": 0.0, "fib_data": {}, "latest_data": None,
+            "latest_candle": None,
             "ui_popups": deque(maxlen=10), "loop_count": 0, "daily_pnl": 0.0, "trades_today": 0,
             "manual_exit": False,
             "ghost_memory": {} 
@@ -897,7 +898,6 @@ class SniperBot:
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
                 clean_qty = float(round(float(qty), 4))
                 
-                # Dynamic CoinDCX Exact Market Matcher
                 exact_market = f"{base_coin}USDT"
                 exact_pair = f"B-{base_coin}_USDT"
                 
@@ -913,42 +913,32 @@ class SniperBot:
                             break
                 except: pass
 
+                # COINDCX 400 ERROR FIX: Leverage param removed from Futures, Spot uses correct keys
                 if market_type in ["Futures", "Options"]:
                     payload = {
                         "side": side.lower(), 
-                        "order_type": "market", # Futures expects "market"
-                        "pair": exact_pair,     # Futures expects "pair" parameter
+                        "order_type": "market", 
+                        "pair": exact_pair,     
                         "total_quantity": clean_qty, 
-                        "timestamp": ts, 
-                        "leverage": int(self.settings.get('leverage', 1))
+                        "timestamp": ts
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 else:
                     payload = {
                         "side": side.lower(), 
-                        "order_type": "market_order", # Spot uses "market_order"
-                        "market": exact_market,       # Spot expects "market" parameter
+                        "order_type": "market_order", 
+                        "market": exact_market,       
                         "total_quantity": clean_qty, 
                         "timestamp": ts
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
-                # Strict HMAC JSON without spaces
                 payload_str = json.dumps(payload, separators=(',', ':'))
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
                 signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
                 
                 res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
                 
-                # If Futures endpoint 404s, automatically fall back to Margin API
-                if res.status_code == 404 and market_type in ["Futures", "Options"]:
-                    self.log(f"⚠️ Futures 404 on {exact_pair}. Falling back to Margin API...")
-                    payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts, "leverage": int(self.settings.get('leverage', 1))}
-                    endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
-                    payload_str = json.dumps(payload, separators=(',', ':'))
-                    signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
-                    res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
-
                 if res.status_code == 200: 
                     response_data = res.json()
                     order_id = response_data.get('orders', [{}])[0].get('id', response_data.get('id', 'DCX_ORDER_OK'))
@@ -982,7 +972,6 @@ class SniperBot:
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
         try: 
-            # ANGEL ONE REAL ORDER EXECUTION (Mirrored perfectly from working script)
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             order_params = {
                 "variety": "NORMAL",
@@ -998,9 +987,22 @@ class SniperBot:
                 "stoploss": "0",
                 "quantity": str(int(float(qty)))
             }
-            order_id = self.api.placeOrder(order_params)
-            self.log(f"✅ Angel Order Pushed! Response/ID: {order_id}")
-            return str(order_id)
+            res = self.api.placeOrder(order_params)
+            
+            if isinstance(res, str):
+                self.log(f"✅ Angel Order Placed! ID: {res}")
+                return res
+            elif isinstance(res, dict):
+                if res.get('status'):
+                    o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID') if res.get('data') else 'UNKNOWN_ID'
+                    self.log(f"✅ Angel Order Placed! ID: {o_id}")
+                    return o_id
+                else:
+                    self.log(f"❌ Angel API Validation Error: {res.get('message')} | Full: {res}")
+                    return None
+            else:
+                self.log(f"❌ Angel Unknown Response Type: {res}")
+                return None
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
 
@@ -1094,6 +1096,7 @@ class SniperBot:
                 if spot and df_candles is not None and not df_candles.empty:
                     self.state["spot"] = spot
                     last_candle = df_candles.iloc[-1]
+                    self.state["latest_candle"] = last_candle.to_dict()
                     
                     if "VIJAY & RFF" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_vijay_rff_strategy(df_candles, index)
                     elif "Institutional FVG" in strategy or "ICT" in strategy: trend, signal, vwap, ema, df_chart, current_atr, fib_data = self.analyzer.apply_ict_smc_strategy(df_candles, index)
@@ -1303,7 +1306,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ SHREE ॐ</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>⚡ shree</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -1573,6 +1576,7 @@ else:
                 df_preload = bot.get_historical_data(exch, token, symbol=INDEX, interval=TIMEFRAME) if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval=TIMEFRAME)
                 if df_preload is not None and not df_preload.empty:
                     bot.state["spot"] = df_preload['close'].iloc[-1]
+                    bot.state["latest_candle"] = df_preload.iloc[-1].to_dict()
                     if "VIJAY & RFF" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vijay_rff_strategy(df_preload, INDEX)
                     elif "Institutional FVG" in STRATEGY or "ICT" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_ict_smc_strategy(df_preload, INDEX)
                     elif "Trend Rider" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_trend_rider_strategy(df_preload, INDEX)
@@ -1645,6 +1649,20 @@ else:
             ltp_display = f"{currency_sym}{ltp_val} (₹ {round(inr_val, 2)})"
         else:
             ltp_display = f"{currency_sym}{ltp_val}"
+            
+        last_candle = bot.state.get("latest_candle")
+        if last_candle is not None:
+            o_val = last_candle.get('open', 0.0)
+            h_val = last_candle.get('high', 0.0)
+            l_val = last_candle.get('low', 0.0)
+            c_val = last_candle.get('close', 0.0)
+            v_val = last_candle.get('volume', 0.0)
+            if c_val > o_val: vol_dom = "Buy Volume Dominant 🟢"
+            elif c_val < o_val: vol_dom = "Sell Volume Dominant 🔴"
+            else: vol_dom = "Neutral Volume ⚪"
+            v_display = f"{round(v_val, 2)} ({vol_dom})"
+        else:
+            o_val, h_val, l_val, c_val, v_display = 0.0, 0.0, 0.0, 0.0, "N/A"
         
         st.markdown(f"""
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
@@ -1659,6 +1677,13 @@ else:
                 <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Angel Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
+                </div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live OHLCV</div>
+                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
+                        O: {round(o_val, 4)} &nbsp;|&nbsp; H: {round(h_val, 4)} &nbsp;|&nbsp; L: {round(l_val, 4)} &nbsp;|&nbsp; C: {round(c_val, 4)}<br>
+                        <span style="font-size: 0.95rem; color: #0284c7;">V: {v_display}</span>
+                    </div>
                 </div>
             </div>
         """, unsafe_allow_html=True)
