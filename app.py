@@ -206,31 +206,49 @@ st.markdown("""
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important;
     }
 
-    /* MODERN TABS STYLING */
+    /* 🔥 STUNNING MOBILE-OPTIMIZED TABS STYLING 🔥 */
+    div[data-testid="stTabs"] {
+        background: transparent !important;
+    }
     div[data-testid="stTabs"] button[data-baseweb="tab"] {
-        font-size: 1rem !important;
-        font-weight: 700 !important;
-        padding: 12px 24px !important;
-        border-radius: 8px 8px 0px 0px !important;
-        border: none !important;
-        background-color: #e2e8f0 !important;
+        flex: 1 !important;
+        font-size: 0.95rem !important;
+        font-weight: 800 !important;
+        padding: 14px 10px !important;
+        border-radius: 8px !important;
+        border: 1px solid #cbd5e1 !important;
+        background: linear-gradient(145deg, #ffffff, #f1f5f9) !important;
         color: #475569 !important;
-        margin-right: 6px !important;
-        transition: all 0.3s ease !important;
-        box-shadow: inset 0 -2px 5px rgba(0,0,0,0.05) !important;
+        margin: 0 6px 15px 0 !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 3px 6px rgba(0,0,0,0.05) !important;
+        white-space: nowrap !important;
+        text-align: center !important;
+        justify-content: center !important;
     }
     div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #0284c7 !important;
+        background: linear-gradient(135deg, #0284c7, #0369a1) !important;
         color: #ffffff !important;
-        border-bottom: 3px solid #0369a1 !important;
-        box-shadow: 0 -4px 10px rgba(2, 132, 199, 0.2) !important;
-        transform: translateY(-2px);
+        border: 1px solid #0284c7 !important;
+        box-shadow: 0 8px 15px rgba(2, 132, 199, 0.35) !important;
+        transform: translateY(-3px) !important;
     }
     div[data-testid="stTabs"] button[data-baseweb="tab"]:hover {
-        background-color: #bae6fd !important;
+        background: #e0f2fe !important;
         color: #0c4a6e !important;
+        border-color: #bae6fd !important;
     }
     div[data-baseweb="tab-highlight"] { display: none !important; }
+    
+    /* Media query strictly for small screens to ensure visibility */
+    @media (max-width: 600px) {
+        div[data-testid="stTabs"] button[data-baseweb="tab"] {
+            font-size: 0.8rem !important;
+            padding: 10px 4px !important;
+            margin: 0 4px 10px 0 !important;
+            border-radius: 6px !important;
+        }
+    }
 
     .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
     .bottom-dock-container { position: fixed !important; bottom: -500px !important; opacity: 0.01 !important; z-index: -1 !important; }
@@ -1300,10 +1318,15 @@ if not getattr(st.session_state, "bot", None):
                     with col_img: st.image("https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128", width=40)
                     with col_t: use_mt5 = st.toggle("MetaTrader 5 (MT5)", value=bool(creds.get("mt5_acc")))
                     if use_mt5:
-                        col_m1, col_m2 = st.columns(2)
-                        with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
-                        with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
-                        MT5_SERVER = st.text_input("MT5 Server", value=creds.get("mt5_server", ""))
+                        if not HAS_MT5:
+                            st.error("⚠️ MetaTrader5 module is not installed or not supported on this OS.")
+                            st.info("The `MetaTrader5` library strictly requires a Windows operating system with the MT5 Terminal installed. It will not run on Termux or Linux servers.")
+                        else:
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
+                            with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
+                            MT5_SERVER = st.text_input("Broker Server (e.g. XMGlobal-MT5 or BTCDana-Live)", value=creds.get("mt5_server", ""))
+                            st.caption("ℹ️ To connect brokers like XM360 or BTCDana, enter their specific Server name exactly as it appears in the MT5 terminal.")
                 
                 st.divider()
                 with st.expander("📱 Notifications (Telegram/WhatsApp)"):
