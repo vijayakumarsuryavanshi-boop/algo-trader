@@ -318,7 +318,12 @@ class TechnicalAnalyzer:
         major_high = df['high'].rolling(lookback).max().iloc[-1]
         major_low = df['low'].rolling(lookback).min().iloc[-1]
         diff = major_high - major_low
-        return major_high, major_low, min(major_high - (diff*0.5), major_high - (diff*0.618)), max(major_high - (diff*0.5), major_high - (diff*0.618))
+        
+        # Fibonacci Golden Zone: 61.8% to 65% retracement from high to low structure
+        fib_618 = major_high - (diff * 0.618)
+        fib_650 = major_high - (diff * 0.650)
+        
+        return major_high, major_low, min(fib_618, fib_650), max(fib_618, fib_650)
 
     def detect_order_blocks(self, df):
         df = df.copy()
@@ -372,13 +377,16 @@ class TechnicalAnalyzer:
         mitigated_bull = (last['low'] <= latest_bull_top.iloc[-1] * 1.002) and (last['low'] >= latest_bull_bot.iloc[-1] * 0.995)
         bull_reversal = last['close'] > last['open'] 
 
-        if mitigated_bull and bull_reversal and (last['stoch_k'] > last['stoch_d']):
+        # Fibonacci Golden Zone SMC logic
+        in_golden_zone = (last['low'] <= f_high and last['high'] >= f_low)
+
+        if in_golden_zone and bull_reversal and (last['stoch_k'] > last['stoch_d']):
+            trend, signal = "SMC GOLDEN ZONE BULLISH REVERSAL 🟢", "BUY_CE"
+        elif in_golden_zone and bear_reversal and (last['stoch_k'] < last['stoch_d']):
+            trend, signal = "SMC GOLDEN ZONE BEARISH REVERSAL 🔴", "BUY_PE"
+        elif mitigated_bull and bull_reversal and (last['stoch_k'] > last['stoch_d']):
             trend, signal = "ICT BULL FVG REVERSAL CONFIRMED 🟢", "BUY_CE"
-
-        mitigated_bear = (last['high'] >= latest_bear_bot.iloc[-1] * 0.998) and (last['high'] <= latest_bear_top.iloc[-1] * 1.005)
-        bear_reversal = last['close'] < last['open']
-
-        if mitigated_bear and bear_reversal and (last['stoch_k'] < last['stoch_d']):
+        elif mitigated_bear and bear_reversal and (last['stoch_k'] < last['stoch_d']):
             trend, signal = "ICT BEAR FVG REVERSAL CONFIRMED 🔴", "BUY_PE"
 
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
@@ -789,7 +797,6 @@ class SniperBot:
         yf_int = interval if interval in ["1m", "5m", "15m"] else "5m" 
         yf_ticker = YF_TICKERS.get(symbol)
         
-        # FIX 2: Ensure Crypto symbols can map to yfinance for signals if not hardcoded
         if not yf_ticker and ("USD" in symbol or "USDT" in symbol):
             base_coin = symbol.replace("USDT", "").replace("USD", "")
             yf_ticker = f"{base_coin}-USD"
@@ -858,7 +865,6 @@ class SniperBot:
                 market_type = self.settings.get("crypto_mode", "Spot")
                 target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
                 
-                # FIX 6: Clean quantity for CoinDCX Spot floating points
                 clean_qty = float(round(float(qty), 4))
                 
                 if market_type in ["Futures", "Options"] or "-" in target or "FUT" in target:
@@ -901,7 +907,6 @@ class SniperBot:
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
         try: 
-            # FIX 1: Ensure Options use CARRYFORWARD so Angel One doesn't block them with INTRADAY margin rules
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             order_params = {"variety": "NORMAL", "tradingsymbol": symbol, "symboltoken": str(token), "transactiontype": side, "exchange": exchange, "ordertype": "MARKET", "producttype": p_type, "duration": "DAY", "quantity": formatted_qty}
             res = self.api.placeOrder(order_params)
@@ -1352,7 +1357,6 @@ else:
     # --- 1. TOP HEADER & LOGOUT ---
     head_c1, head_c2 = st.columns([3, 1])
     with head_c1: 
-        # FIX 3: HTML tag issue resolved so name actually shows correctly formatted.
         st.markdown(f"**👤 Session:** <span style='color:#0284c7; font-weight:800;'>{bot.client_name}</span> | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
     
     with head_c2:
@@ -1529,8 +1533,12 @@ else:
                 st.toast("System Terminated & Trades Closed", icon="☠️")
 
         ltp_val = round(bot.state['spot'], 4)
-        atr_val = round(bot.state['atr'], 4)
         trend_val = bot.state['current_trend']
+        
+        fib_d = bot.state.get('fib_data', {})
+        gz_l = round(fib_d.get('fib_low', 0), 2)
+        gz_h = round(fib_d.get('fib_high', 0), 2)
+        gz_display = f"{gz_l} - {gz_h}" if gz_l > 0 else "Calculating..."
         
         currency_sym = "$" if exch in ["MT5", "DELTA", "COINDCX"] else "₹"
         if exch in ["DELTA", "COINDCX"] and SHOW_INR_CRYPTO:
@@ -1546,11 +1554,11 @@ else:
                     <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
                 </div>
                 <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">ATR Base</div>
-                    <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{atr_val}</div>
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Fib Golden Zone</div>
+                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{gz_display}</div>
                 </div>
                 <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Quant Algorithm Sentiment</div>
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Angel Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
             </div>
@@ -1631,8 +1639,8 @@ else:
                 fib = bot.state['fib_data']
                 fib_lines = [
                     {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
-                    {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Fib 0.5'},
-                    {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Fib 0.618'},
+                    {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
+                    {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
                     {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
                 ]
             
@@ -1733,7 +1741,6 @@ else:
                     df_paper = pd.DataFrame(bot.state["paper_history"])
                     st.dataframe(df_paper.iloc[::-1], use_container_width=True)
                     
-                    # FIX 4: Separate Mock Ledger File Generator tied to Session Client
                     output_mock = io.BytesIO()
                     with pd.ExcelWriter(output_mock, engine='xlsxwriter') as writer: df_paper.to_excel(writer, index=False)
                     st.download_button("📥 Export Mock Ledger (.xlsx)", data=output_mock.getvalue(), file_name=f"Mock_Trade_Log_{bot.client_name}.xlsx")
