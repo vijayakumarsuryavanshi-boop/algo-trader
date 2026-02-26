@@ -21,6 +21,8 @@ plyer
 XlsxWriter
 supabase
 kiteconnect
+Flask
+
 
 
 
