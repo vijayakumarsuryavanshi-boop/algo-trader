@@ -1867,7 +1867,24 @@ else:
                 st.subheader("System Console")
             with col_btn:
                 if st.button("🗑️ Clear", use_container_width=True):
+                    # 1. Clear the text console logs
                     bot.state["logs"].clear()
+                    
+                    # 2. Clear the Mock Ledger (Paper Trading Excel)
+                    if "paper_history" in bot.state:
+                        bot.state["paper_history"] = []
+                    bot.state["daily_pnl"] = 0.0
+                    bot.state["trades_today"] = 0
+                    
+                    # 3. Clear the Live Database (Real Trading Excel)
+                    if not bot.is_mock and HAS_DB:
+                        try:
+                            user_id = getattr(bot, "system_user_id", bot.api_key)
+                            # Deletes all trade history for this specific user from Supabase
+                            supabase.table("trade_logs").delete().eq("user_id", user_id).execute()
+                        except Exception as e:
+                            pass
+                            
                     st.rerun()
                     
             for l in bot.state["logs"]: st.markdown(f"`{l}`")
@@ -1996,3 +2013,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
