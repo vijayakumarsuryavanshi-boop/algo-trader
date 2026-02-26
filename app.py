@@ -657,10 +657,11 @@ class SniperBot:
         if self.api_key and self.totp_secret:
             try:
                 obj = SmartConnect(api_key=self.api_key)
-                res = obj.generateSession(self.client_id, self.pwd, pyotp.TOTP(self.totp_secret).now())
-                if res['status']:
+                totp = pyotp.TOTP(self.totp_secret).now()
+                res = obj.generateSession(self.client_id, self.pwd, totp)
+                if res and res.get('status'):
                     self.api = obj
-                    self.client_name = res['data'].get('name', self.client_id)
+                    self.client_name = res.get('data', {}).get('name', self.client_id)
                     self.log(f"✅ Angel One Connected")
                     success = True
                 else: self.log(f"❌ Angel Login failed: {res.get('message', 'Check credentials')}")
@@ -981,38 +982,25 @@ class SniperBot:
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
         try: 
-            # FIX: Fortified Angel One payload schema to prevent silent validation drops
+            # ANGEL ONE REAL ORDER EXECUTION (Mirrored perfectly from working script)
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             order_params = {
-                "variety": "NORMAL", 
-                "tradingsymbol": symbol, 
-                "symboltoken": str(token), 
-                "transactiontype": side.upper(), 
-                "exchange": exchange.upper(), 
-                "ordertype": "MARKET", 
-                "producttype": p_type, 
-                "duration": "DAY", 
-                "price": "0", 
-                "squareoff": "0", 
-                "stoploss": "0", 
-                "quantity": str(formatted_qty)
+                "variety": "NORMAL",
+                "tradingsymbol": symbol,
+                "symboltoken": str(token),
+                "transactiontype": side.upper(),
+                "exchange": exchange.upper(),
+                "ordertype": "MARKET",
+                "producttype": p_type,
+                "duration": "DAY",
+                "price": "0",
+                "squareoff": "0",
+                "stoploss": "0",
+                "quantity": str(int(float(qty)))
             }
-            res = self.api.placeOrder(order_params)
-            
-            if isinstance(res, str):
-                self.log(f"✅ Angel Order Placed! ID: {res}")
-                return res
-            elif isinstance(res, dict):
-                if res.get('status'):
-                    o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID') if res.get('data') else 'UNKNOWN_ID'
-                    self.log(f"✅ Angel Order Placed! ID: {o_id}")
-                    return o_id
-                else:
-                    self.log(f"❌ Angel API Validation Error: {res.get('message')} | Full: {res}")
-                    return None
-            else:
-                self.log(f"❌ Angel Unknown Response Type: {res}")
-                return None
+            order_id = self.api.placeOrder(order_params)
+            self.log(f"✅ Angel Order Pushed! Response/ID: {order_id}")
+            return str(order_id)
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
 
