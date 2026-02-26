@@ -201,50 +201,67 @@ st.markdown("""
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important;
     }
 
-    /* 🔥 STUNNING MOBILE-OPTIMIZED TABS STYLING 🔥 */
+    /* 🔥 SUPER BEAUTIFUL SEGMENTED CONTROL TABS STYLING 🔥 */
     div[data-testid="stTabs"] {
         background: transparent !important;
     }
+    
+    div[data-baseweb="tab-list"] {
+        background: #e2e8f0 !important; /* Soft pill container */
+        padding: 6px !important;
+        border-radius: 12px !important;
+        display: flex !important;
+        gap: 8px !important;
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.05) !important;
+        border: none !important;
+        margin-bottom: 20px !important;
+    }
+
     div[data-testid="stTabs"] button[data-baseweb="tab"] {
         flex: 1 !important;
-        font-size: 0.95rem !important;
+        font-size: 1rem !important;
         font-weight: 800 !important;
-        padding: 14px 10px !important;
+        padding: 12px 16px !important;
         border-radius: 8px !important;
-        border: 1px solid #cbd5e1 !important;
-        background: linear-gradient(145deg, #ffffff, #f1f5f9) !important;
-        color: #475569 !important;
-        margin: 0 6px 15px 0 !important;
+        background: transparent !important;
+        color: #64748b !important;
+        border: none !important;
+        margin: 0 !important;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        box-shadow: 0 3px 6px rgba(0,0,0,0.05) !important;
         white-space: nowrap !important;
         text-align: center !important;
         justify-content: center !important;
+        box-shadow: none !important;
     }
+
     div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] {
-        background: linear-gradient(135deg, #0284c7, #0369a1) !important;
+        background: linear-gradient(135deg, #0284c7, #0369a1) !important; /* Vivid Active State */
         color: #ffffff !important;
-        border: 1px solid #0284c7 !important;
-        box-shadow: 0 8px 15px rgba(2, 132, 199, 0.35) !important;
-        transform: translateY(-3px) !important;
+        box-shadow: 0 4px 12px rgba(2, 132, 199, 0.4) !important;
+        transform: scale(1.02) !important;
     }
-    div[data-testid="stTabs"] button[data-baseweb="tab"]:hover {
-        background: #e0f2fe !important;
-        color: #0c4a6e !important;
-        border-color: #bae6fd !important;
+
+    div[data-testid="stTabs"] button[data-baseweb="tab"]:hover:not([aria-selected="true"]) {
+        background: #cbd5e1 !important;
+        color: #0f111a !important;
     }
+
     div[data-baseweb="tab-highlight"] { display: none !important; }
     
-    @media (max-width: 600px) {
+    /* Responsive stacking for small mobile screens */
+    @media (max-width: 768px) {
+        div[data-baseweb="tab-list"] {
+            flex-wrap: wrap !important;
+            border-radius: 14px !important;
+        }
         div[data-testid="stTabs"] button[data-baseweb="tab"] {
-            font-size: 0.8rem !important;
-            padding: 10px 4px !important;
-            margin: 0 4px 10px 0 !important;
-            border-radius: 6px !important;
+            font-size: 0.85rem !important;
+            padding: 10px 8px !important;
+            min-width: 45% !important; /* Forces a 2x2 grid on very small screens */
         }
     }
 
-    .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
+    .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
     .bottom-dock-container { position: fixed !important; bottom: -500px !important; opacity: 0.01 !important; z-index: -1 !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -876,36 +893,61 @@ class SniperBot:
             try:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
-                target = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
+                base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
+                clean_qty = float(round(float(qty), 4))
                 
-                # FIX: Find the EXACT market string CoinDCX expects to prevent "404 Not Found"
-                exact_market = target
+                # Dynamic CoinDCX Exact Market Matcher
+                exact_market = f"{base_coin}USDT"
+                exact_pair = f"B-{base_coin}_USDT"
+                
                 try:
                     ticker_data = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
                     for coin in ticker_data:
                         mkt = coin.get('market', '')
-                        clean_mkt = mkt.replace('B-', '').replace('I-', '').replace('-', '').replace('_', '')
-                        if mkt == target or clean_mkt == target:
+                        if market_type in ["Futures", "Options"] and mkt.startswith(f"B-{base_coin}_"):
+                            exact_pair = mkt
+                            break
+                        elif market_type == "Spot" and mkt.startswith(base_coin) and mkt.endswith("USDT"):
                             exact_market = mkt
                             break
                 except: pass
 
-                clean_qty = float(round(float(qty), 4))
-                
-                if market_type in ["Futures", "Options"] or "-" in target or "FUT" in target:
-                    payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts}
+                if market_type in ["Futures", "Options"]:
+                    payload = {
+                        "side": side.lower(), 
+                        "order_type": "market", # Futures expects "market"
+                        "pair": exact_pair,     # Futures expects "pair" parameter
+                        "total_quantity": clean_qty, 
+                        "timestamp": ts, 
+                        "leverage": int(self.settings.get('leverage', 1))
+                    }
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 else:
-                    payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts}
+                    payload = {
+                        "side": side.lower(), 
+                        "order_type": "market_order", # Spot uses "market_order"
+                        "market": exact_market,       # Spot expects "market" parameter
+                        "total_quantity": clean_qty, 
+                        "timestamp": ts
+                    }
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
-                # FIX: Strict HMAC no-space JSON formatting to prevent silent exchange rejection
+                # Strict HMAC JSON without spaces
                 payload_str = json.dumps(payload, separators=(',', ':'))
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
                 signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
                 
                 res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
                 
+                # If Futures endpoint 404s, automatically fall back to Margin API
+                if res.status_code == 404 and market_type in ["Futures", "Options"]:
+                    self.log(f"⚠️ Futures 404 on {exact_pair}. Falling back to Margin API...")
+                    payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts, "leverage": int(self.settings.get('leverage', 1))}
+                    endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
+                    payload_str = json.dumps(payload, separators=(',', ':'))
+                    signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+                    res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
+
                 if res.status_code == 200: 
                     response_data = res.json()
                     order_id = response_data.get('orders', [{}])[0].get('id', response_data.get('id', 'DCX_ORDER_OK'))
