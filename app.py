@@ -323,6 +323,15 @@ class TechnicalAnalyzer:
         df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
         return df['tr'].rolling(period).mean()
 
+    def get_support_resistance(self, df, lookback=15):
+        # Exness-style Swing Highs/Lows calculation
+        df = df.copy()
+        highs = df['high'].rolling(window=lookback, center=True).max()
+        lows = df['low'].rolling(window=lookback, center=True).min()
+        res = df[df['high'] == highs]['high'].dropna().unique().tolist()
+        sup = df[df['low'] == lows]['low'].dropna().unique().tolist()
+        return sup[-2:], res[-2:] # Return the two most recent distinct levels
+
     def calculate_indicators(self, df, is_index=False):
         df = df.copy()
         df['vol_sma'] = df['volume'].rolling(20).mean()
@@ -392,11 +401,6 @@ class TechnicalAnalyzer:
         df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
         df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
 
-        latest_bull_top = df['low'].where(df['fvg_bull']).ffill()
-        latest_bull_bot = df['high'].shift(2).where(df['fvg_bull']).ffill()
-        latest_bear_bot = df['high'].where(df['fvg_bear']).ffill()
-        latest_bear_top = df['low'].shift(2).where(df['fvg_bear']).ffill()
-
         atr = self.get_atr(df).iloc[-1]
         mh, ml, f_low, f_high = self.calculate_fib_zones(df)
         smc_blocks = self.detect_order_blocks(df)
@@ -406,16 +410,16 @@ class TechnicalAnalyzer:
         df['Sell_Signal'] = False
         df['Marker_Text'] = ""
 
-        # Historical Signal Calculation
+        # Historical Signal Calculation for Chart
         for i in range(2, len(df)):
             in_gz = (df['low'].iloc[i] <= f_high and df['high'].iloc[i] >= f_low)
             bull_rev = df['close'].iloc[i] > df['open'].iloc[i]
             if in_gz and bull_rev and (df['stoch_k'].iloc[i] > df['stoch_d'].iloc[i]):
                 df.at[df.index[i], 'Buy_Signal'] = True
-                df.at[df.index[i], 'Marker_Text'] = "ICT"
+                df.at[df.index[i], 'Marker_Text'] = "ICT SMC"
             elif in_gz and (not bull_rev) and (df['stoch_k'].iloc[i] < df['stoch_d'].iloc[i]):
                 df.at[df.index[i], 'Sell_Signal'] = True
-                df.at[df.index[i], 'Marker_Text'] = "ICT"
+                df.at[df.index[i], 'Marker_Text'] = "ICT SMC"
 
         last = df.iloc[-1]
         trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
@@ -425,7 +429,6 @@ class TechnicalAnalyzer:
 
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
 
-    # 🔥 VIJAY & RFF - Completely accurate EMA/RSI logic injected historically into dataframe for TradingView rendering
     def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -491,7 +494,7 @@ class TechnicalAnalyzer:
         smc_blocks = self.detect_order_blocks(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
         
-        # Historical Signal Calculation for the chart
+        # Historical Signal Calculation for Chart
         df['price_cross_up'] = (df['close'] > df['ema_fast']) & (df['close'].shift(1) <= df['ema_fast'].shift(1))
         df['price_cross_dn'] = (df['close'] < df['ema_fast']) & (df['close'].shift(1) >= df['ema_fast'].shift(1))
         
@@ -530,29 +533,25 @@ class TechnicalAnalyzer:
             
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data
 
-    # 🔥 MASSIVE UPGRADE: Keyword Rule Builder generating TradingView-ready markers dynamically
+    # 🔥 KEYWORD RULE BUILDER
     def apply_keyword_strategy(self, df, keywords, index_name):
         if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}
         df = df.copy()
         
-        # EMA
         df['ema9'] = ta.ema(df['close'], 9)
         df['ema21'] = ta.ema(df['close'], 21)
         df['rsi'] = ta.rsi(df['close'], 14)
         
-        # MACD
         macd = ta.macd(df['close'])
         if macd is not None:
             df['macd'] = macd['MACD_12_26_9']
             df['macds'] = macd['MACDs_12_26_9']
             
-        # Bollinger Bands
         bb = ta.bbands(df['close'], length=20, std=2)
         if bb is not None:
             df['bbl'] = bb['BBL_20_2.0']
             df['bbh'] = bb['BBU_20_2.0']
 
-        # Stochastic RSI
         stoch = ta.stochrsi(df['close'])
         if stoch is not None:
             df['stoch_k'] = stoch.iloc[:, 0]
@@ -560,7 +559,6 @@ class TechnicalAnalyzer:
         else:
             df['stoch_k'] = 50; df['stoch_d'] = 50
 
-        # Chandelier Exit
         atr22 = ta.atr(df['high'], df['low'], df['close'], 22)
         if atr22 is not None:
             df['ce_long'] = df['high'].rolling(22).max() - atr22 * 3
@@ -568,7 +566,6 @@ class TechnicalAnalyzer:
         else:
             df['ce_long'] = df['low']; df['ce_short'] = df['high']
 
-        # FVG
         df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
         df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
 
@@ -578,7 +575,6 @@ class TechnicalAnalyzer:
 
         keys = keywords if isinstance(keywords, list) else keywords.split(',') if keywords else []
 
-        # Iterate through history to plot markers exactly when rules align
         for i in range(1, len(df)):
             buy, sell, text = False, False, ""
             
@@ -1185,7 +1181,6 @@ class SniperBot:
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
 
-
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
         
@@ -1234,8 +1229,8 @@ class SniperBot:
         return None, None, None, 0.0
 
     def trading_loop(self):
-        self.log("▶️ Engine thread started.")
-        while self.state["is_running"]:
+        self.log("▶️ Engine thread started. Running in background.")
+        while self.state.get("is_running", False):
             try:
                 s = self.settings
                 current_time = get_ist().time()
@@ -1243,11 +1238,12 @@ class SniperBot:
                 time_str = get_ist().strftime('%H:%M:%S')
                 self.state["loop_count"] = self.state.get("loop_count", 0) + 1
                 
-                if self.state["trades_today"] >= s['max_trades'] or self.state.get("daily_pnl", 0.0) <= -s.get("capital_protect", 999999):
+                if self.state["trades_today"] >= s.get('max_trades', 5) or self.state.get("daily_pnl", 0.0) <= -s.get("capital_protect", 999999):
                     self.state["is_running"] = False
+                    self.log("🛑 Engine Stopped: Max Trades or Drawdown Reached.")
                     break
 
-                index, timeframe, is_mock_mode, strategy = s['index'], s['timeframe'], s['paper_mode'], s['strategy']
+                index, timeframe, is_mock_mode, strategy = s.get('index', 'NIFTY'), s.get('timeframe', '5m'), s.get('paper_mode', True), s.get('strategy', 'Keyword Rule Builder')
                 
                 is_open, mkt_msg = get_market_status(index)
                 if not is_open:
@@ -1348,7 +1344,7 @@ class SniperBot:
                 # ---- EXECUTION ----
                 if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time:
                     
-                    qty = max(float(s['lots']), float(base_lot_size))
+                    qty = max(float(s.get('lots', 1.0)), float(base_lot_size))
                     
                     if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
                         strike_sym = index
@@ -1358,7 +1354,7 @@ class SniperBot:
                         strike_token, strike_exch = strike_sym, exch
                         entry_ltp = spot
                     else:
-                        max_prem = s['max_capital'] / qty if qty > 0 else 0
+                        max_prem = s.get('max_capital', 15000) / qty if qty > 0 else 0
                         strike_sym, strike_token, strike_exch, entry_ltp = self.get_strike(index, spot, signal, max_prem)
                     
                     if strike_sym and entry_ltp:
@@ -1366,15 +1362,15 @@ class SniperBot:
                         if is_mt5_asset or is_crypto: trade_type = "BUY" if signal == "BUY_CE" else "SELL"
 
                         if trade_type == "SELL":
-                            dynamic_sl = entry_ltp + s['sl_pts']
-                            tp1 = entry_ltp - s['tgt_pts']
-                            tp2 = entry_ltp - (s['tgt_pts'] * 2)
-                            tp3 = entry_ltp - (s['tgt_pts'] * 3)
+                            dynamic_sl = entry_ltp + s.get('sl_pts', 20)
+                            tp1 = entry_ltp - s.get('tgt_pts', 15)
+                            tp2 = entry_ltp - (s.get('tgt_pts', 15) * 2)
+                            tp3 = entry_ltp - (s.get('tgt_pts', 15) * 3)
                         else:
-                            dynamic_sl = entry_ltp - s['sl_pts'] 
-                            tp1 = entry_ltp + s['tgt_pts']
-                            tp2 = entry_ltp + (s['tgt_pts'] * 2)
-                            tp3 = entry_ltp + (s['tgt_pts'] * 3)
+                            dynamic_sl = entry_ltp - s.get('sl_pts', 20) 
+                            tp1 = entry_ltp + s.get('tgt_pts', 15)
+                            tp2 = entry_ltp + (s.get('tgt_pts', 15) * 2)
+                            tp3 = entry_ltp + (s.get('tgt_pts', 15) * 3)
 
                         new_trade = {
                             "symbol": strike_sym, "token": strike_token, "exch": strike_exch, 
@@ -1423,7 +1419,7 @@ class SniperBot:
                             lowest = trade.get('lowest_price', trade['entry'])
                             if ltp < lowest:
                                 trade['lowest_price'] = ltp
-                                tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                tsl_buffer = s.get('tsl_pts', 15) * 1.5 if "Trend Rider" in strategy else s.get('tsl_pts', 15)
                                 new_sl = ltp + tsl_buffer
                                 if new_sl < trade['sl']: trade['sl'] = new_sl
                                 
@@ -1441,7 +1437,7 @@ class SniperBot:
                                     else:                              new_sl = trade['sl']
                                     if new_sl > trade['sl']: trade['sl'] = new_sl
                                 else:
-                                    tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                    tsl_buffer = s.get('tsl_pts', 15) * 1.5 if "Trend Rider" in strategy else s.get('tsl_pts', 15)
                                     new_sl = ltp - tsl_buffer
                                     if new_sl > trade['sl']: trade['sl'] = new_sl
                                     
@@ -1510,7 +1506,8 @@ class SniperBot:
                             self.state["daily_pnl"] += pnl
                             self.state["active_trade"] = None
             except Exception as e:
-                self.log(f"⚠️ Loop Error: {str(e)}")
+                # Catching all exceptions ensures the background loop never breaks without a user kill switch.
+                self.log(f"⚠️ Non-Fatal Loop Error: {str(e)}")
             time.sleep(2)
 
 # ==========================================
@@ -1870,7 +1867,7 @@ else:
             </div>
         """, unsafe_allow_html=True)
 
-        is_running = bot.state["is_running"]
+        is_running = bot.state.get("is_running", False)
         status_color = "#22c55e" if is_running else "#ef4444"
         status_bg = "#f0fdf4" if is_running else "#fef2f2"
         status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
@@ -2005,7 +2002,7 @@ else:
         else:
             st.info("⏳ Radar Active: Waiting for High-Probability Setup...")
 
-        # 🔥 TRADING VIEW MIRROR CHART INTEGRATION
+        # 🔥 FULL WHITE TRADING VIEW MIRROR CHART + EXNESS S&R
         st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
         c_h1, c_h2 = st.columns(2)
         with c_h1: SHOW_CHART = st.toggle("📊 Render Chart", True)
@@ -2040,20 +2037,30 @@ else:
                         "size": 2
                     })
             
-            fib_lines = []
+            # --- BASE FIB LINES ---
+            snr_lines = []
             if not bot.state["active_trade"] and bot.state.get('fib_data'):
                 fib = bot.state['fib_data']
-                fib_lines = [
+                snr_lines.extend([
                     {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
                     {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
                     {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
                     {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
-                ]
+                ])
+                
+            # --- EXNESS STYLE HORIZONTAL S&R (For Forex & Crypto) ---
+            if exch in ["MT5", "COINDCX", "DELTA"]:
+                sup, res = bot.analyzer.get_support_resistance(chart_df)
+                for r in res:
+                    snr_lines.append({"price": r, "color": '#ef4444', "lineWidth": 1, "lineStyle": 1, "title": 'Resistance (H)'})
+                for s in sup:
+                    snr_lines.append({"price": s, "color": '#22c55e', "lineWidth": 1, "lineStyle": 1, "title": 'Support (L)'})
             
+            # 🔥 WHITE CHART LAYOUT
             chartOptions = {
                 "height": 700 if FULL_CHART else 500, 
-                "layout": { "textColor": '#d1d4dc', "background": { "type": 'solid', "color": '#131722' } }, 
-                "grid": { "vertLines": { "color": '#363c4e' }, "horzLines": { "color": '#363c4e' } }, 
+                "layout": { "textColor": '#1e293b', "background": { "type": 'solid', "color": '#ffffff' } }, 
+                "grid": { "vertLines": { "color": '#f1f5f9' }, "horzLines": { "color": '#f1f5f9' } }, 
                 "crosshair": { "mode": 0 }, 
                 "timeScale": { "timeVisible": True, "secondsVisible": False }
             }
@@ -2062,14 +2069,14 @@ else:
                 "type": 'Candlestick', 
                 "data": candles, 
                 "options": {
-                    "upColor": '#089981', 
-                    "downColor": '#f23645', 
-                    "borderUpColor": '#089981', 
-                    "borderDownColor": '#f23645', 
-                    "wickUpColor": '#089981', 
-                    "wickDownColor": '#f23645'
+                    "upColor": '#26a69a', 
+                    "downColor": '#ef5350', 
+                    "borderUpColor": '#26a69a', 
+                    "borderDownColor": '#ef5350', 
+                    "wickUpColor": '#26a69a', 
+                    "wickDownColor": '#ef5350'
                 },
-                "priceLines": fib_lines,
+                "priceLines": snr_lines,
                 "markers": markers_list
             }]
 
@@ -2088,7 +2095,7 @@ else:
                 ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
                 if ema_data: chart_series.append({"type": 'Line', "data": ema_data, "options": { "color": '#0ea5e9', "lineWidth": 2, "title": 'EMA' }})
 
-            st.markdown("<div style='border: 1px solid #363c4e; border-radius: 8px; overflow: hidden;'>", unsafe_allow_html=True)
+            st.markdown("<div style='border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden;'>", unsafe_allow_html=True)
             renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="tv_mirror_chart")
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -2279,6 +2286,65 @@ else:
                                 bias_results.append({"Asset": name, "Current Price": round(c_price, 2), "Next Expected Move": bias})
                         except: pass
                     if bias_results: st.dataframe(pd.DataFrame(bias_results), use_container_width=True, hide_index=True)
+        
+        st.divider()
+        st.subheader("⚡ 1-Minute Scalping Signals (Gold & Crypto)")
+        if st.button("Generate 1m Entry/Exit/TP Targets", use_container_width=True):
+            with st.spinner("Analyzing 1m Order Flow & VWAP..."):
+                scalp_assets = {"🥇 Gold (XAUUSD)": "GC=F", "🪙 Bitcoin (BTCUSD)": "BTC-USD"}
+                sc_cols = st.columns(2)
+                for idx, (name, ticker) in enumerate(scalp_assets.items()):
+                    try:
+                        tk = yf.Ticker(ticker)
+                        df_1m = tk.history(period="1d", interval="1m")
+                        if not df_1m.empty:
+                            df_1m.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
+                            atr = ta.atr(df_1m['high'], df_1m['low'], df_1m['close'], 14).iloc[-1]
+                            df_1m['ema9'] = ta.ema(df_1m['close'], 9)
+                            df_1m['ema21'] = ta.ema(df_1m['close'], 21)
+                            
+                            c = df_1m['close'].iloc[-1]
+                            e9 = df_1m['ema9'].iloc[-1]
+                            e21 = df_1m['ema21'].iloc[-1]
+                            
+                            if c > e9 > e21:
+                                bias = "BUY (Long) 🟢"
+                                sl = c - (atr * 1.5)
+                                tp1 = c + (atr * 1.0)
+                                tp2 = c + (atr * 2.0)
+                                tp3 = c + (atr * 3.0)
+                                box_color = "#f0fdf4"
+                                text_color = "#166534"
+                            elif c < e9 < e21:
+                                bias = "SELL (Short) 🔴"
+                                sl = c + (atr * 1.5)
+                                tp1 = c - (atr * 1.0)
+                                tp2 = c - (atr * 2.0)
+                                tp3 = c - (atr * 3.0)
+                                box_color = "#fef2f2"
+                                text_color = "#991b1b"
+                            else:
+                                bias = "WAIT (Ranging) 🟡"
+                                sl, tp1, tp2, tp3 = 0, 0, 0, 0
+                                box_color = "#fefce8"
+                                text_color = "#854d0e"
+                            
+                            with sc_cols[idx]:
+                                st.markdown(f"""
+                                <div style="background-color: {box_color}; padding: 15px; border-radius: 8px; border: 1px solid {text_color};">
+                                    <h4 style="margin-top: 0; color: {text_color};">{name}</h4>
+                                    <h2 style="margin: 0 0 10px 0; color: #0f111a;">{round(c, 2)}</h2>
+                                    <div style="font-weight: bold; color: {text_color}; margin-bottom: 10px;">Signal: {bias}</div>
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.9rem;">
+                                        <div style="background: #ffffff; padding: 5px; border-radius: 4px; border: 1px solid #e2e8f0;"><b>SL:</b> {round(sl, 2)}</div>
+                                        <div style="background: #ffffff; padding: 5px; border-radius: 4px; border: 1px solid #e2e8f0;"><b>TP1:</b> {round(tp1, 2)}</div>
+                                        <div style="background: #ffffff; padding: 5px; border-radius: 4px; border: 1px solid #e2e8f0;"><b>TP2:</b> {round(tp2, 2)}</div>
+                                        <div style="background: #ffffff; padding: 5px; border-radius: 4px; border: 1px solid #e2e8f0;"><b>TP3:</b> {round(tp3, 2)}</div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.write(f"Error loading {name}")
 
     def cycle_asset():
         assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
@@ -2298,6 +2364,7 @@ else:
         with dock_c3: st.button("🔲", key="btn_recent", on_click=cycle_strat, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    if bot.state.get("is_running"):
+    # Background processing ping to keep Streamlit connection alive while thread runs
+    if bot.state.get("is_running", False):
         time.sleep(2)
         st.rerun()
