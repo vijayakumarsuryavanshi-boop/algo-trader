@@ -271,7 +271,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 DEFAULT_LOTS = {
-    "NIFTY": 25, "BANKNIFTY": 15, "SENSEX": 10, "CRUDEOIL": 100, "NATURALGAS": 1250, 
+    "NIFTY": 65, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, 
     "GOLD": 100, "SILVER": 30, "XAUUSD": 0.01, "EURUSD": 0.01, "BTCUSD": 0.01, 
     "ETHUSD": 0.1, "SOLUSD": 1.0, "INDIA VIX": 1,
     "XRPUSD": 10.0, "ARBUSD": 1.0, "ADAUSD": 10.0, "XAGUSD": 0.1, "DOGEUSD": 100.0, 
@@ -1041,13 +1041,13 @@ class SniperBot:
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
-   # 🔥 ANGEL ONE EXECUTION BLOCK
+  # 🔥 ANGEL ONE EXECUTION BLOCK
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             
             # Default to MARKET, but we will convert Options to safe LIMIT orders
             order_type = "MARKET"
-            exec_price = "0"
+            exec_price = 0.0
             
             # 🛡️ Anti-Freak Trade Protection for Options
             if exchange in ["NFO", "BFO"]:
@@ -1059,11 +1059,12 @@ class SniperBot:
                     else:
                         safe_price = ltp * 0.95  # 5% buffer below LTP
                     
-                    # Round strictly to NSE's 0.05 tick size to avoid rejection
-                    exec_price = str(round(round(safe_price / 0.05) * 0.05, 2))
+                    # Round strictly to NSE's 0.05 tick size
+                    exec_price = round(round(safe_price / 0.05) * 0.05, 2)
                 else:
                     self.log(f"⚠️ Could not fetch LTP for {symbol}. Retrying as pure MARKET.")
 
+            # 🔥 FIX: Angel API Gateway strictly requires native numbers, NOT strings for price, squareoff, quantity
             order_params = {
                 "variety": "NORMAL",
                 "tradingsymbol": str(symbol),
@@ -1073,18 +1074,36 @@ class SniperBot:
                 "ordertype": str(order_type),
                 "producttype": str(p_type),
                 "duration": "DAY",
-                "price": str(exec_price),
-                "squareoff": "0",
-                "stoploss": "0",
-                "quantity": str(int(float(qty)))
+                "price": float(exec_price),
+                "squareoff": 0.0,
+                "stoploss": 0.0,
+                "quantity": int(float(qty))
             }
             
             self.log(f"📡 Sending Angel Payload: {order_params}")
             res = self.api.placeOrder(order_params)
             
             if res is None:
-                self.log(f"❌ Angel API Timeout/Null. Payload check: {order_params}")
+                # The Python SDK failed to parse the response. Doing a direct request to catch the raw text.
+                try:
+                    headers = {
+                        "Authorization": f"Bearer {self.api.access_token}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-UserType": "USER",
+                        "X-SourceID": "WEB",
+                        "X-ClientLocalIP": self.client_ip,
+                        "X-ClientPublicIP": self.client_ip,
+                        "X-MACAddress": "00:00:00:00:00:00",
+                        "X-PrivateKey": self.api_key
+                    }
+                    url = "https://apiconnect.angelone.in/rest/secure/angelbroking/order/v1/placeOrder"
+                    raw_res = requests.post(url, headers=headers, json=order_params, timeout=5)
+                    self.log(f"❌ Gateway Error [{raw_res.status_code}]: {raw_res.text}")
+                except Exception as e:
+                    self.log(f"❌ Angel API Timeout. Network issue: {e}")
                 return None
+                
             elif isinstance(res, str):
                 self.log(f"✅ Angel Order Placed! ID: {res}")
                 return res
@@ -1094,14 +1113,13 @@ class SniperBot:
                     self.log(f"✅ Angel Order Placed! ID: {o_id}")
                     return o_id
                 else:
-                    self.log(f"❌ Angel API Validation Error: {res.get('message')} | Full: {res}")
+                    self.log(f"❌ Angel API Validation Error: {res.get('message')}")
                     return None
             else:
                 self.log(f"❌ Angel Unknown Response Type: {type(res)} -> {res}")
                 return None
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
-
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
         
