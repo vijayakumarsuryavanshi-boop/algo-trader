@@ -292,7 +292,6 @@ YF_TICKERS = {
 INDEX_SYMBOLS = {"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank", "SENSEX": "BSE SENSEX", "INDIA VIX": "INDIA VIX"}
 INDEX_TOKENS = {"NIFTY": ("NSE", "26000"), "BANKNIFTY": ("NSE", "26009"), "INDIA VIX": ("NSE", "26017"), "SENSEX": ("BSE", "99919000")}
 
-# STRATEGY LIST UPDATED WITH KEYWORD RULE BUILDER
 STRAT_LIST = ["VIJAY & RFF All-In-One", "Intraday Trend Rider", "ICT", "Momentum Breakout + S&R", "Institutional FVG + SMC", "Keyword Rule Builder", "TradingView Webhook"]
 
 if 'sb_index_input' not in st.session_state: st.session_state.sb_index_input = list(DEFAULT_LOTS.keys())[0]
@@ -419,13 +418,12 @@ class TechnicalAnalyzer:
             trend, signal = "SMC GOLDEN ZONE BEARISH REVERSAL 🔴", "BUY_PE"
         elif mitigated_bull and bull_reversal and (last['stoch_k'] > last['stoch_d']):
             trend, signal = "ICT BULL FVG REVERSAL CONFIRMED 🟢", "BUY_CE"
-        # Adjusted bear logic due to missing variable in previous iteration
         elif (last['high'] >= latest_bear_bot.iloc[-1] * 0.998 and last['high'] <= latest_bear_top.iloc[-1] * 1.005) and (not bull_reversal) and (last['stoch_k'] < last['stoch_d']):
             trend, signal = "ICT BEAR FVG REVERSAL CONFIRMED 🔴", "BUY_PE"
 
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
 
-    # 🔥 FIXED: VIJAY & RFF strategy updated to rely on pure Momentum (EMA+RSI) so it doesn't block Spot Indices.
+    # 🔥 FIX: VIJAY RFF Strategy logic properly triggers on fresh EMA Crossovers with RSI to match TradingView logic precisely.
     def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -447,41 +445,37 @@ class TechnicalAnalyzer:
         df_ta['EMA_21'] = ta.ema(df_ta['Close'], length=21)
         
         df_ta['RSI_14'] = ta.rsi(df_ta['Close'], length=14)
-        if df_ta['RSI_14'] is None: df_ta['RSI_14'] = df_ta['Close'] * 0 + 50 # Safe fallback
+        if df_ta['RSI_14'] is None: df_ta['RSI_14'] = df_ta['Close'] * 0 + 50
         
         df_ta['VWAP'] = ta.vwap(df_ta['High'], df_ta['Low'], df_ta['Close'], df_ta['Volume'])
         if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all() or is_index:
             df_ta['VWAP'] = df_ta['Close']
-            
-        df_ta['Buy_Signal'] = False
-        df_ta['Sell_Signal'] = False
 
-        # 🔥 FIX: Relaxed constraints to align with TradingView logic and removed dependency on Volume/VWAP for spot.
-        bull_trend = (df_ta['EMA_5'] > df_ta['EMA_13']) & (df_ta['RSI_14'] > 55)
-        bear_trend = (df_ta['EMA_5'] < df_ta['EMA_13']) & (df_ta['RSI_14'] < 45)
+        # 🔥 CROSSOVER DETECTION: Only triggers when the fast EMA explicitly crosses the slow EMA
+        df_ta['EMA_Cross_Up'] = (df_ta['EMA_5'] > df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) <= df_ta['EMA_13'].shift(1))
+        df_ta['EMA_Cross_Dn'] = (df_ta['EMA_5'] < df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) >= df_ta['EMA_13'].shift(1))
 
-        df_ta.loc[bull_trend, 'Buy_Signal'] = True
-        df_ta.loc[bear_trend, 'Sell_Signal'] = True
+        df_ta['Buy_Signal'] = df_ta['EMA_Cross_Up'] & (df_ta['RSI_14'] >= 50)
+        df_ta['Sell_Signal'] = df_ta['EMA_Cross_Dn'] & (df_ta['RSI_14'] <= 50)
         
         df['vwap'] = df_ta['VWAP']
         df['ema_fast'] = df_ta['EMA_13']
         
         last = df_ta.iloc[-1]
-        prev = df_ta.iloc[-2]
         
         signal = "WAIT"
         trend = "RANGING 🟡 (VIJAY_RFF)"
         
-        if last['Buy_Signal'] or prev['Buy_Signal']:
+        if last['Buy_Signal']:
             signal = "BUY_CE"
-            trend = "VIJAY_RFF AGGRESSIVE UPTREND 🟢"
-        elif last['Sell_Signal'] or prev['Sell_Signal']:
+            trend = "VIJAY_RFF UPTREND CROSSOVER 🟢"
+        elif last['Sell_Signal']:
             signal = "BUY_PE"
-            trend = "VIJAY_RFF AGGRESSIVE DOWNTREND 🔴"
+            trend = "VIJAY_RFF DOWNTREND CROSSOVER 🔴"
             
         return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data
 
-    # 🔥 FIXED: Trend Rider unblocked by simplifying strict SMC conditions into broader momentum checks.
+    # 🔥 FIX: Intraday Trend Rider now triggers specifically on price pullbacks to the fast EMA, creating precision entries.
     def apply_trend_rider_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -496,13 +490,17 @@ class TechnicalAnalyzer:
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
         
         last = df.iloc[-1]
+        prev = df.iloc[-2]
         signal, trend = "WAIT", "RANGING 🟡"
         
-        # 🔥 FIX: Relaxed the criteria to prevent false negatives.
-        if last['ema_fast'] > last['ema_trend'] and last['close'] > last['vwap'] and last['rsi'] > 50:
-            signal, trend = "BUY_CE", "STRONG UPTREND RIDER 🚀"
-        elif last['ema_fast'] < last['ema_trend'] and last['close'] < last['vwap'] and last['rsi'] < 50:
-            signal, trend = "BUY_PE", "STRONG DOWNTREND RIDER 🩸"
+        # Detect Price Crossover against the Fast EMA while maintaining the macro trend
+        price_cross_up = (last['close'] > last['ema_fast']) and (prev['close'] <= prev['ema_fast'])
+        price_cross_dn = (last['close'] < last['ema_fast']) and (prev['close'] >= prev['ema_fast'])
+        
+        if price_cross_up and last['ema_fast'] > last['ema_trend'] and last['rsi'] > 50:
+            signal, trend = "BUY_CE", "TREND RIDER PULLBACK UPTREND 🚀"
+        elif price_cross_dn and last['ema_fast'] < last['ema_trend'] and last['rsi'] < 50:
+            signal, trend = "BUY_PE", "TREND RIDER PULLBACK DOWNTREND 🩸"
                     
         return trend, signal, last['vwap'], last['ema_fast'], df, atr, fib_data
 
@@ -527,7 +525,6 @@ class TechnicalAnalyzer:
             
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data
 
-    # 🔥 NEW: Keyword Strategy Builder replacing raw Python execution
     def apply_keyword_strategy(self, df, keywords, index_name):
         if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}
         df = df.copy()
@@ -1044,10 +1041,8 @@ class SniperBot:
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
-        # 🔥 FIXED: Angel API strict string requirement
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
-            
             order_params = {
                 "variety": "NORMAL",
                 "tradingsymbol": str(symbol),
@@ -1065,7 +1060,7 @@ class SniperBot:
             res = self.api.placeOrder(order_params)
             
             if res is None:
-                self.log(f"❌ Angel API Null Response. Please check connectivity or parameters: {order_params}")
+                self.log(f"❌ Angel API Timeout/Null. (Likely rejected by Exchange due to Market Order restriction or Margin). Payload check: {order_params}")
                 return None
             elif isinstance(res, str):
                 self.log(f"✅ Angel Order Placed! ID: {res}")
@@ -1260,24 +1255,32 @@ class SniperBot:
                         strike_sym, strike_token, strike_exch, entry_ltp = self.get_strike(index, spot, signal, max_prem)
                     
                     if strike_sym and entry_ltp:
-                        dynamic_sl = entry_ltp - s['sl_pts'] 
-                        tp1 = entry_ltp + s['tgt_pts']
-                        tp2 = entry_ltp + (s['tgt_pts'] * 2)
-                        tp3 = entry_ltp + (s['tgt_pts'] * 3)
-                        
                         trade_type = "CE" if signal == "BUY_CE" else "PE"
                         if is_mt5_asset or is_crypto: trade_type = "BUY" if signal == "BUY_CE" else "SELL"
+
+                        # Ensure correct TP/SL direction for MT5/Crypto Shorts
+                        if trade_type == "SELL":
+                            dynamic_sl = entry_ltp + s['sl_pts']
+                            tp1 = entry_ltp - s['tgt_pts']
+                            tp2 = entry_ltp - (s['tgt_pts'] * 2)
+                            tp3 = entry_ltp - (s['tgt_pts'] * 3)
+                        else:
+                            dynamic_sl = entry_ltp - s['sl_pts'] 
+                            tp1 = entry_ltp + s['tgt_pts']
+                            tp2 = entry_ltp + (s['tgt_pts'] * 2)
+                            tp3 = entry_ltp + (s['tgt_pts'] * 3)
 
                         new_trade = {
                             "symbol": strike_sym, "token": strike_token, "exch": strike_exch, 
                             "type": trade_type, "entry": entry_ltp, 
-                            "highest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, 
+                            "highest_price": entry_ltp, "lowest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, 
                             "tp1": tp1, "tp2": tp2, "tp3": tp3, "tgt": tp3,
                             "scaled_out": False, "is_hz": s.get("hero_zero", False)
                         }
 
                         if not is_mock_mode: 
-                            exec_side = "BUY" if new_trade['type'] in ["CE", "BUY"] else "SELL"
+                            # 🔥 FIX: For option buying (CE or PE), we always BUY to open! 
+                            exec_side = "SELL" if new_trade['type'] == "SELL" else "BUY"
                             self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch)
                             
                         self.push_notify("Trade Entered", f"Entered {qty} {strike_sym} @ {entry_ltp}")
@@ -1301,8 +1304,8 @@ class SniperBot:
                         ltp = trade['entry'] + delta + np.random.uniform(-1, 2)
                         
                     if ltp:
-                        if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
-                            pnl = (ltp - trade['entry']) * trade['qty'] if trade['type'] == "BUY" else (trade['entry'] - ltp) * trade['qty']
+                        if trade['type'] == "SELL":
+                            pnl = (trade['entry'] - ltp) * trade['qty']
                         else:
                             pnl = (ltp - trade['entry']) * trade['qty']
                             
@@ -1311,55 +1314,79 @@ class SniperBot:
                         self.state["active_trade"]["current_ltp"] = ltp
                         self.state["active_trade"]["floating_pnl"] = pnl
                         
-                        if ltp > trade.get('highest_price', trade['entry']):
-                            trade['highest_price'] = ltp
-                            
-                            if trade['is_hz']:
-                                if ltp >= trade['entry'] * 3.0:    new_sl = ltp * 0.85 
-                                elif ltp >= trade['entry'] * 2.0:  new_sl = ltp * 0.80 
-                                elif ltp >= trade['entry'] * 1.5:  new_sl = trade['entry'] * 1.10 
-                                else:                              new_sl = trade['sl']
-                                
-                                if new_sl > trade['sl']: trade['sl'] = new_sl
-                            else:
+                        # Trailing Stoploss logic specific to trade direction
+                        if trade['type'] == "SELL":
+                            lowest = trade.get('lowest_price', trade['entry'])
+                            if ltp < lowest:
+                                trade['lowest_price'] = ltp
                                 tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
-                                new_sl = ltp - tsl_buffer
-                                if new_sl > trade['sl']: trade['sl'] = new_sl
+                                new_sl = ltp + tsl_buffer
+                                if new_sl < trade['sl']: trade['sl'] = new_sl
+                                
+                            hit_tp = False if ("Trend Rider" in strategy) else (ltp <= trade['tgt'])
+                            hit_sl = ltp >= trade['sl']
+                        else:
+                            highest = trade.get('highest_price', trade['entry'])
+                            if ltp > highest:
+                                trade['highest_price'] = ltp
+                                
+                                if trade.get('is_hz'):
+                                    if ltp >= trade['entry'] * 3.0:    new_sl = ltp * 0.85 
+                                    elif ltp >= trade['entry'] * 2.0:  new_sl = ltp * 0.80 
+                                    elif ltp >= trade['entry'] * 1.5:  new_sl = trade['entry'] * 1.10 
+                                    else:                              new_sl = trade['sl']
+                                    if new_sl > trade['sl']: trade['sl'] = new_sl
+                                else:
+                                    tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                    new_sl = ltp - tsl_buffer
+                                    if new_sl > trade['sl']: trade['sl'] = new_sl
+                                    
+                            hit_tp = False if ("Trend Rider" in strategy and not trade.get('is_hz')) else (ltp >= trade['tgt'])
+                            hit_sl = ltp <= trade['sl']
 
-                        if ltp >= trade['tp1'] and not trade['scaled_out'] and not trade['is_hz']:
-                            if index in ["NIFTY", "SENSEX", "XAUUSD"] or is_crypto:
-                                lots_held = trade['qty'] / base_lot_size
-                                half_lots = int(lots_held / 2) if not (is_mt5_asset or is_crypto) else round(trade['qty']/2, 2)
-                                if half_lots > 0:
-                                    qty_to_sell = half_lots * base_lot_size if not (is_mt5_asset or is_crypto) else half_lots
-                                    if not is_mock_mode:
-                                        exec_side = "SELL" if trade['type'] in ["CE", "BUY"] else "BUY"
-                                        self.place_real_order(trade['symbol'], trade['token'], qty_to_sell, exec_side, trade['exch'])
-                                    trade['qty'] -= qty_to_sell
-                                    trade['scaled_out'] = True
-                                    trade['sl'] = trade['entry'] 
-                                    self.log(f"💥 PARTIAL BOOKED 50% at {ltp}. SL trailed to BE.")
-                                    self.push_notify("Partial Profit", f"Booked 50% of {trade['symbol']}. Remainder risk-free.")
+                        # Partial Target Hits
+                        if not trade['scaled_out'] and not trade.get('is_hz'):
+                            reach_tp1 = (ltp <= trade['tp1']) if trade['type'] == "SELL" else (ltp >= trade['tp1'])
+                            if reach_tp1:
+                                if index in ["NIFTY", "SENSEX", "XAUUSD"] or is_crypto:
+                                    lots_held = trade['qty'] / base_lot_size
+                                    half_lots = int(lots_held / 2) if not (is_mt5_asset or is_crypto) else round(trade['qty']/2, 2)
+                                    if half_lots > 0:
+                                        qty_to_sell = half_lots * base_lot_size if not (is_mt5_asset or is_crypto) else half_lots
+                                        if not is_mock_mode:
+                                            # 🔥 FIX: Inverse order exactly aligns execution with partial close requirements
+                                            exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
+                                            self.place_real_order(trade['symbol'], trade['token'], qty_to_sell, exec_side, trade['exch'])
+                                        trade['qty'] -= qty_to_sell
+                                        trade['scaled_out'] = True
+                                        trade['sl'] = trade['entry'] 
+                                        self.log(f"💥 PARTIAL BOOKED 50% at {ltp}. SL trailed to BE.")
+                                        self.push_notify("Partial Profit", f"Booked 50% of {trade['symbol']}. Remainder risk-free.")
                         
-                        hit_tp = False if ("Trend Rider" in strategy and not trade['is_hz']) else (ltp >= trade['tgt'])
-                        hit_sl = ltp <= trade['sl']
                         market_close = current_time >= cutoff_time
                         
                         if self.state.get("manual_exit"):
                             hit_tp, market_close = True, True
                             self.state["manual_exit"] = False
                         
+                        # Full Exit Target / SL Hits
                         if hit_tp or hit_sl or market_close:
                             if not is_mock_mode: 
-                                exec_side = "SELL" if trade['type'] in ["CE", "BUY"] else "BUY"
+                                # 🔥 FIX: Option Longs close by SELLING. Crypto Shorts close by BUYING.
+                                exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                 self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'])
                             
-                            highest_reached = trade['highest_price']
-                            if highest_reached >= trade['tp3']: win_text = "tp3❤"
-                            elif highest_reached >= trade['tp2']: win_text = "tp2✔✔"
-                            elif highest_reached >= trade['tp1']: win_text = "tp1✔"
-                            elif pnl > 0: win_text = "profit👍"
-                            else: win_text = "sl hit 🛑"
+                            win_text = "profit👍" if pnl > 0 else "sl hit 🛑"
+                            if trade['type'] == "SELL":
+                                lowest_reached = trade.get('lowest_price', trade['entry'])
+                                if lowest_reached <= trade['tp3']: win_text = "tp3❤"
+                                elif lowest_reached <= trade['tp2']: win_text = "tp2✔✔"
+                                elif lowest_reached <= trade['tp1']: win_text = "tp1✔"
+                            else:
+                                highest_reached = trade.get('highest_price', trade['entry'])
+                                if highest_reached >= trade['tp3']: win_text = "tp3❤"
+                                elif highest_reached >= trade['tp2']: win_text = "tp2✔✔"
+                                elif highest_reached >= trade['tp1']: win_text = "tp1✔"
                             
                             if market_close: win_text += " (Force Exit 3:15)"
                             if trade['scaled_out']: win_text += " (Scaled Out)"
@@ -2136,4 +2163,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
