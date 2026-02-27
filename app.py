@@ -1066,25 +1066,30 @@ class SniperBot:
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
-        try: 
+       try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
+            
+            # 🔥 FIX: Angel API strictly expects string representations for order parameters
             order_params = {
                 "variety": "NORMAL",
-                "tradingsymbol": symbol,
+                "tradingsymbol": str(symbol),
                 "symboltoken": str(token),
-                "transactiontype": side.upper(),
-                "exchange": exchange.upper(),
+                "transactiontype": str(side.upper()),
+                "exchange": str(exchange.upper()),
                 "ordertype": "MARKET",
-                "producttype": p_type,
+                "producttype": str(p_type),
                 "duration": "DAY",
-                "price": 0,
-                "squareoff": 0,
-                "stoploss": 0,
-                "quantity": int(float(qty))
+                "price": "0",
+                "squareoff": "0",
+                "stoploss": "0",
+                "quantity": str(int(float(qty)))
             }
             res = self.api.placeOrder(order_params)
             
-            if isinstance(res, str):
+            if res is None:
+                self.log(f"❌ Angel API Timeout/Null. Check connection. Payload: {order_params}")
+                return None
+            elif isinstance(res, str):
                 self.log(f"✅ Angel Order Placed! ID: {res}")
                 return res
             elif isinstance(res, dict):
@@ -1096,7 +1101,7 @@ class SniperBot:
                     self.log(f"❌ Angel API Validation Error: {res.get('message')} | Full: {res}")
                     return None
             else:
-                self.log(f"❌ Angel Unknown Response Type: {res}")
+                self.log(f"❌ Angel Unknown Response Type: {type(res)} -> {res}")
                 return None
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
@@ -2156,3 +2161,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
