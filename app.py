@@ -954,12 +954,17 @@ class SniperBot:
             except Exception as e: 
                 self.log(f"❌ Delta Exception: {e}"); return None
 
-        if exchange == "COINDCX":
+       if exchange == "COINDCX":
             try:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-                clean_qty = float(round(float(qty), 4))
+                
+                # 🛡️ CoinDCX Precision Fix: BTC/ETH use 4 decimals, Altcoins use integers
+                if "BTC" in base_coin or "ETH" in base_coin:
+                    clean_qty = float(round(float(qty), 4))
+                else:
+                    clean_qty = float(int(float(qty)))
                 
                 exact_market = f"{base_coin}USDT"
                 exact_pair = f"B-{base_coin}_USDT"
@@ -1033,14 +1038,39 @@ class SniperBot:
                 return result.order
             except Exception as e: self.log(f"❌ MT5 Exception: {e}"); return None
 
-        if broker == "Zerodha" and self.kite:
+       if broker == "Zerodha" and self.kite:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
-                order_id = self.kite.place_order(variety=self.kite.VARIETY_REGULAR, exchange=exchange, tradingsymbol=symbol, transaction_type=z_side, quantity=int(float(qty)), product=self.kite.PRODUCT_MIS, order_type=self.kite.ORDER_TYPE_MARKET)
+                
+                # Use NRML (Carryforward) for Options, MIS (Intraday) for Equities
+                z_product = self.kite.PRODUCT_NRML if exchange in ["NFO", "BFO", "MCX"] else self.kite.PRODUCT_MIS
+                
+                z_order_type = self.kite.ORDER_TYPE_MARKET
+                z_price = 0.0
+                
+                # 🛡️ Anti-Freak Trade Protection for Zerodha Options
+                if exchange in ["NFO", "BFO"]:
+                    ltp = self.get_live_price(exchange, symbol, token)
+                    if ltp and ltp > 0:
+                        z_order_type = self.kite.ORDER_TYPE_LIMIT
+                        safe_price = ltp * 1.05 if side == "BUY" else ltp * 0.95
+                        z_price = round(round(safe_price / 0.05) * 0.05, 2)
+                
+                order_id = self.kite.place_order(
+                    variety=self.kite.VARIETY_REGULAR, 
+                    exchange=exchange, 
+                    tradingsymbol=symbol, 
+                    transaction_type=z_side, 
+                    quantity=int(float(qty)), 
+                    product=z_product, 
+                    order_type=z_order_type,
+                    price=z_price
+                )
                 self.log(f"✅ Zerodha Order Pushed! ID: {order_id}")
                 return order_id
-            except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
-
+            except Exception as e: 
+                self.log(f"❌ Zerodha Order Error: {str(e)}")
+                return None
   # 🔥 ANGEL ONE EXECUTION BLOCK
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
@@ -2204,4 +2234,5 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
 
