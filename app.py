@@ -2136,3 +2136,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
