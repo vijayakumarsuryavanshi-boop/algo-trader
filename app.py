@@ -1041,26 +1041,49 @@ class SniperBot:
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
+   # 🔥 ANGEL ONE EXECUTION BLOCK
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
+            
+            # Default to MARKET, but we will convert Options to safe LIMIT orders
+            order_type = "MARKET"
+            exec_price = "0"
+            
+            # 🛡️ Anti-Freak Trade Protection for Options
+            if exchange in ["NFO", "BFO"]:
+                ltp = self.get_live_price(exchange, symbol, token)
+                if ltp and ltp > 0:
+                    order_type = "LIMIT"
+                    if side.upper() == "BUY":
+                        safe_price = ltp * 1.05  # 5% buffer above LTP
+                    else:
+                        safe_price = ltp * 0.95  # 5% buffer below LTP
+                    
+                    # Round strictly to NSE's 0.05 tick size to avoid rejection
+                    exec_price = str(round(round(safe_price / 0.05) * 0.05, 2))
+                else:
+                    self.log(f"⚠️ Could not fetch LTP for {symbol}. Retrying as pure MARKET.")
+
             order_params = {
                 "variety": "NORMAL",
                 "tradingsymbol": str(symbol),
                 "symboltoken": str(token),
                 "transactiontype": str(side.upper()),
                 "exchange": str(exchange.upper()),
-                "ordertype": "MARKET",
+                "ordertype": str(order_type),
                 "producttype": str(p_type),
                 "duration": "DAY",
-                "price": "0",
+                "price": str(exec_price),
                 "squareoff": "0",
                 "stoploss": "0",
                 "quantity": str(int(float(qty)))
             }
+            
+            self.log(f"📡 Sending Angel Payload: {order_params}")
             res = self.api.placeOrder(order_params)
             
             if res is None:
-                self.log(f"❌ Angel API Timeout/Null. (Likely rejected by Exchange due to Market Order restriction or Margin). Payload check: {order_params}")
+                self.log(f"❌ Angel API Timeout/Null. Payload check: {order_params}")
                 return None
             elif isinstance(res, str):
                 self.log(f"✅ Angel Order Placed! ID: {res}")
@@ -2163,3 +2186,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
