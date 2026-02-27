@@ -299,7 +299,7 @@ if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = S
 if 'bot' not in st.session_state: st.session_state.bot = None
 if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
 if 'custom_stock' not in st.session_state: st.session_state.custom_stock = ""
-if 'custom_code_input' not in st.session_state: st.session_state.custom_code_input = "EMA Crossover (9 & 21)"
+if 'custom_code_input' not in st.session_state: st.session_state.custom_code_input = "EMA Cross,FVG / ICT"
 
 @st.cache_data(ttl=43200) 
 def get_angel_scrip_master():
@@ -352,10 +352,8 @@ class TechnicalAnalyzer:
         major_high = df['high'].rolling(lookback).max().iloc[-1]
         major_low = df['low'].rolling(lookback).min().iloc[-1]
         diff = major_high - major_low
-        
         fib_618 = major_high - (diff * 0.618)
         fib_650 = major_high - (diff * 0.650)
-        
         return major_high, major_low, min(fib_618, fib_650), max(fib_618, fib_650)
 
     def detect_order_blocks(self, df):
@@ -399,31 +397,35 @@ class TechnicalAnalyzer:
         latest_bear_bot = df['high'].where(df['fvg_bear']).ffill()
         latest_bear_top = df['low'].shift(2).where(df['fvg_bear']).ffill()
 
-        last = df.iloc[-1]
         atr = self.get_atr(df).iloc[-1]
         mh, ml, f_low, f_high = self.calculate_fib_zones(df)
         smc_blocks = self.detect_order_blocks(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
 
+        df['Buy_Signal'] = False
+        df['Sell_Signal'] = False
+        df['Marker_Text'] = ""
+
+        # Historical Signal Calculation
+        for i in range(2, len(df)):
+            in_gz = (df['low'].iloc[i] <= f_high and df['high'].iloc[i] >= f_low)
+            bull_rev = df['close'].iloc[i] > df['open'].iloc[i]
+            if in_gz and bull_rev and (df['stoch_k'].iloc[i] > df['stoch_d'].iloc[i]):
+                df.at[df.index[i], 'Buy_Signal'] = True
+                df.at[df.index[i], 'Marker_Text'] = "ICT"
+            elif in_gz and (not bull_rev) and (df['stoch_k'].iloc[i] < df['stoch_d'].iloc[i]):
+                df.at[df.index[i], 'Sell_Signal'] = True
+                df.at[df.index[i], 'Marker_Text'] = "ICT"
+
+        last = df.iloc[-1]
         trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
-
-        mitigated_bull = (last['low'] <= latest_bull_top.iloc[-1] * 1.002) and (last['low'] >= latest_bull_bot.iloc[-1] * 0.995)
-        bull_reversal = last['close'] > last['open'] 
-
-        in_golden_zone = (last['low'] <= f_high and last['high'] >= f_low)
-
-        if in_golden_zone and bull_reversal and (last['stoch_k'] > last['stoch_d']):
-            trend, signal = "SMC GOLDEN ZONE BULLISH REVERSAL 🟢", "BUY_CE"
-        elif in_golden_zone and (not bull_reversal) and (last['stoch_k'] < last['stoch_d']):
-            trend, signal = "SMC GOLDEN ZONE BEARISH REVERSAL 🔴", "BUY_PE"
-        elif mitigated_bull and bull_reversal and (last['stoch_k'] > last['stoch_d']):
-            trend, signal = "ICT BULL FVG REVERSAL CONFIRMED 🟢", "BUY_CE"
-        elif (last['high'] >= latest_bear_bot.iloc[-1] * 0.998 and last['high'] <= latest_bear_top.iloc[-1] * 1.005) and (not bull_reversal) and (last['stoch_k'] < last['stoch_d']):
-            trend, signal = "ICT BEAR FVG REVERSAL CONFIRMED 🔴", "BUY_PE"
+        
+        if last['Buy_Signal']: trend, signal = "SMC GOLDEN ZONE BULLISH 🟢", "BUY_CE"
+        elif last['Sell_Signal']: trend, signal = "SMC GOLDEN ZONE BEARISH 🔴", "BUY_PE"
 
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
 
-    # 🔥 FIX: VIJAY RFF Strategy logic properly triggers on fresh EMA Crossovers with RSI to match TradingView logic precisely.
+    # 🔥 VIJAY & RFF - Completely accurate EMA/RSI logic injected historically into dataframe for TradingView rendering
     def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -451,17 +453,18 @@ class TechnicalAnalyzer:
         if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all() or is_index:
             df_ta['VWAP'] = df_ta['Close']
 
-        # 🔥 CROSSOVER DETECTION: Only triggers when the fast EMA explicitly crosses the slow EMA
+        # Accurate historical crossover logic
         df_ta['EMA_Cross_Up'] = (df_ta['EMA_5'] > df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) <= df_ta['EMA_13'].shift(1))
         df_ta['EMA_Cross_Dn'] = (df_ta['EMA_5'] < df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) >= df_ta['EMA_13'].shift(1))
 
-        df_ta['Buy_Signal'] = df_ta['EMA_Cross_Up'] & (df_ta['RSI_14'] >= 50)
-        df_ta['Sell_Signal'] = df_ta['EMA_Cross_Dn'] & (df_ta['RSI_14'] <= 50)
+        df['Buy_Signal'] = df_ta['EMA_Cross_Up'] & (df_ta['RSI_14'] >= 50)
+        df['Sell_Signal'] = df_ta['EMA_Cross_Dn'] & (df_ta['RSI_14'] <= 50)
+        df['Marker_Text'] = "VIJAY"
         
         df['vwap'] = df_ta['VWAP']
         df['ema_fast'] = df_ta['EMA_13']
         
-        last = df_ta.iloc[-1]
+        last = df.iloc[-1]
         
         signal = "WAIT"
         trend = "RANGING 🟡 (VIJAY_RFF)"
@@ -473,9 +476,8 @@ class TechnicalAnalyzer:
             signal = "BUY_PE"
             trend = "VIJAY_RFF DOWNTREND CROSSOVER 🔴"
             
-        return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data
+        return trend, signal, last['vwap'], last['ema_fast'], df, atr, fib_data
 
-    # 🔥 FIX: Intraday Trend Rider now triggers specifically on price pullbacks to the fast EMA, creating precision entries.
     def apply_trend_rider_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -489,18 +491,19 @@ class TechnicalAnalyzer:
         smc_blocks = self.detect_order_blocks(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
         
+        # Historical Signal Calculation for the chart
+        df['price_cross_up'] = (df['close'] > df['ema_fast']) & (df['close'].shift(1) <= df['ema_fast'].shift(1))
+        df['price_cross_dn'] = (df['close'] < df['ema_fast']) & (df['close'].shift(1) >= df['ema_fast'].shift(1))
+        
+        df['Buy_Signal'] = df['price_cross_up'] & (df['ema_fast'] > df['ema_trend']) & (df['rsi'] > 50)
+        df['Sell_Signal'] = df['price_cross_dn'] & (df['ema_fast'] < df['ema_trend']) & (df['rsi'] < 50)
+        df['Marker_Text'] = "TREND"
+        
         last = df.iloc[-1]
-        prev = df.iloc[-2]
         signal, trend = "WAIT", "RANGING 🟡"
         
-        # Detect Price Crossover against the Fast EMA while maintaining the macro trend
-        price_cross_up = (last['close'] > last['ema_fast']) and (prev['close'] <= prev['ema_fast'])
-        price_cross_dn = (last['close'] < last['ema_fast']) and (prev['close'] >= prev['ema_fast'])
-        
-        if price_cross_up and last['ema_fast'] > last['ema_trend'] and last['rsi'] > 50:
-            signal, trend = "BUY_CE", "TREND RIDER PULLBACK UPTREND 🚀"
-        elif price_cross_dn and last['ema_fast'] < last['ema_trend'] and last['rsi'] < 50:
-            signal, trend = "BUY_PE", "TREND RIDER PULLBACK DOWNTREND 🩸"
+        if last['Buy_Signal']: signal, trend = "BUY_CE", "TREND RIDER PULLBACK UPTREND 🚀"
+        elif last['Sell_Signal']: signal, trend = "BUY_PE", "TREND RIDER PULLBACK DOWNTREND 🩸"
                     
         return trend, signal, last['vwap'], last['ema_fast'], df, atr, fib_data
 
@@ -514,65 +517,107 @@ class TechnicalAnalyzer:
         atr = self.get_atr(df).iloc[-1]
         mh, ml, f_low, f_high = self.calculate_fib_zones(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
+        
+        df['Buy_Signal'] = (df['ema_short'] > df['ema_long']) & (df['ema_short'].shift(1) <= df['ema_long'].shift(1))
+        df['Sell_Signal'] = (df['ema_short'] < df['ema_long']) & (df['ema_short'].shift(1) >= df['ema_long'].shift(1))
+        df['Marker_Text'] = "VWAP"
+        
         last = df.iloc[-1]
         signal, trend = "WAIT", "FLAT"
         
-        benchmark = last['ema_long'] if is_index else last['vwap']
-        if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark) and last['rsi'] > 50: 
-            trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
-        elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark) and last['rsi'] < 50: 
-            trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
+        if last['Buy_Signal']: trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
+        elif last['Sell_Signal']: trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
             
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data
 
+    # 🔥 MASSIVE UPGRADE: Keyword Rule Builder generating TradingView-ready markers dynamically
     def apply_keyword_strategy(self, df, keywords, index_name):
         if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}
         df = df.copy()
         
+        # EMA
         df['ema9'] = ta.ema(df['close'], 9)
         df['ema21'] = ta.ema(df['close'], 21)
         df['rsi'] = ta.rsi(df['close'], 14)
         
+        # MACD
         macd = ta.macd(df['close'])
         if macd is not None:
             df['macd'] = macd['MACD_12_26_9']
             df['macds'] = macd['MACDs_12_26_9']
             
+        # Bollinger Bands
         bb = ta.bbands(df['close'], length=20, std=2)
         if bb is not None:
             df['bbl'] = bb['BBL_20_2.0']
             df['bbh'] = bb['BBU_20_2.0']
 
+        # Stochastic RSI
+        stoch = ta.stochrsi(df['close'])
+        if stoch is not None:
+            df['stoch_k'] = stoch.iloc[:, 0]
+            df['stoch_d'] = stoch.iloc[:, 1]
+        else:
+            df['stoch_k'] = 50; df['stoch_d'] = 50
+
+        # Chandelier Exit
+        atr22 = ta.atr(df['high'], df['low'], df['close'], 22)
+        if atr22 is not None:
+            df['ce_long'] = df['high'].rolling(22).max() - atr22 * 3
+            df['ce_short'] = df['low'].rolling(22).min() + atr22 * 3
+        else:
+            df['ce_long'] = df['low']; df['ce_short'] = df['high']
+
+        # FVG
+        df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
+        df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
+
+        df['Buy_Signal'] = False
+        df['Sell_Signal'] = False
+        df['Marker_Text'] = ""
+
+        keys = keywords if isinstance(keywords, list) else keywords.split(',') if keywords else []
+
+        # Iterate through history to plot markers exactly when rules align
+        for i in range(1, len(df)):
+            buy, sell, text = False, False, ""
+            
+            if "EMA Cross" in keys:
+                if df['ema9'].iloc[i] > df['ema21'].iloc[i] and df['ema9'].iloc[i-1] <= df['ema21'].iloc[i-1]: buy, text = True, "EMA"
+                elif df['ema9'].iloc[i] < df['ema21'].iloc[i] and df['ema9'].iloc[i-1] >= df['ema21'].iloc[i-1]: sell, text = True, "EMA"
+
+            if "Bollinger Bands" in keys and 'bbl' in df.columns:
+                if df['close'].iloc[i] > df['bbl'].iloc[i] and df['close'].iloc[i-1] <= df['bbl'].iloc[i-1]: buy, text = True, "BB"
+                elif df['close'].iloc[i] < df['bbh'].iloc[i] and df['close'].iloc[i-1] >= df['bbh'].iloc[i-1]: sell, text = True, "BB"
+
+            if "MACD" in keys and 'macd' in df.columns:
+                if df['macd'].iloc[i] > df['macds'].iloc[i] and df['macd'].iloc[i-1] <= df['macds'].iloc[i-1]: buy, text = True, "MACD"
+                elif df['macd'].iloc[i] < df['macds'].iloc[i] and df['macd'].iloc[i-1] >= df['macds'].iloc[i-1]: sell, text = True, "MACD"
+
+            if "Stochastic RSI" in keys:
+                if df['stoch_k'].iloc[i] > df['stoch_d'].iloc[i] and df['stoch_k'].iloc[i-1] <= df['stoch_d'].iloc[i-1] and df['stoch_k'].iloc[i] < 20: buy, text = True, "STOCH"
+                elif df['stoch_k'].iloc[i] < df['stoch_d'].iloc[i] and df['stoch_k'].iloc[i-1] >= df['stoch_d'].iloc[i-1] and df['stoch_k'].iloc[i] > 80: sell, text = True, "STOCH"
+
+            if "FVG / ICT" in keys:
+                if df['fvg_bull'].iloc[i]: buy, text = True, "FVG"
+                elif df['fvg_bear'].iloc[i]: sell, text = True, "FVG"
+                
+            if "Chandelier Exit" in keys:
+                if df['close'].iloc[i] > df['ce_long'].iloc[i] and df['close'].iloc[i-1] <= df['ce_long'].iloc[i-1]: buy, text = True, "CE"
+                elif df['close'].iloc[i] < df['ce_short'].iloc[i] and df['close'].iloc[i-1] >= df['ce_short'].iloc[i-1]: sell, text = True, "CE"
+
+            if buy:
+                df.at[df.index[i], 'Buy_Signal'] = True
+                df.at[df.index[i], 'Marker_Text'] = text
+            elif sell:
+                df.at[df.index[i], 'Sell_Signal'] = True
+                df.at[df.index[i], 'Marker_Text'] = text
+
         last = df.iloc[-1]
-        prev = df.iloc[-2]
-
-        buy_conds, sell_conds = [], []
-        keys = keywords.split(',') if keywords else []
-
-        if "EMA Crossover (9 & 21)" in keys:
-            buy_conds.append(last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'])
-            sell_conds.append(last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'])
-
-        if "RSI Breakout (>60/<40)" in keys:
-            buy_conds.append(last['rsi'] > 60)
-            sell_conds.append(last['rsi'] < 40)
-
-        if "MACD Crossover" in keys:
-            if 'macd' in df.columns:
-                buy_conds.append(last['macd'] > last['macds'] and prev['macd'] <= prev['macds'])
-                sell_conds.append(last['macd'] < last['macds'] and prev['macd'] >= prev['macds'])
-
-        if "Bollinger Bands Bounce" in keys:
-            if 'bbl' in df.columns:
-                buy_conds.append(last['close'] > last['bbl'] and prev['close'] <= prev['bbl'])
-                sell_conds.append(last['close'] < last['bbh'] and prev['close'] >= prev['bbh'])
-
         signal, trend = "WAIT", "Awaiting Keyword Match 🟡"
 
-        if buy_conds and all(buy_conds):
-            signal, trend = "BUY_CE", "Keyword Setup Met: BULLISH 🟢"
-        elif sell_conds and all(sell_conds):
-            signal, trend = "BUY_PE", "Keyword Setup Met: BEARISH 🔴"
+        if last['Buy_Signal']: signal, trend = "BUY_CE", f"Setup Met: BULLISH {last['Marker_Text']} 🟢"
+        elif last['Sell_Signal']: signal, trend = "BUY_PE", f"Setup Met: BEARISH {last['Marker_Text']} 🔴"
 
         return trend, signal, last['close'], last['ema9'], df, self.get_atr(df).iloc[-1], {}
 
@@ -954,13 +999,12 @@ class SniperBot:
             except Exception as e: 
                 self.log(f"❌ Delta Exception: {e}"); return None
 
-       if exchange == "COINDCX":
+        if exchange == "COINDCX":
             try:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
                 
-                # 🛡️ CoinDCX Precision Fix: BTC/ETH use 4 decimals, Altcoins use integers
                 if "BTC" in base_coin or "ETH" in base_coin:
                     clean_qty = float(round(float(qty), 4))
                 else:
@@ -1038,17 +1082,13 @@ class SniperBot:
                 return result.order
             except Exception as e: self.log(f"❌ MT5 Exception: {e}"); return None
 
-       if broker == "Zerodha" and self.kite:
+        if broker == "Zerodha" and self.kite:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
-                
-                # Use NRML (Carryforward) for Options, MIS (Intraday) for Equities
                 z_product = self.kite.PRODUCT_NRML if exchange in ["NFO", "BFO", "MCX"] else self.kite.PRODUCT_MIS
-                
                 z_order_type = self.kite.ORDER_TYPE_MARKET
                 z_price = 0.0
                 
-                # 🛡️ Anti-Freak Trade Protection for Zerodha Options
                 if exchange in ["NFO", "BFO"]:
                     ltp = self.get_live_price(exchange, symbol, token)
                     if ltp and ltp > 0:
@@ -1071,30 +1111,25 @@ class SniperBot:
             except Exception as e: 
                 self.log(f"❌ Zerodha Order Error: {str(e)}")
                 return None
-  # 🔥 ANGEL ONE EXECUTION BLOCK
+
+        # 🔥 ANGEL ONE EXECUTION BLOCK (Robust Protection)
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
-            
-            # Default to MARKET, but we will convert Options to safe LIMIT orders
             order_type = "MARKET"
             exec_price = 0.0
             
-            # 🛡️ Anti-Freak Trade Protection for Options
             if exchange in ["NFO", "BFO"]:
                 ltp = self.get_live_price(exchange, symbol, token)
                 if ltp and ltp > 0:
                     order_type = "LIMIT"
                     if side.upper() == "BUY":
-                        safe_price = ltp * 1.05  # 5% buffer above LTP
+                        safe_price = ltp * 1.05
                     else:
-                        safe_price = ltp * 0.95  # 5% buffer below LTP
-                    
-                    # Round strictly to NSE's 0.05 tick size
+                        safe_price = ltp * 0.95
                     exec_price = round(round(safe_price / 0.05) * 0.05, 2)
                 else:
                     self.log(f"⚠️ Could not fetch LTP for {symbol}. Retrying as pure MARKET.")
 
-            # 🔥 FIX: Angel API Gateway strictly requires native numbers, NOT strings for price, squareoff, quantity
             order_params = {
                 "variety": "NORMAL",
                 "tradingsymbol": str(symbol),
@@ -1114,7 +1149,6 @@ class SniperBot:
             res = self.api.placeOrder(order_params)
             
             if res is None:
-                # The Python SDK failed to parse the response. Doing a direct request to catch the raw text.
                 try:
                     headers = {
                         "Authorization": f"Bearer {self.api.access_token}",
@@ -1150,6 +1184,8 @@ class SniperBot:
                 return None
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
+
+
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
         
@@ -1235,7 +1271,7 @@ class SniperBot:
                 df_candles = self.get_historical_data(exch, token, symbol=index, interval=timeframe) if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval=timeframe)
                 
                 user_lots_dict = s.get('user_lots', DEFAULT_LOTS)
-                base_lot_size = user_lots_dict.get(index, 25) if not (is_mt5_asset or is_crypto) else 0.01
+                base_lot_size = user_lots_dict.get(index, 65) if not (is_mt5_asset or is_crypto) else 0.01
                 
                 # ---- STRATEGY LOGIC ROUTING ----
                 if strategy == "TradingView Webhook":
@@ -1329,7 +1365,6 @@ class SniperBot:
                         trade_type = "CE" if signal == "BUY_CE" else "PE"
                         if is_mt5_asset or is_crypto: trade_type = "BUY" if signal == "BUY_CE" else "SELL"
 
-                        # Ensure correct TP/SL direction for MT5/Crypto Shorts
                         if trade_type == "SELL":
                             dynamic_sl = entry_ltp + s['sl_pts']
                             tp1 = entry_ltp - s['tgt_pts']
@@ -1350,7 +1385,6 @@ class SniperBot:
                         }
 
                         if not is_mock_mode: 
-                            # 🔥 FIX: For option buying (CE or PE), we always BUY to open! 
                             exec_side = "SELL" if new_trade['type'] == "SELL" else "BUY"
                             self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch)
                             
@@ -1385,7 +1419,6 @@ class SniperBot:
                         self.state["active_trade"]["current_ltp"] = ltp
                         self.state["active_trade"]["floating_pnl"] = pnl
                         
-                        # Trailing Stoploss logic specific to trade direction
                         if trade['type'] == "SELL":
                             lowest = trade.get('lowest_price', trade['entry'])
                             if ltp < lowest:
@@ -1415,7 +1448,6 @@ class SniperBot:
                             hit_tp = False if ("Trend Rider" in strategy and not trade.get('is_hz')) else (ltp >= trade['tgt'])
                             hit_sl = ltp <= trade['sl']
 
-                        # Partial Target Hits
                         if not trade['scaled_out'] and not trade.get('is_hz'):
                             reach_tp1 = (ltp <= trade['tp1']) if trade['type'] == "SELL" else (ltp >= trade['tp1'])
                             if reach_tp1:
@@ -1425,7 +1457,6 @@ class SniperBot:
                                     if half_lots > 0:
                                         qty_to_sell = half_lots * base_lot_size if not (is_mt5_asset or is_crypto) else half_lots
                                         if not is_mock_mode:
-                                            # 🔥 FIX: Inverse order exactly aligns execution with partial close requirements
                                             exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                             self.place_real_order(trade['symbol'], trade['token'], qty_to_sell, exec_side, trade['exch'])
                                         trade['qty'] -= qty_to_sell
@@ -1440,10 +1471,8 @@ class SniperBot:
                             hit_tp, market_close = True, True
                             self.state["manual_exit"] = False
                         
-                        # Full Exit Target / SL Hits
                         if hit_tp or hit_sl or market_close:
                             if not is_mock_mode: 
-                                # 🔥 FIX: Option Longs close by SELLING. Crypto Shorts close by BUYING.
                                 exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                 self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'])
                             
@@ -1707,7 +1736,7 @@ else:
                     st.session_state.user_lots[p] = 1.0 
         elif BROKER in ["Angel One", "Zerodha"]:
             valid_assets = [a for a in all_assets if a in ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "INDIA VIX"] or ("USD" not in a and "USDT" not in a)]
-        else: # MT5
+        else: 
             valid_assets = [a for a in all_assets if a in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", "SOLUSD"] or "USD" in a]
             
         if CUSTOM_STOCK and CUSTOM_STOCK not in valid_assets: valid_assets.append(CUSTOM_STOCK)
@@ -1720,18 +1749,18 @@ else:
         STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
         TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
         
-        # --- DYNAMIC KEYWORD BUILDER ---
+        # --- DYNAMIC KEYWORD BUILDER UI ---
         CUSTOM_CODE = ""
         TV_PASSPHRASE = "SHREE123"
         
         if STRATEGY == "Keyword Rule Builder":
             st.divider()
-            st.markdown("**🧠 Keyword Logic Builder**")
-            st.info("Select triggers. If multiple are chosen, ALL must be true to enter a trade.")
+            st.markdown("**🧠 Custom Strategy Logic Builder**")
+            st.info("Select triggers. Signals will plot dynamically on the TradingView mirror chart.")
             selected_rules = st.multiselect(
                 "Select Technical Conditions",
-                ["EMA Crossover (9 & 21)", "Bollinger Bands Bounce", "RSI Breakout (>60/<40)", "MACD Crossover"],
-                default=["EMA Crossover (9 & 21)"]
+                ["EMA Cross", "Bollinger Bands", "FVG / ICT", "MACD", "Stochastic RSI", "Chandelier Exit"],
+                default=["EMA Cross", "FVG / ICT"]
             )
             CUSTOM_CODE = ",".join(selected_rules)
             st.session_state.custom_code_input = CUSTOM_CODE
@@ -1913,13 +1942,6 @@ else:
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live OHLCV</div>
-                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
-                        O: {round(o_val, 4)} &nbsp;|&nbsp; H: {round(h_val, 4)} &nbsp;|&nbsp; L: {round(l_val, 4)} &nbsp;|&nbsp; C: {round(c_val, 4)}<br>
-                        <span style="font-size: 0.95rem; color: #0284c7;">V: {v_display}</span>
-                    </div>
-                </div>
             </div>
         """, unsafe_allow_html=True)
 
@@ -1983,6 +2005,7 @@ else:
         else:
             st.info("⏳ Radar Active: Waiting for High-Probability Setup...")
 
+        # 🔥 TRADING VIEW MIRROR CHART INTEGRATION
         st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
         c_h1, c_h2 = st.columns(2)
         with c_h1: SHOW_CHART = st.toggle("📊 Render Chart", True)
@@ -1992,6 +2015,30 @@ else:
             chart_df = bot.state["latest_data"].copy()
             chart_df['time'] = (pd.to_datetime(chart_df.index).astype('int64') // 10**9) - 19800
             candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
+            
+            # --- DYNAMIC BUY/SELL SIGNAL MARKERS ---
+            markers_list = []
+            for i, row in chart_df.iterrows():
+                if row.get('Buy_Signal') == True:
+                    text_val = row.get('Marker_Text', 'BUY') if row.get('Marker_Text') else 'BUY'
+                    markers_list.append({
+                        "time": row['time'],
+                        "position": "belowBar",
+                        "color": "#089981", # TradingView Native Green
+                        "shape": "arrowUp",
+                        "text": text_val,
+                        "size": 2
+                    })
+                elif row.get('Sell_Signal') == True:
+                    text_val = row.get('Marker_Text', 'SELL') if row.get('Marker_Text') else 'SELL'
+                    markers_list.append({
+                        "time": row['time'],
+                        "position": "aboveBar",
+                        "color": "#f23645", # TradingView Native Red
+                        "shape": "arrowDown",
+                        "text": text_val,
+                        "size": 2
+                    })
             
             fib_lines = []
             if not bot.state["active_trade"] and bot.state.get('fib_data'):
@@ -2004,14 +2051,32 @@ else:
                 ]
             
             chartOptions = {
-                "height": 700 if FULL_CHART else 400, 
-                "layout": { "textColor": '#1e293b', "background": { "type": 'solid', "color": '#ffffff' } }, 
-                "grid": { "vertLines": { "color": 'rgba(226, 232, 240, 0.8)' }, "horzLines": { "color": 'rgba(226, 232, 240, 0.8)' } }, 
+                "height": 700 if FULL_CHART else 500, 
+                "layout": { "textColor": '#d1d4dc', "background": { "type": 'solid', "color": '#131722' } }, 
+                "grid": { "vertLines": { "color": '#363c4e' }, "horzLines": { "color": '#363c4e' } }, 
                 "crosshair": { "mode": 0 }, 
                 "timeScale": { "timeVisible": True, "secondsVisible": False }
             }
-            chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
+            
+            chart_series = [{
+                "type": 'Candlestick', 
+                "data": candles, 
+                "options": {
+                    "upColor": '#089981', 
+                    "downColor": '#f23645', 
+                    "borderUpColor": '#089981', 
+                    "borderDownColor": '#f23645', 
+                    "wickUpColor": '#089981', 
+                    "wickDownColor": '#f23645'
+                },
+                "priceLines": fib_lines,
+                "markers": markers_list
+            }]
 
+            if 'ce_long' in chart_df.columns:
+                ce_data = chart_df[['time', 'ce_long']].dropna().rename(columns={'ce_long': 'value'}).to_dict('records')
+                if ce_data: chart_series.append({"type": 'Line', "data": ce_data, "options": { "color": '#fbbf24', "lineWidth": 1, "lineStyle": 2, "title": 'CE Trail' }})
+            
             if 'avwap' in chart_df.columns:
                 avwap_data = chart_df[['time', 'avwap']].dropna().rename(columns={'avwap': 'value'}).to_dict('records')
                 if avwap_data: chart_series.append({"type": 'Line', "data": avwap_data, "options": { "color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP' }})
@@ -2023,7 +2088,9 @@ else:
                 ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
                 if ema_data: chart_series.append({"type": 'Line', "data": ema_data, "options": { "color": '#0ea5e9', "lineWidth": 2, "title": 'EMA' }})
 
-            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
+            st.markdown("<div style='border: 1px solid #363c4e; border-radius: 8px; overflow: hidden;'>", unsafe_allow_html=True)
+            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="tv_mirror_chart")
+            st.markdown("</div>", unsafe_allow_html=True)
 
     with tab2:
         colA, colB, colC = st.columns(3)
@@ -2234,5 +2301,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
-
