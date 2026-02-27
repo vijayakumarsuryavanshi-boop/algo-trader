@@ -299,7 +299,7 @@ if 'sb_strat_input' not in st.session_state: st.session_state.sb_strat_input = S
 if 'bot' not in st.session_state: st.session_state.bot = None
 if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
 if 'custom_stock' not in st.session_state: st.session_state.custom_stock = ""
-if 'custom_code_input' not in st.session_state: st.session_state.custom_code_input = "EMA Cross,FVG / ICT"
+if 'custom_code_input' not in st.session_state: st.session_state.custom_code_input = "EMA Crossover (9 & 21)"
 
 @st.cache_data(ttl=43200) 
 def get_angel_scrip_master():
@@ -322,15 +322,6 @@ class TechnicalAnalyzer:
         df['tr2'] = abs(df['low'] - df['close'].shift())
         df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
         return df['tr'].rolling(period).mean()
-
-    def get_support_resistance(self, df, lookback=15):
-        # Exness-style Swing Highs/Lows calculation
-        df = df.copy()
-        highs = df['high'].rolling(window=lookback, center=True).max()
-        lows = df['low'].rolling(window=lookback, center=True).min()
-        res = df[df['high'] == highs]['high'].dropna().unique().tolist()
-        sup = df[df['low'] == lows]['low'].dropna().unique().tolist()
-        return sup[-2:], res[-2:] # Return the two most recent distinct levels
 
     def calculate_indicators(self, df, is_index=False):
         df = df.copy()
@@ -361,8 +352,10 @@ class TechnicalAnalyzer:
         major_high = df['high'].rolling(lookback).max().iloc[-1]
         major_low = df['low'].rolling(lookback).min().iloc[-1]
         diff = major_high - major_low
+        
         fib_618 = major_high - (diff * 0.618)
         fib_650 = major_high - (diff * 0.650)
+        
         return major_high, major_low, min(fib_618, fib_650), max(fib_618, fib_650)
 
     def detect_order_blocks(self, df):
@@ -401,34 +394,36 @@ class TechnicalAnalyzer:
         df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
         df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
 
+        latest_bull_top = df['low'].where(df['fvg_bull']).ffill()
+        latest_bull_bot = df['high'].shift(2).where(df['fvg_bull']).ffill()
+        latest_bear_bot = df['high'].where(df['fvg_bear']).ffill()
+        latest_bear_top = df['low'].shift(2).where(df['fvg_bear']).ffill()
+
+        last = df.iloc[-1]
         atr = self.get_atr(df).iloc[-1]
         mh, ml, f_low, f_high = self.calculate_fib_zones(df)
         smc_blocks = self.detect_order_blocks(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
 
-        df['Buy_Signal'] = False
-        df['Sell_Signal'] = False
-        df['Marker_Text'] = ""
-
-        # Historical Signal Calculation for Chart
-        for i in range(2, len(df)):
-            in_gz = (df['low'].iloc[i] <= f_high and df['high'].iloc[i] >= f_low)
-            bull_rev = df['close'].iloc[i] > df['open'].iloc[i]
-            if in_gz and bull_rev and (df['stoch_k'].iloc[i] > df['stoch_d'].iloc[i]):
-                df.at[df.index[i], 'Buy_Signal'] = True
-                df.at[df.index[i], 'Marker_Text'] = "ICT SMC"
-            elif in_gz and (not bull_rev) and (df['stoch_k'].iloc[i] < df['stoch_d'].iloc[i]):
-                df.at[df.index[i], 'Sell_Signal'] = True
-                df.at[df.index[i], 'Marker_Text'] = "ICT SMC"
-
-        last = df.iloc[-1]
         trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
-        
-        if last['Buy_Signal']: trend, signal = "SMC GOLDEN ZONE BULLISH 🟢", "BUY_CE"
-        elif last['Sell_Signal']: trend, signal = "SMC GOLDEN ZONE BEARISH 🔴", "BUY_PE"
+
+        mitigated_bull = (last['low'] <= latest_bull_top.iloc[-1] * 1.002) and (last['low'] >= latest_bull_bot.iloc[-1] * 0.995)
+        bull_reversal = last['close'] > last['open'] 
+
+        in_golden_zone = (last['low'] <= f_high and last['high'] >= f_low)
+
+        if in_golden_zone and bull_reversal and (last['stoch_k'] > last['stoch_d']):
+            trend, signal = "SMC GOLDEN ZONE BULLISH REVERSAL 🟢", "BUY_CE"
+        elif in_golden_zone and (not bull_reversal) and (last['stoch_k'] < last['stoch_d']):
+            trend, signal = "SMC GOLDEN ZONE BEARISH REVERSAL 🔴", "BUY_PE"
+        elif mitigated_bull and bull_reversal and (last['stoch_k'] > last['stoch_d']):
+            trend, signal = "ICT BULL FVG REVERSAL CONFIRMED 🟢", "BUY_CE"
+        elif (last['high'] >= latest_bear_bot.iloc[-1] * 0.998 and last['high'] <= latest_bear_top.iloc[-1] * 1.005) and (not bull_reversal) and (last['stoch_k'] < last['stoch_d']):
+            trend, signal = "ICT BEAR FVG REVERSAL CONFIRMED 🔴", "BUY_PE"
 
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data
 
+    # 🔥 FIX: VIJAY RFF Strategy logic properly triggers on fresh EMA Crossovers with RSI to match TradingView logic precisely.
     def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -456,18 +451,17 @@ class TechnicalAnalyzer:
         if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all() or is_index:
             df_ta['VWAP'] = df_ta['Close']
 
-        # Accurate historical crossover logic
+        # 🔥 CROSSOVER DETECTION: Only triggers when the fast EMA explicitly crosses the slow EMA
         df_ta['EMA_Cross_Up'] = (df_ta['EMA_5'] > df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) <= df_ta['EMA_13'].shift(1))
         df_ta['EMA_Cross_Dn'] = (df_ta['EMA_5'] < df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) >= df_ta['EMA_13'].shift(1))
 
-        df['Buy_Signal'] = df_ta['EMA_Cross_Up'] & (df_ta['RSI_14'] >= 50)
-        df['Sell_Signal'] = df_ta['EMA_Cross_Dn'] & (df_ta['RSI_14'] <= 50)
-        df['Marker_Text'] = "VIJAY"
+        df_ta['Buy_Signal'] = df_ta['EMA_Cross_Up'] & (df_ta['RSI_14'] >= 50)
+        df_ta['Sell_Signal'] = df_ta['EMA_Cross_Dn'] & (df_ta['RSI_14'] <= 50)
         
         df['vwap'] = df_ta['VWAP']
         df['ema_fast'] = df_ta['EMA_13']
         
-        last = df.iloc[-1]
+        last = df_ta.iloc[-1]
         
         signal = "WAIT"
         trend = "RANGING 🟡 (VIJAY_RFF)"
@@ -479,8 +473,9 @@ class TechnicalAnalyzer:
             signal = "BUY_PE"
             trend = "VIJAY_RFF DOWNTREND CROSSOVER 🔴"
             
-        return trend, signal, last['vwap'], last['ema_fast'], df, atr, fib_data
+        return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data
 
+    # 🔥 FIX: Intraday Trend Rider now triggers specifically on price pullbacks to the fast EMA, creating precision entries.
     def apply_trend_rider_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50: return "WAIT", "WAIT", 0, 0, df, 0, {}
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -494,19 +489,18 @@ class TechnicalAnalyzer:
         smc_blocks = self.detect_order_blocks(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
         
-        # Historical Signal Calculation for Chart
-        df['price_cross_up'] = (df['close'] > df['ema_fast']) & (df['close'].shift(1) <= df['ema_fast'].shift(1))
-        df['price_cross_dn'] = (df['close'] < df['ema_fast']) & (df['close'].shift(1) >= df['ema_fast'].shift(1))
-        
-        df['Buy_Signal'] = df['price_cross_up'] & (df['ema_fast'] > df['ema_trend']) & (df['rsi'] > 50)
-        df['Sell_Signal'] = df['price_cross_dn'] & (df['ema_fast'] < df['ema_trend']) & (df['rsi'] < 50)
-        df['Marker_Text'] = "TREND"
-        
         last = df.iloc[-1]
+        prev = df.iloc[-2]
         signal, trend = "WAIT", "RANGING 🟡"
         
-        if last['Buy_Signal']: signal, trend = "BUY_CE", "TREND RIDER PULLBACK UPTREND 🚀"
-        elif last['Sell_Signal']: signal, trend = "BUY_PE", "TREND RIDER PULLBACK DOWNTREND 🩸"
+        # Detect Price Crossover against the Fast EMA while maintaining the macro trend
+        price_cross_up = (last['close'] > last['ema_fast']) and (prev['close'] <= prev['ema_fast'])
+        price_cross_dn = (last['close'] < last['ema_fast']) and (prev['close'] >= prev['ema_fast'])
+        
+        if price_cross_up and last['ema_fast'] > last['ema_trend'] and last['rsi'] > 50:
+            signal, trend = "BUY_CE", "TREND RIDER PULLBACK UPTREND 🚀"
+        elif price_cross_dn and last['ema_fast'] < last['ema_trend'] and last['rsi'] < 50:
+            signal, trend = "BUY_PE", "TREND RIDER PULLBACK DOWNTREND 🩸"
                     
         return trend, signal, last['vwap'], last['ema_fast'], df, atr, fib_data
 
@@ -520,20 +514,17 @@ class TechnicalAnalyzer:
         atr = self.get_atr(df).iloc[-1]
         mh, ml, f_low, f_high = self.calculate_fib_zones(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
-        
-        df['Buy_Signal'] = (df['ema_short'] > df['ema_long']) & (df['ema_short'].shift(1) <= df['ema_long'].shift(1))
-        df['Sell_Signal'] = (df['ema_short'] < df['ema_long']) & (df['ema_short'].shift(1) >= df['ema_long'].shift(1))
-        df['Marker_Text'] = "VWAP"
-        
         last = df.iloc[-1]
         signal, trend = "WAIT", "FLAT"
         
-        if last['Buy_Signal']: trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
-        elif last['Sell_Signal']: trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
+        benchmark = last['ema_long'] if is_index else last['vwap']
+        if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark) and last['rsi'] > 50: 
+            trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
+        elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark) and last['rsi'] < 50: 
+            trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
             
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data
 
-    # 🔥 KEYWORD RULE BUILDER
     def apply_keyword_strategy(self, df, keywords, index_name):
         if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}
         df = df.copy()
@@ -552,68 +543,36 @@ class TechnicalAnalyzer:
             df['bbl'] = bb['BBL_20_2.0']
             df['bbh'] = bb['BBU_20_2.0']
 
-        stoch = ta.stochrsi(df['close'])
-        if stoch is not None:
-            df['stoch_k'] = stoch.iloc[:, 0]
-            df['stoch_d'] = stoch.iloc[:, 1]
-        else:
-            df['stoch_k'] = 50; df['stoch_d'] = 50
-
-        atr22 = ta.atr(df['high'], df['low'], df['close'], 22)
-        if atr22 is not None:
-            df['ce_long'] = df['high'].rolling(22).max() - atr22 * 3
-            df['ce_short'] = df['low'].rolling(22).min() + atr22 * 3
-        else:
-            df['ce_long'] = df['low']; df['ce_short'] = df['high']
-
-        df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
-        df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
-
-        df['Buy_Signal'] = False
-        df['Sell_Signal'] = False
-        df['Marker_Text'] = ""
-
-        keys = keywords if isinstance(keywords, list) else keywords.split(',') if keywords else []
-
-        for i in range(1, len(df)):
-            buy, sell, text = False, False, ""
-            
-            if "EMA Cross" in keys:
-                if df['ema9'].iloc[i] > df['ema21'].iloc[i] and df['ema9'].iloc[i-1] <= df['ema21'].iloc[i-1]: buy, text = True, "EMA"
-                elif df['ema9'].iloc[i] < df['ema21'].iloc[i] and df['ema9'].iloc[i-1] >= df['ema21'].iloc[i-1]: sell, text = True, "EMA"
-
-            if "Bollinger Bands" in keys and 'bbl' in df.columns:
-                if df['close'].iloc[i] > df['bbl'].iloc[i] and df['close'].iloc[i-1] <= df['bbl'].iloc[i-1]: buy, text = True, "BB"
-                elif df['close'].iloc[i] < df['bbh'].iloc[i] and df['close'].iloc[i-1] >= df['bbh'].iloc[i-1]: sell, text = True, "BB"
-
-            if "MACD" in keys and 'macd' in df.columns:
-                if df['macd'].iloc[i] > df['macds'].iloc[i] and df['macd'].iloc[i-1] <= df['macds'].iloc[i-1]: buy, text = True, "MACD"
-                elif df['macd'].iloc[i] < df['macds'].iloc[i] and df['macd'].iloc[i-1] >= df['macds'].iloc[i-1]: sell, text = True, "MACD"
-
-            if "Stochastic RSI" in keys:
-                if df['stoch_k'].iloc[i] > df['stoch_d'].iloc[i] and df['stoch_k'].iloc[i-1] <= df['stoch_d'].iloc[i-1] and df['stoch_k'].iloc[i] < 20: buy, text = True, "STOCH"
-                elif df['stoch_k'].iloc[i] < df['stoch_d'].iloc[i] and df['stoch_k'].iloc[i-1] >= df['stoch_d'].iloc[i-1] and df['stoch_k'].iloc[i] > 80: sell, text = True, "STOCH"
-
-            if "FVG / ICT" in keys:
-                if df['fvg_bull'].iloc[i]: buy, text = True, "FVG"
-                elif df['fvg_bear'].iloc[i]: sell, text = True, "FVG"
-                
-            if "Chandelier Exit" in keys:
-                if df['close'].iloc[i] > df['ce_long'].iloc[i] and df['close'].iloc[i-1] <= df['ce_long'].iloc[i-1]: buy, text = True, "CE"
-                elif df['close'].iloc[i] < df['ce_short'].iloc[i] and df['close'].iloc[i-1] >= df['ce_short'].iloc[i-1]: sell, text = True, "CE"
-
-            if buy:
-                df.at[df.index[i], 'Buy_Signal'] = True
-                df.at[df.index[i], 'Marker_Text'] = text
-            elif sell:
-                df.at[df.index[i], 'Sell_Signal'] = True
-                df.at[df.index[i], 'Marker_Text'] = text
-
         last = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        buy_conds, sell_conds = [], []
+        keys = keywords.split(',') if keywords else []
+
+        if "EMA Crossover (9 & 21)" in keys:
+            buy_conds.append(last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'])
+            sell_conds.append(last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'])
+
+        if "RSI Breakout (>60/<40)" in keys:
+            buy_conds.append(last['rsi'] > 60)
+            sell_conds.append(last['rsi'] < 40)
+
+        if "MACD Crossover" in keys:
+            if 'macd' in df.columns:
+                buy_conds.append(last['macd'] > last['macds'] and prev['macd'] <= prev['macds'])
+                sell_conds.append(last['macd'] < last['macds'] and prev['macd'] >= prev['macds'])
+
+        if "Bollinger Bands Bounce" in keys:
+            if 'bbl' in df.columns:
+                buy_conds.append(last['close'] > last['bbl'] and prev['close'] <= prev['bbl'])
+                sell_conds.append(last['close'] < last['bbh'] and prev['close'] >= prev['bbh'])
+
         signal, trend = "WAIT", "Awaiting Keyword Match 🟡"
 
-        if last['Buy_Signal']: signal, trend = "BUY_CE", f"Setup Met: BULLISH {last['Marker_Text']} 🟢"
-        elif last['Sell_Signal']: signal, trend = "BUY_PE", f"Setup Met: BEARISH {last['Marker_Text']} 🔴"
+        if buy_conds and all(buy_conds):
+            signal, trend = "BUY_CE", "Keyword Setup Met: BULLISH 🟢"
+        elif sell_conds and all(sell_conds):
+            signal, trend = "BUY_PE", "Keyword Setup Met: BEARISH 🔴"
 
         return trend, signal, last['close'], last['ema9'], df, self.get_atr(df).iloc[-1], {}
 
@@ -1000,11 +959,7 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-                
-                if "BTC" in base_coin or "ETH" in base_coin:
-                    clean_qty = float(round(float(qty), 4))
-                else:
-                    clean_qty = float(int(float(qty)))
+                clean_qty = float(round(float(qty), 4))
                 
                 exact_market = f"{base_coin}USDT"
                 exact_pair = f"B-{base_coin}_USDT"
@@ -1081,51 +1036,35 @@ class SniperBot:
         if broker == "Zerodha" and self.kite:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
-                z_product = self.kite.PRODUCT_NRML if exchange in ["NFO", "BFO", "MCX"] else self.kite.PRODUCT_MIS
-                z_order_type = self.kite.ORDER_TYPE_MARKET
-                z_price = 0.0
-                
-                if exchange in ["NFO", "BFO"]:
-                    ltp = self.get_live_price(exchange, symbol, token)
-                    if ltp and ltp > 0:
-                        z_order_type = self.kite.ORDER_TYPE_LIMIT
-                        safe_price = ltp * 1.05 if side == "BUY" else ltp * 0.95
-                        z_price = round(round(safe_price / 0.05) * 0.05, 2)
-                
-                order_id = self.kite.place_order(
-                    variety=self.kite.VARIETY_REGULAR, 
-                    exchange=exchange, 
-                    tradingsymbol=symbol, 
-                    transaction_type=z_side, 
-                    quantity=int(float(qty)), 
-                    product=z_product, 
-                    order_type=z_order_type,
-                    price=z_price
-                )
+                order_id = self.kite.place_order(variety=self.kite.VARIETY_REGULAR, exchange=exchange, tradingsymbol=symbol, transaction_type=z_side, quantity=int(float(qty)), product=self.kite.PRODUCT_MIS, order_type=self.kite.ORDER_TYPE_MARKET)
                 self.log(f"✅ Zerodha Order Pushed! ID: {order_id}")
                 return order_id
-            except Exception as e: 
-                self.log(f"❌ Zerodha Order Error: {str(e)}")
-                return None
+            except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
-        # 🔥 ANGEL ONE EXECUTION BLOCK (Robust Protection)
+  # 🔥 ANGEL ONE EXECUTION BLOCK
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
+            
+            # Default to MARKET, but we will convert Options to safe LIMIT orders
             order_type = "MARKET"
             exec_price = 0.0
             
+            # 🛡️ Anti-Freak Trade Protection for Options
             if exchange in ["NFO", "BFO"]:
                 ltp = self.get_live_price(exchange, symbol, token)
                 if ltp and ltp > 0:
                     order_type = "LIMIT"
                     if side.upper() == "BUY":
-                        safe_price = ltp * 1.05
+                        safe_price = ltp * 1.05  # 5% buffer above LTP
                     else:
-                        safe_price = ltp * 0.95
+                        safe_price = ltp * 0.95  # 5% buffer below LTP
+                    
+                    # Round strictly to NSE's 0.05 tick size
                     exec_price = round(round(safe_price / 0.05) * 0.05, 2)
                 else:
                     self.log(f"⚠️ Could not fetch LTP for {symbol}. Retrying as pure MARKET.")
 
+            # 🔥 FIX: Angel API Gateway strictly requires native numbers, NOT strings for price, squareoff, quantity
             order_params = {
                 "variety": "NORMAL",
                 "tradingsymbol": str(symbol),
@@ -1145,6 +1084,7 @@ class SniperBot:
             res = self.api.placeOrder(order_params)
             
             if res is None:
+                # The Python SDK failed to parse the response. Doing a direct request to catch the raw text.
                 try:
                     headers = {
                         "Authorization": f"Bearer {self.api.access_token}",
@@ -1180,7 +1120,6 @@ class SniperBot:
                 return None
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
-
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
         
@@ -1229,8 +1168,8 @@ class SniperBot:
         return None, None, None, 0.0
 
     def trading_loop(self):
-        self.log("▶️ Engine thread started. Running in background.")
-        while self.state.get("is_running", False):
+        self.log("▶️ Engine thread started.")
+        while self.state["is_running"]:
             try:
                 s = self.settings
                 current_time = get_ist().time()
@@ -1238,12 +1177,11 @@ class SniperBot:
                 time_str = get_ist().strftime('%H:%M:%S')
                 self.state["loop_count"] = self.state.get("loop_count", 0) + 1
                 
-                if self.state["trades_today"] >= s.get('max_trades', 5) or self.state.get("daily_pnl", 0.0) <= -s.get("capital_protect", 999999):
+                if self.state["trades_today"] >= s['max_trades'] or self.state.get("daily_pnl", 0.0) <= -s.get("capital_protect", 999999):
                     self.state["is_running"] = False
-                    self.log("🛑 Engine Stopped: Max Trades or Drawdown Reached.")
                     break
 
-                index, timeframe, is_mock_mode, strategy = s.get('index', 'NIFTY'), s.get('timeframe', '5m'), s.get('paper_mode', True), s.get('strategy', 'Keyword Rule Builder')
+                index, timeframe, is_mock_mode, strategy = s['index'], s['timeframe'], s['paper_mode'], s['strategy']
                 
                 is_open, mkt_msg = get_market_status(index)
                 if not is_open:
@@ -1267,7 +1205,7 @@ class SniperBot:
                 df_candles = self.get_historical_data(exch, token, symbol=index, interval=timeframe) if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval=timeframe)
                 
                 user_lots_dict = s.get('user_lots', DEFAULT_LOTS)
-                base_lot_size = user_lots_dict.get(index, 65) if not (is_mt5_asset or is_crypto) else 0.01
+                base_lot_size = user_lots_dict.get(index, 25) if not (is_mt5_asset or is_crypto) else 0.01
                 
                 # ---- STRATEGY LOGIC ROUTING ----
                 if strategy == "TradingView Webhook":
@@ -1344,7 +1282,7 @@ class SniperBot:
                 # ---- EXECUTION ----
                 if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time:
                     
-                    qty = max(float(s.get('lots', 1.0)), float(base_lot_size))
+                    qty = max(float(s['lots']), float(base_lot_size))
                     
                     if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
                         strike_sym = index
@@ -1354,23 +1292,24 @@ class SniperBot:
                         strike_token, strike_exch = strike_sym, exch
                         entry_ltp = spot
                     else:
-                        max_prem = s.get('max_capital', 15000) / qty if qty > 0 else 0
+                        max_prem = s['max_capital'] / qty if qty > 0 else 0
                         strike_sym, strike_token, strike_exch, entry_ltp = self.get_strike(index, spot, signal, max_prem)
                     
                     if strike_sym and entry_ltp:
                         trade_type = "CE" if signal == "BUY_CE" else "PE"
                         if is_mt5_asset or is_crypto: trade_type = "BUY" if signal == "BUY_CE" else "SELL"
 
+                        # Ensure correct TP/SL direction for MT5/Crypto Shorts
                         if trade_type == "SELL":
-                            dynamic_sl = entry_ltp + s.get('sl_pts', 20)
-                            tp1 = entry_ltp - s.get('tgt_pts', 15)
-                            tp2 = entry_ltp - (s.get('tgt_pts', 15) * 2)
-                            tp3 = entry_ltp - (s.get('tgt_pts', 15) * 3)
+                            dynamic_sl = entry_ltp + s['sl_pts']
+                            tp1 = entry_ltp - s['tgt_pts']
+                            tp2 = entry_ltp - (s['tgt_pts'] * 2)
+                            tp3 = entry_ltp - (s['tgt_pts'] * 3)
                         else:
-                            dynamic_sl = entry_ltp - s.get('sl_pts', 20) 
-                            tp1 = entry_ltp + s.get('tgt_pts', 15)
-                            tp2 = entry_ltp + (s.get('tgt_pts', 15) * 2)
-                            tp3 = entry_ltp + (s.get('tgt_pts', 15) * 3)
+                            dynamic_sl = entry_ltp - s['sl_pts'] 
+                            tp1 = entry_ltp + s['tgt_pts']
+                            tp2 = entry_ltp + (s['tgt_pts'] * 2)
+                            tp3 = entry_ltp + (s['tgt_pts'] * 3)
 
                         new_trade = {
                             "symbol": strike_sym, "token": strike_token, "exch": strike_exch, 
@@ -1381,6 +1320,7 @@ class SniperBot:
                         }
 
                         if not is_mock_mode: 
+                            # 🔥 FIX: For option buying (CE or PE), we always BUY to open! 
                             exec_side = "SELL" if new_trade['type'] == "SELL" else "BUY"
                             self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch)
                             
@@ -1415,11 +1355,12 @@ class SniperBot:
                         self.state["active_trade"]["current_ltp"] = ltp
                         self.state["active_trade"]["floating_pnl"] = pnl
                         
+                        # Trailing Stoploss logic specific to trade direction
                         if trade['type'] == "SELL":
                             lowest = trade.get('lowest_price', trade['entry'])
                             if ltp < lowest:
                                 trade['lowest_price'] = ltp
-                                tsl_buffer = s.get('tsl_pts', 15) * 1.5 if "Trend Rider" in strategy else s.get('tsl_pts', 15)
+                                tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
                                 new_sl = ltp + tsl_buffer
                                 if new_sl < trade['sl']: trade['sl'] = new_sl
                                 
@@ -1437,13 +1378,14 @@ class SniperBot:
                                     else:                              new_sl = trade['sl']
                                     if new_sl > trade['sl']: trade['sl'] = new_sl
                                 else:
-                                    tsl_buffer = s.get('tsl_pts', 15) * 1.5 if "Trend Rider" in strategy else s.get('tsl_pts', 15)
+                                    tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
                                     new_sl = ltp - tsl_buffer
                                     if new_sl > trade['sl']: trade['sl'] = new_sl
                                     
                             hit_tp = False if ("Trend Rider" in strategy and not trade.get('is_hz')) else (ltp >= trade['tgt'])
                             hit_sl = ltp <= trade['sl']
 
+                        # Partial Target Hits
                         if not trade['scaled_out'] and not trade.get('is_hz'):
                             reach_tp1 = (ltp <= trade['tp1']) if trade['type'] == "SELL" else (ltp >= trade['tp1'])
                             if reach_tp1:
@@ -1453,6 +1395,7 @@ class SniperBot:
                                     if half_lots > 0:
                                         qty_to_sell = half_lots * base_lot_size if not (is_mt5_asset or is_crypto) else half_lots
                                         if not is_mock_mode:
+                                            # 🔥 FIX: Inverse order exactly aligns execution with partial close requirements
                                             exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                             self.place_real_order(trade['symbol'], trade['token'], qty_to_sell, exec_side, trade['exch'])
                                         trade['qty'] -= qty_to_sell
@@ -1467,8 +1410,10 @@ class SniperBot:
                             hit_tp, market_close = True, True
                             self.state["manual_exit"] = False
                         
+                        # Full Exit Target / SL Hits
                         if hit_tp or hit_sl or market_close:
                             if not is_mock_mode: 
+                                # 🔥 FIX: Option Longs close by SELLING. Crypto Shorts close by BUYING.
                                 exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                 self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'])
                             
@@ -1506,8 +1451,7 @@ class SniperBot:
                             self.state["daily_pnl"] += pnl
                             self.state["active_trade"] = None
             except Exception as e:
-                # Catching all exceptions ensures the background loop never breaks without a user kill switch.
-                self.log(f"⚠️ Non-Fatal Loop Error: {str(e)}")
+                self.log(f"⚠️ Loop Error: {str(e)}")
             time.sleep(2)
 
 # ==========================================
@@ -1733,7 +1677,7 @@ else:
                     st.session_state.user_lots[p] = 1.0 
         elif BROKER in ["Angel One", "Zerodha"]:
             valid_assets = [a for a in all_assets if a in ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "INDIA VIX"] or ("USD" not in a and "USDT" not in a)]
-        else: 
+        else: # MT5
             valid_assets = [a for a in all_assets if a in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", "SOLUSD"] or "USD" in a]
             
         if CUSTOM_STOCK and CUSTOM_STOCK not in valid_assets: valid_assets.append(CUSTOM_STOCK)
@@ -1746,18 +1690,18 @@ else:
         STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
         TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
         
-        # --- DYNAMIC KEYWORD BUILDER UI ---
+        # --- DYNAMIC KEYWORD BUILDER ---
         CUSTOM_CODE = ""
         TV_PASSPHRASE = "SHREE123"
         
         if STRATEGY == "Keyword Rule Builder":
             st.divider()
-            st.markdown("**🧠 Custom Strategy Logic Builder**")
-            st.info("Select triggers. Signals will plot dynamically on the TradingView mirror chart.")
+            st.markdown("**🧠 Keyword Logic Builder**")
+            st.info("Select triggers. If multiple are chosen, ALL must be true to enter a trade.")
             selected_rules = st.multiselect(
                 "Select Technical Conditions",
-                ["EMA Cross", "Bollinger Bands", "FVG / ICT", "MACD", "Stochastic RSI", "Chandelier Exit"],
-                default=["EMA Cross", "FVG / ICT"]
+                ["EMA Crossover (9 & 21)", "Bollinger Bands Bounce", "RSI Breakout (>60/<40)", "MACD Crossover"],
+                default=["EMA Crossover (9 & 21)"]
             )
             CUSTOM_CODE = ",".join(selected_rules)
             st.session_state.custom_code_input = CUSTOM_CODE
@@ -1867,7 +1811,7 @@ else:
             </div>
         """, unsafe_allow_html=True)
 
-        is_running = bot.state.get("is_running", False)
+        is_running = bot.state["is_running"]
         status_color = "#22c55e" if is_running else "#ef4444"
         status_bg = "#f0fdf4" if is_running else "#fef2f2"
         status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
@@ -1939,6 +1883,13 @@ else:
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Algorithm Sentiment</div>
                     <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
                 </div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live OHLCV</div>
+                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
+                        O: {round(o_val, 4)} &nbsp;|&nbsp; H: {round(h_val, 4)} &nbsp;|&nbsp; L: {round(l_val, 4)} &nbsp;|&nbsp; C: {round(c_val, 4)}<br>
+                        <span style="font-size: 0.95rem; color: #0284c7;">V: {v_display}</span>
+                    </div>
+                </div>
             </div>
         """, unsafe_allow_html=True)
 
@@ -2002,7 +1953,6 @@ else:
         else:
             st.info("⏳ Radar Active: Waiting for High-Probability Setup...")
 
-        # 🔥 FULL WHITE TRADING VIEW MIRROR CHART + EXNESS S&R
         st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
         c_h1, c_h2 = st.columns(2)
         with c_h1: SHOW_CHART = st.toggle("📊 Render Chart", True)
@@ -2013,77 +1963,25 @@ else:
             chart_df['time'] = (pd.to_datetime(chart_df.index).astype('int64') // 10**9) - 19800
             candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
             
-            # --- DYNAMIC BUY/SELL SIGNAL MARKERS ---
-            markers_list = []
-            for i, row in chart_df.iterrows():
-                if row.get('Buy_Signal') == True:
-                    text_val = row.get('Marker_Text', 'BUY') if row.get('Marker_Text') else 'BUY'
-                    markers_list.append({
-                        "time": row['time'],
-                        "position": "belowBar",
-                        "color": "#089981", # TradingView Native Green
-                        "shape": "arrowUp",
-                        "text": text_val,
-                        "size": 2
-                    })
-                elif row.get('Sell_Signal') == True:
-                    text_val = row.get('Marker_Text', 'SELL') if row.get('Marker_Text') else 'SELL'
-                    markers_list.append({
-                        "time": row['time'],
-                        "position": "aboveBar",
-                        "color": "#f23645", # TradingView Native Red
-                        "shape": "arrowDown",
-                        "text": text_val,
-                        "size": 2
-                    })
-            
-            # --- BASE FIB LINES ---
-            snr_lines = []
+            fib_lines = []
             if not bot.state["active_trade"] and bot.state.get('fib_data'):
                 fib = bot.state['fib_data']
-                snr_lines.extend([
+                fib_lines = [
                     {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
                     {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
                     {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
                     {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
-                ])
-                
-            # --- EXNESS STYLE HORIZONTAL S&R (For Forex & Crypto) ---
-            if exch in ["MT5", "COINDCX", "DELTA"]:
-                sup, res = bot.analyzer.get_support_resistance(chart_df)
-                for r in res:
-                    snr_lines.append({"price": r, "color": '#ef4444', "lineWidth": 1, "lineStyle": 1, "title": 'Resistance (H)'})
-                for s in sup:
-                    snr_lines.append({"price": s, "color": '#22c55e', "lineWidth": 1, "lineStyle": 1, "title": 'Support (L)'})
+                ]
             
-            # 🔥 WHITE CHART LAYOUT
             chartOptions = {
-                "height": 700 if FULL_CHART else 500, 
+                "height": 700 if FULL_CHART else 400, 
                 "layout": { "textColor": '#1e293b', "background": { "type": 'solid', "color": '#ffffff' } }, 
-                "grid": { "vertLines": { "color": '#f1f5f9' }, "horzLines": { "color": '#f1f5f9' } }, 
+                "grid": { "vertLines": { "color": 'rgba(226, 232, 240, 0.8)' }, "horzLines": { "color": 'rgba(226, 232, 240, 0.8)' } }, 
                 "crosshair": { "mode": 0 }, 
                 "timeScale": { "timeVisible": True, "secondsVisible": False }
             }
-            
-            chart_series = [{
-                "type": 'Candlestick', 
-                "data": candles, 
-                "options": {
-                    "upColor": '#26a69a', 
-                    "downColor": '#ef5350', 
-                    "borderUpColor": '#26a69a', 
-                    "borderDownColor": '#ef5350', 
-                    "wickUpColor": '#26a69a', 
-                    "wickDownColor": '#ef5350'
-                },
-                "priceLines": snr_lines,
-                "markers": markers_list
-            }]
+            chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
 
-            if 'ce_long' in chart_df.columns:
-                ce_data = chart_df[['time', 'ce_long']].dropna().rename(columns={'ce_long': 'value'}).to_dict('records')
-                if ce_data: chart_series.append({"type": 'Line', "data": ce_data, "options": { "color": '#fbbf24', "lineWidth": 1, "lineStyle": 2, "title": 'CE Trail' }})
-            
             if 'avwap' in chart_df.columns:
                 avwap_data = chart_df[['time', 'avwap']].dropna().rename(columns={'avwap': 'value'}).to_dict('records')
                 if avwap_data: chart_series.append({"type": 'Line', "data": avwap_data, "options": { "color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP' }})
@@ -2095,9 +1993,7 @@ else:
                 ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
                 if ema_data: chart_series.append({"type": 'Line', "data": ema_data, "options": { "color": '#0ea5e9', "lineWidth": 2, "title": 'EMA' }})
 
-            st.markdown("<div style='border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden;'>", unsafe_allow_html=True)
-            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="tv_mirror_chart")
-            st.markdown("</div>", unsafe_allow_html=True)
+            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
 
     with tab2:
         colA, colB, colC = st.columns(3)
@@ -2286,65 +2182,6 @@ else:
                                 bias_results.append({"Asset": name, "Current Price": round(c_price, 2), "Next Expected Move": bias})
                         except: pass
                     if bias_results: st.dataframe(pd.DataFrame(bias_results), use_container_width=True, hide_index=True)
-        
-        st.divider()
-        st.subheader("⚡ 1-Minute Scalping Signals (Gold & Crypto)")
-        if st.button("Generate 1m Entry/Exit/TP Targets", use_container_width=True):
-            with st.spinner("Analyzing 1m Order Flow & VWAP..."):
-                scalp_assets = {"🥇 Gold (XAUUSD)": "GC=F", "🪙 Bitcoin (BTCUSD)": "BTC-USD"}
-                sc_cols = st.columns(2)
-                for idx, (name, ticker) in enumerate(scalp_assets.items()):
-                    try:
-                        tk = yf.Ticker(ticker)
-                        df_1m = tk.history(period="1d", interval="1m")
-                        if not df_1m.empty:
-                            df_1m.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
-                            atr = ta.atr(df_1m['high'], df_1m['low'], df_1m['close'], 14).iloc[-1]
-                            df_1m['ema9'] = ta.ema(df_1m['close'], 9)
-                            df_1m['ema21'] = ta.ema(df_1m['close'], 21)
-                            
-                            c = df_1m['close'].iloc[-1]
-                            e9 = df_1m['ema9'].iloc[-1]
-                            e21 = df_1m['ema21'].iloc[-1]
-                            
-                            if c > e9 > e21:
-                                bias = "BUY (Long) 🟢"
-                                sl = c - (atr * 1.5)
-                                tp1 = c + (atr * 1.0)
-                                tp2 = c + (atr * 2.0)
-                                tp3 = c + (atr * 3.0)
-                                box_color = "#f0fdf4"
-                                text_color = "#166534"
-                            elif c < e9 < e21:
-                                bias = "SELL (Short) 🔴"
-                                sl = c + (atr * 1.5)
-                                tp1 = c - (atr * 1.0)
-                                tp2 = c - (atr * 2.0)
-                                tp3 = c - (atr * 3.0)
-                                box_color = "#fef2f2"
-                                text_color = "#991b1b"
-                            else:
-                                bias = "WAIT (Ranging) 🟡"
-                                sl, tp1, tp2, tp3 = 0, 0, 0, 0
-                                box_color = "#fefce8"
-                                text_color = "#854d0e"
-                            
-                            with sc_cols[idx]:
-                                st.markdown(f"""
-                                <div style="background-color: {box_color}; padding: 15px; border-radius: 8px; border: 1px solid {text_color};">
-                                    <h4 style="margin-top: 0; color: {text_color};">{name}</h4>
-                                    <h2 style="margin: 0 0 10px 0; color: #0f111a;">{round(c, 2)}</h2>
-                                    <div style="font-weight: bold; color: {text_color}; margin-bottom: 10px;">Signal: {bias}</div>
-                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.9rem;">
-                                        <div style="background: #ffffff; padding: 5px; border-radius: 4px; border: 1px solid #e2e8f0;"><b>SL:</b> {round(sl, 2)}</div>
-                                        <div style="background: #ffffff; padding: 5px; border-radius: 4px; border: 1px solid #e2e8f0;"><b>TP1:</b> {round(tp1, 2)}</div>
-                                        <div style="background: #ffffff; padding: 5px; border-radius: 4px; border: 1px solid #e2e8f0;"><b>TP2:</b> {round(tp2, 2)}</div>
-                                        <div style="background: #ffffff; padding: 5px; border-radius: 4px; border: 1px solid #e2e8f0;"><b>TP3:</b> {round(tp3, 2)}</div>
-                                    </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.write(f"Error loading {name}")
 
     def cycle_asset():
         assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
@@ -2364,7 +2201,7 @@ else:
         with dock_c3: st.button("🔲", key="btn_recent", on_click=cycle_strat, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Background processing ping to keep Streamlit connection alive while thread runs
-    if bot.state.get("is_running", False):
+    if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
