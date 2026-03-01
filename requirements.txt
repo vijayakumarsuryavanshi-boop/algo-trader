@@ -22,6 +22,8 @@ XlsxWriter
 supabase
 kiteconnect
 Flask
+streamlit-browser-notification
+
 
 
 
