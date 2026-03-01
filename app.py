@@ -18,10 +18,7 @@ from streamlit.runtime.scriptrunner import add_script_run_ctx
 from collections import deque
 from streamlit_lightweight_charts import renderLightweightCharts
 from supabase import create_client, Client
-from streamlit_browser_notification import browser_notification
 
-# This will trigger a real browser popup
-browser_notification("Trade Alert", body="BUY Signal on CRUDEOIL", icon="https://example.com/logo.png")
 
 # Added missing imports for background process
 import sys
@@ -3477,4 +3474,5 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
 
