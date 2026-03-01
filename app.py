@@ -1715,6 +1715,9 @@ class SniperBot:
             except Exception as e: 
                 self.log(f"❌ Delta Exception: {e}"); return None
 
+       # 🔥 FIX: CoinDCX Order System. 
+        # 1. Futures payload uses "quantity" (not total_quantity).
+        # 2. Spot Market strictly simulated via aggressive Limit Order to fix 400 bad request.
         if exchange == "COINDCX":
             try:
                 ts = int(round(time.time() * 1000))
@@ -1742,20 +1745,27 @@ class SniperBot:
                         "side": side.lower(), 
                         "order_type": "market", 
                         "pair": exact_pair,     
-                        "total_quantity": clean_qty, 
+                        "quantity": clean_qty,  # 🔥 FIXED: Changed from 'total_quantity' to 'quantity'
                         "timestamp": ts
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 else:
+                    # FIX: Simulating spot market_order via limit_order to prevent 400 Bad Request
+                    current_spot = self.get_live_price("COINDCX", exact_market, token)
+                    if not current_spot: current_spot = self.state.get('spot', 50000)
+                    agg_price = current_spot * 1.05 if side.upper() == "BUY" else current_spot * 0.95
+                    
                     payload = {
                         "side": side.lower(), 
-                        "order_type": "market_order", 
+                        "order_type": "limit_order", 
                         "market": exact_market,       
-                        "total_quantity": clean_qty, 
+                        "total_quantity": clean_qty,  # Spot uses total_quantity
+                        "price_per_unit": float(round(agg_price, 4)),
                         "timestamp": ts
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
+                # Strip spaces out of JSON to satisfy strict HMAC SHA-256 signature requirements
                 payload_str = json.dumps(payload, separators=(',', ':'))
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
                 signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
@@ -1765,10 +1775,9 @@ class SniperBot:
                 if res.status_code == 404 and market_type in ["Futures", "Options"]:
                     self.log(f"⚠️ Futures 404 on {exact_pair}. Falling back to Margin API...")
                     payload = {"side": side.lower(), "order_type": "market_order", "market": exact_market, "total_quantity": clean_qty, "timestamp": ts}
-                    endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
                     payload_str = json.dumps(payload, separators=(',', ':'))
                     signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
-                    res = requests.post(endpoint, headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
+                    res = requests.post("https://api.coindcx.com/exchange/v1/margin/create", headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}, data=payload_str)
 
                 if res.status_code == 200: 
                     response_data = res.json()
@@ -1779,7 +1788,8 @@ class SniperBot:
                     self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {res.text}")
                     return None
             except Exception as e: 
-                self.log(f"❌ CoinDCX Exception: {e}"); return None
+                self.log(f"❌ CoinDCX Exception: {e}")
+                return None
 
         if exchange == "MT5" and self.is_mt5_connected:
             try:
@@ -3476,6 +3486,7 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
 
 
 
