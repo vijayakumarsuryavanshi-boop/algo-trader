@@ -884,19 +884,21 @@ def load_creds(user_id):
         "delta_api": "", "delta_secret": ""
     }
 
-def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_chat, wa_phone, wa_api, mt5_acc, mt5_pass, mt5_server, zerodha_api, zerodha_secret, coindcx_api, coindcx_secret, delta_api, delta_secret):
+def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_chat, wa_phone, wa_api, mt5_acc, mt5_pass, mt5_server, mt5_api_url, zerodha_api, zerodha_secret, coindcx_api, coindcx_secret, delta_api, delta_secret):
     if HAS_DB:
         data = {
             "user_id": user_id, "angel_api": angel_api, "client_id": client_id, "pwd": pwd, 
             "totp_secret": totp_secret, "tg_token": tg_token, "tg_chat": tg_chat, 
             "wa_phone": wa_phone, "wa_api": wa_api,
-            "mt5_acc": mt5_acc, "mt5_pass": mt5_pass, "mt5_server": mt5_server,
+            "mt5_acc": mt5_acc, "mt5_pass": mt5_pass, "mt5_server": mt5_server, "mt5_api_url": mt5_api_url,
             "zerodha_api": zerodha_api, "zerodha_secret": zerodha_secret,
             "coindcx_api": coindcx_api, "coindcx_secret": coindcx_secret,
             "delta_api": delta_api, "delta_secret": delta_secret
         }
-        try: supabase.table("user_credentials").upsert(data).execute()
-        except: pass
+        try: 
+            supabase.table("user_credentials").upsert(data).execute()
+        except: 
+            pass
 
 def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit_price, pnl, result):
     if HAS_DB and user_id and user_id != "mock_user":
@@ -3474,5 +3476,6 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
 
 
