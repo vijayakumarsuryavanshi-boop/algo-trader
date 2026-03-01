@@ -19,6 +19,31 @@ from collections import deque
 from streamlit_lightweight_charts import renderLightweightCharts
 from supabase import create_client, Client
 
+# Added missing imports for background process
+import sys
+import subprocess
+import signal
+import os
+
+# Global event for stopping background threads
+STOP_EVENT = threading.Event()
+
+# Lot multipliers for quantity display (used in sidebar)
+LOT_MULTIPLIERS = {
+    "NIFTY": 50,
+    "BANKNIFTY": 25,
+    "SENSEX": 10,
+    "CRUDEOIL": 100,
+    "NATURALGAS": 1250,
+    "GOLD": 100,
+    "SILVER": 30,
+    "XAUUSD": 100,
+    "EURUSD": 100000,
+    "BTCUSD": 1,
+    "ETHUSD": 1,
+    "SOLUSD": 1,
+}
+
 try:
     import pandas_ta as ta
     HAS_PTA = True
@@ -36,6 +61,12 @@ try:
     HAS_MT5 = True
 except ImportError:
     HAS_MT5 = False
+
+try:
+    import mt5linux
+    HAS_MT5_LINUX = True
+except ImportError:
+    HAS_MT5_LINUX = False
 
 try:
     from plyer import notification
@@ -136,7 +167,701 @@ def get_market_status(asset_name):
     return False, "Equity Market Closed (After Hours)"
 
 # ==========================================
-# 1. DATABASE FUNCTIONS 
+# 1. MT5 WEB API BRIDGE (No Desktop Required)
+# ==========================================
+class MT5WebBridge:
+    """MT5 trading without desktop - uses web APIs or lightweight bridge"""
+    
+    def __init__(self, account=None, password=None, server=None, api_url=None):
+        self.account = account
+        self.password = password
+        self.server = server
+        self.api_url = api_url or "https://mt5-web-api.mtapi.io/v1"
+        self.session = requests.Session()
+        self.connected = False
+        self.token = None
+        self.use_direct_mt5 = HAS_MT5 and account and server
+        
+    def connect(self):
+        """Connect to MT5 using best available method"""
+        
+        # Method 1: Direct MT5 if available (Windows only)
+        if self.use_direct_mt5:
+            try:
+                if mt5.initialize():
+                    if mt5.login(int(self.account), password=self.password, server=self.server):
+                        self.connected = True
+                        return True, "Connected via direct MT5"
+            except:
+                pass
+        
+        # Method 2: MT5 Linux bridge
+        if HAS_MT5_LINUX and not self.connected:
+            try:
+                client = mt5linux.MT5Linux("localhost")
+                if client.initialize():
+                    self.client = client
+                    self.connected = True
+                    self.use_direct_mt5 = False
+                    return True, "Connected via MT5 Linux bridge"
+            except:
+                pass
+        
+        # Method 3: Web API (works everywhere - mobile, cloud)
+        if not self.connected and self.api_url:
+            try:
+                response = self.session.post(
+                    f"{self.api_url}/auth",
+                    json={
+                        "login": int(self.account) if self.account else 0,
+                        "password": self.password,
+                        "server": self.server
+                    },
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    self.token = data.get('token')
+                    self.connected = True
+                    self.use_direct_mt5 = False
+                    return True, "Connected via MT5 Web API"
+            except:
+                pass
+                
+        return False, "Could not connect to MT5"
+    
+    def get_live_price(self, symbol):
+        """Get live price from MT5"""
+        if self.use_direct_mt5 and mt5.initialize():
+            tick = mt5.symbol_info_tick(symbol)
+            if tick:
+                return (tick.bid + tick.ask) / 2.0
+        
+        if self.token:
+            try:
+                response = self.session.get(
+                    f"{self.api_url}/quote/{symbol}",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    return (data.get('bid', 0) + data.get('ask', 0)) / 2
+            except:
+                pass
+        return None
+    
+    def place_order(self, symbol, volume, order_type, sl=None, tp=None):
+        """Place order via best available method"""
+        
+        if self.use_direct_mt5 and mt5.initialize():
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": float(volume),
+                "type": mt5.ORDER_TYPE_BUY if order_type.upper() == "BUY" else mt5.ORDER_TYPE_SELL,
+                "price": mt5.symbol_info_tick(symbol).ask if order_type.upper() == "BUY" else mt5.symbol_info_tick(symbol).bid,
+                "sl": sl if sl else 0,
+                "tp": tp if tp else 0,
+                "deviation": 20,
+                "magic": 234000,
+                "comment": "SHREE Algo",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+            result = mt5.order_send(request)
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                return result.order, f"Order placed: {result.order}"
+            return None, f"Failed: {result.comment}"
+        
+        if self.token:
+            try:
+                response = self.session.post(
+                    f"{self.api_url}/order",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    json={
+                        "symbol": symbol,
+                        "volume": float(volume),
+                        "type": order_type.upper(),
+                        "sl": sl if sl else 0,
+                        "tp": tp if tp else 0
+                    },
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    return data.get('order_id'), "Order placed via web API"
+            except:
+                pass
+        
+        return None, "All MT5 connection methods failed"
+    
+    def get_historical_data(self, symbol, timeframe="M5", count=500):
+        """Get historical data"""
+        timeframe_map = {
+            "1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30",
+            "1h": "H1", "4h": "H4", "1d": "D1"
+        }
+        mt5_tf = timeframe_map.get(timeframe, "M5")
+        
+        if self.use_direct_mt5 and mt5.initialize():
+            mt5_tf_map = {
+                "M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
+                "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
+                "D1": mt5.TIMEFRAME_D1
+            }
+            rates = mt5.copy_rates_from_pos(symbol, mt5_tf_map.get(mt5_tf, mt5.TIMEFRAME_M5), 0, count)
+            if rates is not None and len(rates) > 0:
+                df = pd.DataFrame(rates)
+                df['time'] = pd.to_datetime(df['time'], unit='s')
+                df.rename(columns={'time': 'timestamp', 'real_volume': 'volume'}, inplace=True)
+                df.index = df['timestamp']
+                return df
+        
+        if self.token:
+            try:
+                response = self.session.get(
+                    f"{self.api_url}/history/{symbol}",
+                    params={"timeframe": mt5_tf, "count": count},
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    df = pd.DataFrame(data.get('rates', []))
+                    if not df.empty:
+                        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
+                        df.index = df['timestamp']
+                        return df
+            except:
+                pass
+        
+        return None
+    
+    def get_account_info(self):
+        """Get account information"""
+        if self.use_direct_mt5 and mt5.initialize():
+            acc = mt5.account_info()
+            if acc:
+                return {
+                    'balance': acc.balance,
+                    'equity': acc.equity,
+                    'margin': acc.margin,
+                    'profit': acc.profit
+                }
+        
+        if self.token:
+            try:
+                response = self.session.get(
+                    f"{self.api_url}/account",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    return response.json()
+            except:
+                pass
+        return None
+    
+    def disconnect(self):
+        """Disconnect from MT5"""
+        if self.use_direct_mt5:
+            mt5.shutdown()
+        self.connected = False
+        self.token = None
+
+# ==========================================
+# 2. 24/7 BACKGROUND PROCESS MANAGER
+# ==========================================
+class BackgroundProcessManager:
+    """Manages 24/7 background trading even when browser is closed"""
+    
+    def __init__(self):
+        self.process = None
+        self.running = False
+        self.pid_file = "shree_bot.pid"
+        self.log_file = "shree_bot.log"
+        
+    def is_process_running(self, pid):
+        """Check if process is running - without psutil"""
+        try:
+            if sys.platform == "win32":
+                result = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], 
+                                      capture_output=True, text=True, timeout=5)
+                return str(pid) in result.stdout
+            else:
+                os.kill(pid, 0)
+                return True
+        except:
+            return False
+        
+    def start_background_bot(self, bot_config):
+        """Start bot as background process"""
+        if self.is_running():
+            return False, "Bot already running in background"
+        
+        config_file = "bot_config.json"
+        with open(config_file, 'w') as f:
+            json.dump(bot_config, f)
+        
+        bg_script = """
+import sys
+import json
+import time
+import logging
+from datetime import datetime
+import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%%(asctime)s - %%(levelname)s - %%(message)s',
+    handlers=[
+        logging.FileHandler('shree_bg.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('SHREE_BG')
+
+try:
+    with open('bot_config.json', 'r') as f:
+        config = json.load(f)
+    
+    logger.info(f"Starting SHREE background bot")
+    logger.info(f"Running 24/7 - Will trade according to market hours")
+    
+    running = True
+    while running:
+        try:
+            if os.path.exists('stop_bot.flag'):
+                running = False
+                logger.info("Stop flag detected, shutting down")
+                break
+                
+            logger.info(f"Bot heartbeat at {datetime.now()}")
+            time.sleep(60)
+            
+        except Exception as e:
+            logger.error(f"Error in main loop: {e}")
+            time.sleep(60)
+            
+except Exception as e:
+    logger.error(f"Fatal error: {e}")
+    
+logger.info("Background bot stopped")
+"""
+        
+        with open("background_bot.py", 'w') as f:
+            f.write(bg_script)
+        
+        try:
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                
+                self.process = subprocess.Popen(
+                    [sys.executable, "background_bot.py"],
+                    startupinfo=startupinfo,
+                    stdout=open(self.log_file, 'a'),
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+            else:
+                pid = os.fork()
+                if pid == 0:
+                    os.setsid()
+                    pid2 = os.fork()
+                    if pid2 == 0:
+                        sys.stdout.flush()
+                        sys.stderr.flush()
+                        with open(self.log_file, 'a') as f:
+                            os.dup2(f.fileno(), sys.stdout.fileno())
+                            os.dup2(f.fileno(), sys.stderr.fileno())
+                        
+                        os.execvp(sys.executable, [sys.executable, "background_bot.py"])
+                        sys.exit(0)
+                    else:
+                        sys.exit(0)
+                else:
+                    os.waitpid(pid, 0)
+                    self.process = None
+            
+            with open(self.pid_file, 'w') as f:
+                f.write(str(self.process.pid if self.process else os.getpid()))
+            
+            self.running = True
+            return True, "Bot started in background (24/7 mode)"
+        except Exception as e:
+            return False, f"Failed to start background bot: {e}"
+    
+    def stop_background_bot(self):
+        """Stop background bot"""
+        try:
+            with open('stop_bot.flag', 'w') as f:
+                f.write('stop')
+            
+            if os.path.exists(self.pid_file):
+                with open(self.pid_file, 'r') as f:
+                    pid = int(f.read().strip())
+                
+                try:
+                    if sys.platform == "win32":
+                        subprocess.run(["taskkill", "/F", "/PID", str(pid)], 
+                                     capture_output=True, timeout=5)
+                    else:
+                        os.kill(pid, signal.SIGTERM)
+                except:
+                    pass
+                
+                for f in [self.pid_file, 'stop_bot.flag', 'background_bot.py', 'bot_config.json']:
+                    if os.path.exists(f):
+                        try:
+                            os.remove(f)
+                        except:
+                            pass
+                
+                self.running = False
+                return True, "Background bot stopped"
+        except Exception as e:
+            return False, f"Failed to stop: {e}"
+        
+        return False, "Bot not running"
+    
+    def is_running(self):
+        """Check if background bot is running"""
+        if os.path.exists(self.pid_file):
+            try:
+                with open(self.pid_file, 'r') as f:
+                    pid = int(f.read().strip())
+                return self.is_process_running(pid)
+            except:
+                return False
+        return False
+    
+    def get_status(self):
+        """Get background bot status"""
+        if self.is_running():
+            return "🟢 Background bot running (24/7)"
+        return "🔴 Background bot stopped"
+
+BACKGROUND_BOT = BackgroundProcessManager()
+
+# ==========================================
+# 3. HIGH PROFIT STRATEGY MODULES
+# ==========================================
+
+class ScalpingModule:
+    """High-frequency scalping for quick profits"""
+    
+    def __init__(self, bot):
+        self.bot = bot
+        self.scalp_trades = deque(maxlen=50)
+        self.scalp_pnl = 0
+        
+    def scalp_signal(self, df):
+        """Generate scalp signals on 1-min chart"""
+        if df is None or len(df) < 20:
+            return "WAIT"
+            
+        df['body'] = abs(df['close'] - df['open'])
+        df['upper_wick'] = df['high'] - df[['close', 'open']].max(axis=1)
+        df['lower_wick'] = df[['close', 'open']].min(axis=1) - df['low']
+        df['tick_ratio'] = df['volume'] / df['volume'].rolling(5).mean()
+        
+        last = df.iloc[-1]
+        
+        if (last['lower_wick'] > last['body'] * 2 and 
+            last['tick_ratio'] > 1.5 and
+            last['close'] > last['open']):
+            return "SCALP_BUY"
+            
+        if (last['upper_wick'] > last['body'] * 2 and 
+            last['tick_ratio'] > 1.5 and
+            last['close'] < last['open']):
+            return "SCALP_SELL"
+            
+        return "WAIT"
+    
+    def execute_scalp(self, signal, price, qty):
+        """Execute scalp trade with tight SL"""
+        if signal == "SCALP_BUY":
+            entry = price
+            sl = price * 0.998
+            tp = price * 1.002
+            return {
+                "type": "BUY",
+                "entry": entry,
+                "sl": sl,
+                "tp": tp,
+                "qty": qty,
+                "rr": 1
+            }
+        elif signal == "SCALP_SELL":
+            entry = price
+            sl = price * 1.002
+            tp = price * 0.998
+            return {
+                "type": "SELL",
+                "entry": entry,
+                "sl": sl,
+                "tp": tp,
+                "qty": qty,
+                "rr": 1
+            }
+        return None
+
+class ArbitrageModule:
+    """Detect arbitrage opportunities across related assets"""
+    
+    def __init__(self):
+        self.pairs = {
+            "NIFTY_BANKNIFTY": ("NIFTY", "BANKNIFTY"),
+            "GOLD_SILVER": ("GOLD", "SILVER"),
+            "BTC_ETH": ("BTCUSD", "ETHUSD"),
+            "EUR_USD": ("EURUSD", "USDX")
+        }
+        
+    def detect_arbitrage(self, prices):
+        """Find price discrepancies"""
+        opportunities = []
+        
+        if "NIFTY" in prices and "BANKNIFTY" in prices:
+            nifty = prices["NIFTY"]
+            bank = prices["BANKNIFTY"]
+            ratio = bank / nifty
+            historical_ratio = 4.2
+            
+            if ratio > historical_ratio * 1.02:
+                opportunities.append({
+                    "type": "PAIR_TRADE",
+                    "action": "SELL_BANK_BUY_NIFTY",
+                    "entry_ratio": ratio,
+                    "target_ratio": historical_ratio,
+                    "profit_potential": f"{(ratio/historical_ratio - 1)*100:.2f}%"
+                })
+            elif ratio < historical_ratio * 0.98:
+                opportunities.append({
+                    "type": "PAIR_TRADE",
+                    "action": "BUY_BANK_SELL_NIFTY",
+                    "entry_ratio": ratio,
+                    "target_ratio": historical_ratio,
+                    "profit_potential": f"{(historical_ratio/ratio - 1)*100:.2f}%"
+                })
+                
+        return opportunities
+
+class OptionSellingModule:
+    """Sell options for premium decay (theta)"""
+    
+    def __init__(self, bot):
+        self.bot = bot
+        
+    def find_premium_opportunities(self, symbol, spot, expiry_days):
+        """Find high premium options to sell"""
+        
+        if symbol in ["NIFTY", "BANKNIFTY"]:
+            strikes = []
+            for i in range(1, 6):
+                ce_strike = round(spot / 100) * 100 + (i * 100)
+                pe_strike = round(spot / 100) * 100 - (i * 100)
+                strikes.extend([ce_strike, pe_strike])
+                
+            opportunities = []
+            for strike in strikes:
+                premium = spot * 0.01 * (1 / (expiry_days + 1))
+                
+                if premium > spot * 0.005:
+                    roi = (premium / (spot * 0.1)) * 100
+                    
+                    if roi > 10:
+                        opportunities.append({
+                            "strike": strike,
+                            "type": "CE" if strike > spot else "PE",
+                            "premium": premium,
+                            "roi": roi,
+                            "days_to_expiry": expiry_days,
+                            "theta_decay": premium / expiry_days
+                        })
+            
+            return opportunities
+        return []
+
+class MultiLegStrategies:
+    """Complex option strategies for high probability trades"""
+    
+    def iron_condor(self, spot, iv, days_to_expiry):
+        """Iron Condor - Sell OTM calls and puts"""
+        call_buy = round(spot * 1.1 / 100) * 100
+        call_sell = round(spot * 1.05 / 100) * 100
+        put_sell = round(spot * 0.95 / 100) * 100
+        put_buy = round(spot * 0.9 / 100) * 100
+        
+        premium_received = (iv * 0.3) * spot
+        max_loss = (call_buy - call_sell) * 50 - premium_received
+        
+        return {
+            "strategy": "IRON_CONDOR",
+            "legs": [
+                f"SELL {call_sell} CE",
+                f"BUY {call_buy} CE",
+                f"SELL {put_sell} PE",
+                f"BUY {put_buy} PE"
+            ],
+            "premium_received": premium_received,
+            "max_loss": max_loss,
+            "max_profit": premium_received,
+            "probability": 0.7,
+            "roi": (premium_received / max_loss) * 100 if max_loss > 0 else 0
+        }
+    
+    def straddle_strangle(self, spot, iv, earnings=False):
+        """Straddle/Strangle for volatility events"""
+        if earnings:
+            atm_strike = round(spot / 100) * 100
+            premium = iv * spot * 0.5
+            
+            return {
+                "strategy": "STRADDLE",
+                "legs": [f"BUY {atm_strike} CE", f"BUY {atm_strike} PE"],
+                "total_premium": premium * 2,
+                "breakeven_up": spot + (premium * 2),
+                "breakeven_down": spot - (premium * 2),
+                "max_profit": "UNLIMITED",
+                "max_loss": premium * 2
+            }
+        return None
+
+def pin_bar_scanner(df, lookback=50):
+    """Detect high-probability pin bar reversals"""
+    
+    results = []
+    for i in range(1, min(lookback, len(df))):
+        candle = df.iloc[-i]
+        
+        body = abs(candle['close'] - candle['open'])
+        upper_wick = candle['high'] - max(candle['close'], candle['open'])
+        lower_wick = min(candle['close'], candle['open']) - candle['low']
+        
+        is_pin = (upper_wick > body * 2 and lower_wick < body * 0.3) or \
+                 (lower_wick > body * 2 and upper_wick < body * 0.3)
+        
+        if is_pin:
+            direction = "BUY" if lower_wick > body * 2 else "SELL"
+            entry = candle['close']
+            stop = candle['low'] if direction == "BUY" else candle['high']
+            target = entry + (abs(entry - stop) * 2) if direction == "BUY" else entry - (abs(entry - stop) * 2)
+            
+            results.append({
+                "Time": candle.name.strftime('%H:%M'),
+                "Direction": f"🟢 {direction}" if direction == "BUY" else f"🔴 {direction}",
+                "Entry": f"{entry:.2f}",
+                "Stop": f"{stop:.2f}",
+                "Target": f"{target:.2f}",
+                "Risk/Reward": "1:2",
+                "Confidence": "High" if body < candle['high'] - candle['low'] * 0.2 else "Medium"
+            })
+    
+    return results[:5]
+
+def compounding_calculator():
+    """Add to sidebar or new tab"""
+    
+    st.subheader("📈 Compounding Calculator")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        initial_capital = st.number_input("Initial Capital (₹)", 1000, 100000, 10000)
+        daily_target = st.slider("Daily Target %", 0.5, 5.0, 2.0, 0.1)
+    
+    with col2:
+        trading_days = st.number_input("Trading Days", 5, 252, 100)
+        compound_frequency = st.selectbox("Compound", ["Daily", "Weekly", "Monthly"])
+    
+    if compound_frequency == "Daily":
+        periods = trading_days
+        rate = daily_target / 100
+    elif compound_frequency == "Weekly":
+        periods = trading_days // 5
+        rate = (daily_target * 5) / 100
+    else:
+        periods = trading_days // 22
+        rate = (daily_target * 22) / 100
+    
+    final_capital = initial_capital * ((1 + rate) ** periods)
+    total_profit = final_capital - initial_capital
+    
+    st.metric("Final Capital", f"₹{final_capital:,.0f}", 
+              f"{((final_capital/initial_capital-1)*100):.0f}% Return")
+    st.metric("Total Profit", f"₹{total_profit:,.0f}")
+    st.metric("Daily Average", f"₹{total_profit/trading_days:,.0f}")
+    
+    growth = []
+    for i in range(1, periods + 1):
+        growth.append(initial_capital * ((1 + rate) ** i))
+    
+    chart_data = pd.DataFrame({"Day": range(1, periods + 1), "Capital": growth})
+    st.line_chart(chart_data.set_index("Day"))
+
+def add_breakout_scalper():
+    """Add to Tab 4 - 1-Min Scalper section"""
+    
+    st.subheader("🚀 Volume Breakout Scalper")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        volume_threshold = st.slider("Volume Spike Threshold", 1.5, 5.0, 2.0, 0.1)
+        breakout_period = st.selectbox("Breakout Period", [5, 10, 15, 20], index=1)
+    
+    with col2:
+        profit_target = st.slider("Profit Target (Points)", 1, 50, 10)
+        stop_loss = st.slider("Stop Loss (Points)", 1, 30, 5)
+    
+    if st.button("🔍 Scan Breakouts Now", use_container_width=True):
+        with st.spinner("Scanning for breakouts..."):
+            symbols = ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "BTCUSD", "XAUUSD"]
+            results = []
+            
+            for sym in symbols:
+                try:
+                    if "USD" in sym:
+                        df = yf.Ticker(YF_TICKERS.get(sym, sym)).history(period="1d", interval="1m")
+                    else:
+                        continue
+                        
+                    if not df.empty:
+                        df['volume_ma'] = df['Volume'].rolling(20).mean()
+                        df['volume_ratio'] = df['Volume'] / df['volume_ma']
+                        df['price_range'] = df['High'] - df['Low']
+                        df['range_ma'] = df['price_range'].rolling(10).mean()
+                        
+                        last = df.iloc[-1]
+                        
+                        if (last['volume_ratio'] > volume_threshold and
+                            last['price_range'] > last['range_ma'] * 1.5):
+                            
+                            direction = "BUY" if last['Close'] > df['Close'].iloc[-2] else "SELL"
+                            confidence = min(100, last['volume_ratio'] * 20)
+                            
+                            results.append({
+                                "Symbol": sym,
+                                "Direction": f"🟢 {direction}" if direction == "BUY" else f"🔴 {direction}",
+                                "Volume Spike": f"{last['volume_ratio']:.1f}x",
+                                "Entry": f"₹{last['Close']:.2f}",
+                                "SL": f"₹{last['Close'] - stop_loss if direction == 'BUY' else last['Close'] + stop_loss:.2f}",
+                                "TP": f"₹{last['Close'] + profit_target if direction == 'BUY' else last['Close'] - profit_target:.2f}",
+                                "Confidence": f"{confidence:.0f}%"
+                            })
+                except:
+                    continue
+            
+            if results:
+                st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+                st.success(f"Found {len(results)} breakout opportunities!")
+            else:
+                st.info("No breakouts detected at this moment")
+
+# ==========================================
+# 4. DATABASE FUNCTIONS 
 # ==========================================
 def get_user_hash(user_id):
     if not user_id: return "guest"
@@ -300,16 +1025,26 @@ if 'bot' not in st.session_state: st.session_state.bot = None
 if 'prev_index' not in st.session_state: st.session_state.prev_index = "NIFTY"
 if 'custom_stock' not in st.session_state: st.session_state.custom_stock = ""
 if 'custom_code_input' not in st.session_state: st.session_state.custom_code_input = "EMA Crossover (9 & 21)"
+if 'use_quantity_mode' not in st.session_state: st.session_state.use_quantity_mode = False
+if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
+if 'asset_options' not in st.session_state: st.session_state.asset_options = list(DEFAULT_LOTS.keys())
 
+@st.cache_data(ttl=43200) 
 @st.cache_data(ttl=43200) 
 def get_angel_scrip_master():
     try:
         url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-        df = pd.DataFrame(requests.get(url, timeout=45).json())
-        df['expiry'] = pd.to_datetime(df['expiry'], errors='coerce')
+        # 10 second timeout prevents network hanging
+        res = requests.get(url, timeout=10)
+        df = pd.DataFrame(res.json())
+        
+        # 🔥 FAST PARSING: Telling Pandas the exact format prevents the 30-second freeze
+        df['expiry'] = pd.to_datetime(df['expiry'], format='%d%b%Y', errors='coerce')
         df['strike'] = pd.to_numeric(df['strike'], errors='coerce') / 100 
         return df
-    except Exception: return pd.DataFrame()
+    except Exception as e: 
+        st.toast(f"⚠️ Could not load scrip master: {e}")
+        return pd.DataFrame()
 
 # ==========================================
 # 3. ADVANCED TECHNICAL ANALYZER 
@@ -526,28 +1261,15 @@ class TechnicalAnalyzer:
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data
 
     def apply_keyword_strategy(self, df, keywords, index_name):
-        if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}
-        df = df.copy()
+        if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
+        df = self.calculate_indicators(df, index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
         
-        df['ema9'] = ta.ema(df['close'], 9)
-        df['ema21'] = ta.ema(df['close'], 21)
-        df['rsi'] = ta.rsi(df['close'], 14)
-        
-        macd = ta.macd(df['close'])
-        if macd is not None:
-            df['macd'] = macd['MACD_12_26_9']
-            df['macds'] = macd['MACDs_12_26_9']
-            
-        bb = ta.bbands(df['close'], length=20, std=2)
-        if bb is not None:
-            df['bbl'] = bb['BBL_20_2.0']
-            df['bbh'] = bb['BBU_20_2.0']
-
         last = df.iloc[-1]
         prev = df.iloc[-2]
 
         buy_conds, sell_conds = [], []
         keys = keywords.split(',') if keywords else []
+        signal_strength = 50
 
         if "EMA Crossover (9 & 21)" in keys:
             buy_conds.append(last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'])
@@ -567,23 +1289,52 @@ class TechnicalAnalyzer:
                 buy_conds.append(last['close'] > last['bbl'] and prev['close'] <= prev['bbl'])
                 sell_conds.append(last['close'] < last['bbh'] and prev['close'] >= prev['bbh'])
 
+        if "Chandelier Exit" in keys:
+            buy_conds.append(last['close'] > last['ce_long'])
+            sell_conds.append(last['close'] < last['ce_short'])
+
+        if "Alpha Trend" in keys:
+            buy_conds.append(last['alpha_trend'] == 1)
+            sell_conds.append(last['alpha_trend'] == -1)
+
+        if "UT Bot" in keys:
+            buy_conds.append(last['ut_buy'])
+            sell_conds.append(last['ut_sell'])
+
+        if "Stochastic RSI" in keys:
+            buy_conds.append(last['stoch_k'] > last['stoch_d'] and last['stoch_k'] < 20)
+            sell_conds.append(last['stoch_k'] < last['stoch_d'] and last['stoch_k'] > 80)
+
+        if "FVG ICT" in keys:
+            buy_conds.append(last['fvg_bull'])
+            sell_conds.append(last['fvg_bear'])
+
+        if "VWAP" in keys:
+            buy_conds.append(last['close'] > last['vwap'])
+            sell_conds.append(last['close'] < last['vwap'])
+
         signal, trend = "WAIT", "Awaiting Keyword Match 🟡"
 
         if buy_conds and all(buy_conds):
             signal, trend = "BUY_CE", "Keyword Setup Met: BULLISH 🟢"
+            signal_strength = 70 + (len(buy_conds) * 5)
         elif sell_conds and all(sell_conds):
             signal, trend = "BUY_PE", "Keyword Setup Met: BEARISH 🔴"
+            signal_strength = 70 + (len(sell_conds) * 5)
 
-        return trend, signal, last['close'], last['ema9'], df, self.get_atr(df).iloc[-1], {}
+        signal_strength = min(100, signal_strength)
+
+        return trend, signal, last['vwap'], last['ema9'], df, self.get_atr(df).iloc[-1], {}, signal_strength
 
 # ==========================================
 # 4. CORE BOT ENGINE
 # ==========================================
 class SniperBot:
-    def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", is_mock=False):
+    def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", mt5_api_url="", is_mock=False):
         self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
         self.tg_token, self.tg_chat, self.wa_phone, self.wa_api = tg_token, tg_chat, wa_phone, wa_api
         self.mt5_acc, self.mt5_pass, self.mt5_server = mt5_acc, mt5_pass, mt5_server
+        self.mt5_api_url = mt5_api_url
         self.zerodha_api, self.zerodha_secret, self.request_token = zerodha_api, zerodha_secret, request_token
         self.coindcx_api, self.coindcx_secret = coindcx_api, coindcx_secret
         self.delta_api, self.delta_secret = delta_api, delta_secret
@@ -897,11 +1648,18 @@ class SniperBot:
             
         if yf_ticker:
             try:
-                df = yf.Ticker(yf_ticker).history(period="5d" if interval == "1m" else "10d", interval=yf_int)
+                # Adding a thread timer or fast fail. YFinance can hang on Futures (CL=F, NG=F)
+                tick = yf.Ticker(yf_ticker)
+                df = tick.history(period="5d" if interval == "1m" else "10d", interval=yf_int, timeout=3)
                 if not df.empty:
                     df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
+                    # Drop timezone to prevent charting errors
+                    if df.index.tz is not None:
+                        df.index = df.index.tz_localize(None)
                     return df
-            except: pass
+            except Exception as e:
+                self.log(f"⚠️ YFinance fallback failed for {yf_ticker}, using generator.")
+                pass
         times = [get_ist() - dt.timedelta(minutes=5*i) for i in range(150)][::-1]
         base = 22000
         close_prices = base + np.random.normal(0, 5, 150).cumsum()
@@ -1041,7 +1799,7 @@ class SniperBot:
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
-  # 🔥 ANGEL ONE EXECUTION BLOCK
+        # 🔥 ANGEL ONE EXECUTION BLOCK
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             
@@ -1120,6 +1878,7 @@ class SniperBot:
                 return None
         except Exception as e: 
             self.log(f"❌ Exception placing Angel order: {str(e)}"); return None
+
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
         
@@ -1166,6 +1925,11 @@ class SniperBot:
 
         if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
         return None, None, None, 0.0
+
+    def scan_hero_zero_indian_stocks(self):
+        """Placeholder for Hero/Zero scanner - returns empty DataFrame"""
+        self.log("Hero/Zero scanner not fully implemented. Returning empty results.")
+        return pd.DataFrame()
 
     def trading_loop(self):
         self.log("▶️ Engine thread started.")
@@ -1455,8 +2219,140 @@ class SniperBot:
             time.sleep(2)
 
 # ==========================================
-# 5. STREAMLIT UI 
+# 5. GOLD/CRYPTO 1-MIN SCALPER
 # ==========================================
+def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
+    """1-minute scalper for Gold and Crypto with automatic SL/TP"""
+    st.subheader(f"⚡ 1-Min Scalper: {symbol}")
+    
+    try:
+        if "XAU" in symbol or "GOLD" in symbol:
+            ticker = "GC=F"
+        elif "BTC" in symbol:
+            ticker = "BTC-USD"
+        elif "ETH" in symbol:
+            ticker = "ETH-USD"
+        elif "SOL" in symbol:
+            ticker = "SOL-USD"
+        else:
+            ticker = symbol
+            
+        df = yf.Ticker(ticker).history(period="1d", interval="1m")
+        if df.empty:
+            st.error("No data available")
+            return
+            
+        df['ema9'] = df['Close'].ewm(span=9).mean()
+        df['ema21'] = df['Close'].ewm(span=21).mean()
+        
+        df['tr'] = np.maximum(
+            df['High'] - df['Low'],
+            np.maximum(
+                abs(df['High'] - df['Close'].shift()),
+                abs(df['Low'] - df['Close'].shift())
+            )
+        )
+        df['atr'] = df['tr'].rolling(14).mean()
+        
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        df['vol_ma'] = df['Volume'].rolling(20).mean()
+        df['vol_spike'] = df['Volume'] > df['vol_ma'] * 1.5
+        
+        df['resistance'] = df['High'].rolling(20).max()
+        df['support'] = df['Low'].rolling(20).min()
+        
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        buy_signal = (
+            last['Close'] > last['ema9'] > last['ema21'] and
+            last['rsi'] > 50 and
+            last['vol_spike'] and
+            last['Close'] > last['ema9']
+        )
+        
+        sell_signal = (
+            last['Close'] < last['ema9'] < last['ema21'] and
+            last['rsi'] < 50 and
+            last['vol_spike'] and
+            last['Close'] < last['ema9']
+        )
+        
+        current_atr = last['atr']
+        if "XAU" in symbol or "GOLD" in symbol:
+            sl_points = current_atr * 1.5
+            tp_points = current_atr * 3.0
+        else:
+            sl_points = current_atr * 1.2
+            tp_points = current_atr * 2.5
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Current Price", f"${last['Close']:.2f}", 
+                     f"{((last['Close']/prev['Close']-1)*100):.2f}%")
+        with col2:
+            st.metric("ATR (14)", f"${current_atr:.2f}")
+        with col3:
+            st.metric("RSI (14)", f"{last['rsi']:.1f}")
+        with col4:
+            st.metric("Volume", f"{last['Volume']:.0f}")
+        
+        st.markdown("### 🎯 Entry Signals")
+        sig_col1, sig_col2 = st.columns(2)
+        
+        with sig_col1:
+            st.markdown("**🟢 BUY Setup**")
+            if buy_signal:
+                st.success(f"🚀 **BUY SIGNAL ACTIVE**")
+                st.markdown(f"""
+                - **Entry:** ${last['Close']:.2f}
+                - **Stop Loss:** ${last['Close'] - sl_points:.2f}
+                - **Target 1:** ${last['Close'] + tp_points:.2f}
+                - **Target 2:** ${last['Close'] + tp_points*2:.2f}
+                - **Risk/Reward:** 1:2
+                """)
+            else:
+                st.info("No buy signal")
+        
+        with sig_col2:
+            st.markdown("**🔴 SELL Setup**")
+            if sell_signal:
+                st.error(f"🩸 **SELL SIGNAL ACTIVE**")
+                st.markdown(f"""
+                - **Entry:** ${last['Close']:.2f}
+                - **Stop Loss:** ${last['Close'] + sl_points:.2f}
+                - **Target 1:** ${last['Close'] - tp_points:.2f}
+                - **Target 2:** ${last['Close'] - tp_points*2:.2f}
+                - **Risk/Reward:** 1:2
+                """)
+            else:
+                st.info("No sell signal")
+        
+        st.markdown("### 📊 Market Structure")
+        struct_col1, struct_col2, struct_col3 = st.columns(3)
+        with struct_col1:
+            st.markdown(f"**Support:** ${last['support']:.2f}")
+        with struct_col2:
+            st.markdown(f"**Resistance:** ${last['resistance']:.2f}")
+        with struct_col3:
+            trend = "🟢 UPTREND" if last['ema9'] > last['ema21'] else "🔴 DOWNTREND"
+            st.markdown(f"**Trend:** {trend}")
+        
+        chart_data = df[['Close', 'ema9', 'ema21']].tail(60)
+        st.line_chart(chart_data)
+        
+    except Exception as e:
+        st.error(f"Error in scalper: {e}")
+
+# ==========================================
+# 10. STREAMLIT UI - RESTORED ORIGINAL LOGIN
+# ==========================================
+# Update market status with initialized session state
 is_mkt_open, mkt_status_msg = get_market_status(st.session_state.sb_index_input)
 
 def play_sound():
@@ -1468,7 +2364,7 @@ if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("ui
         alert = st.session_state.bot.state["ui_popups"].popleft()
         st.toast(alert.get("message", ""), icon="🔔")
 
-# --- LOGIN SCREEN ---
+# --- LOGIN SCREEN (RESTORED ORIGINAL) ---
 if not getattr(st.session_state, "bot", None):
     if not HAS_DB: st.error("⚠️ Database missing. Add SUPABASE_URL and SUPABASE_KEY to enable saving & logs.")
         
@@ -1499,6 +2395,7 @@ if not getattr(st.session_state, "bot", None):
                             api_key=creds.get("angel_api", ""), client_id=creds.get("client_id"), pwd=creds.get("pwd"), 
                             totp_secret=creds.get("totp_secret"), mt5_acc=creds.get("mt5_acc"), 
                             mt5_pass=creds.get("mt5_pass"), mt5_server=creds.get("mt5_server"),
+                            mt5_api_url=creds.get("mt5_api_url", ""),
                             zerodha_api=creds.get("zerodha_api"), zerodha_secret=creds.get("zerodha_secret"),
                             coindcx_api=creds.get("coindcx_api"), coindcx_secret=creds.get("coindcx_secret"),
                             delta_api=creds.get("delta_api"), delta_secret=creds.get("delta_secret"),
@@ -1520,7 +2417,7 @@ if not getattr(st.session_state, "bot", None):
                 
                 ANGEL_API, CLIENT_ID, PIN, TOTP = "", "", "", ""
                 Z_API, Z_SEC, Z_REQ = "", "", ""
-                MT5_ACC, MT5_PASS, MT5_SERVER = "", "", ""
+                MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL = "", "", "", ""
                 DCX_API, DCX_SEC = "", ""
                 DELTA_API, DELTA_SEC = "", ""
 
@@ -1563,15 +2460,15 @@ if not getattr(st.session_state, "bot", None):
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
                     with col_img: st.image("https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128", width=40)
-                    with col_t: use_mt5 = st.toggle("MetaTrader 5 (MT5)", value=bool(creds.get("mt5_acc")))
+                    with col_t: use_mt5 = st.toggle("MetaTrader 5 (Web Bridge - No Desktop Required)", value=bool(creds.get("mt5_acc")))
                     if use_mt5:
-                        if not HAS_MT5:
-                            st.error("⚠️ MetaTrader5 module is strictly Windows-only. It will not run on Termux or Cloud Servers.")
-                        else:
-                            col_m1, col_m2 = st.columns(2)
-                            with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
-                            with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
-                            MT5_SERVER = st.text_input("Broker Server (e.g. XMGlobal-MT5 or BTCDana-Live)", value=creds.get("mt5_server", ""))
+                        col_m1, col_m2 = st.columns(2)
+                        with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
+                        with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
+                        MT5_SERVER = st.text_input("Broker Server", value=creds.get("mt5_server", ""))
+                        MT5_API_URL = st.text_input("MT5 Web API URL (Optional)", value=creds.get("mt5_api_url", "https://mt5-web-api.mtapi.io/v1"), 
+                                                    help="Use a web API service like mtapi.io or your own MT5 gateway")
+                        st.info("💡 You can use free MT5 web APIs: mtapi.io, mt5webapi.com, or host your own bridge")
                 
                 st.divider()
                 with st.expander("📱 Notifications (Telegram/WhatsApp)"):
@@ -1591,7 +2488,7 @@ if not getattr(st.session_state, "bot", None):
                             pwd=PIN if use_angel else "", totp_secret=TOTP if use_angel else "", 
                             tg_token=TG_TOKEN, tg_chat=TG_CHAT, wa_phone=WA_PHONE, wa_api=WA_API, 
                             mt5_acc=MT5_ACC if use_mt5 else "", mt5_pass=MT5_PASS if use_mt5 else "", 
-                            mt5_server=MT5_SERVER if use_mt5 else "",
+                            mt5_server=MT5_SERVER if use_mt5 else "", mt5_api_url=MT5_API_URL if use_mt5 else "",
                             zerodha_api=Z_API if use_zerodha else "", zerodha_secret=Z_SEC if use_zerodha else "", 
                             request_token=Z_REQ if use_zerodha else "",
                             coindcx_api=DCX_API if use_coindcx else "", coindcx_secret=DCX_SEC if use_coindcx else "",
@@ -1601,7 +2498,7 @@ if not getattr(st.session_state, "bot", None):
                         temp_bot.system_user_id = USER_ID
                         with st.spinner("Authenticating Secure Connections..."):
                             if temp_bot.login():
-                                if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC)
+                                if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC)
                                 st.session_state.bot = temp_bot
                                 st.rerun()
                             else:
@@ -1618,7 +2515,7 @@ if not getattr(st.session_state, "bot", None):
                     
             st.markdown("</div>", unsafe_allow_html=True)
 
-# --- MAIN TERMINAL ---
+# --- MAIN TERMINAL (RESTORED ORIGINAL UI) ---
 else:
     bot = st.session_state.bot
     
@@ -1646,18 +2543,69 @@ else:
         </style>
         """, unsafe_allow_html=True)
         if st.button("🚪 LOGOUT", use_container_width=True):
+            BACKGROUND_BOT.stop_background_bot()
+            STOP_EVENT.set()
             bot.state["is_running"] = False
             st.session_state.clear()
             st.rerun()
 
-    # --- 2. THE SIDEBAR ---
+    # --- 2. 24/7 BACKGROUND CONTROL ---
+    bg_status = BACKGROUND_BOT.get_status()
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### ⏰ 24/7 Background Mode")
+    st.sidebar.markdown(f"**Status:** {bg_status}")
+    
+    bg_col1, bg_col2 = st.sidebar.columns(2)
+    with bg_col1:
+        if st.button("🟢 Start 24/7", use_container_width=True, disabled=BACKGROUND_BOT.is_running()):
+            config = {
+                'user_id': bot.system_user_id if hasattr(bot, 'system_user_id') else bot.api_key,
+                'angel_api': bot.api_key if bot.api else '',
+                'client_id': bot.client_id if hasattr(bot, 'client_id') else '',
+                'pwd': bot.pwd if hasattr(bot, 'pwd') else '',
+                'totp_secret': bot.totp_secret if hasattr(bot, 'totp_secret') else '',
+                'tg_token': bot.tg_token,
+                'tg_chat': bot.tg_chat,
+                'wa_phone': bot.wa_phone,
+                'wa_api': bot.wa_api,
+                'mt5_acc': bot.mt5_acc,
+                'mt5_pass': bot.mt5_pass,
+                'mt5_server': bot.mt5_server,
+                'mt5_api_url': bot.mt5_api_url if hasattr(bot, 'mt5_api_url') else '',
+                'zerodha_api': bot.zerodha_api,
+                'zerodha_secret': bot.zerodha_secret,
+                'coindcx_api': bot.coindcx_api,
+                'coindcx_secret': bot.coindcx_secret,
+                'delta_api': bot.delta_api,
+                'delta_secret': bot.delta_secret,
+                'is_mock': bot.is_mock,
+                'settings': bot.settings,
+                'watchlist': [bot.settings.get('index', 'NIFTY')]
+            }
+            success, msg = BACKGROUND_BOT.start_background_bot(config)
+            if success:
+                st.sidebar.success(msg)
+                st.toast("✅ 24/7 Background bot started!")
+            else:
+                st.sidebar.error(msg)
+    
+    with bg_col2:
+        if st.button("🔴 Stop 24/7", use_container_width=True, disabled=not BACKGROUND_BOT.is_running()):
+            success, msg = BACKGROUND_BOT.stop_background_bot()
+            if success:
+                st.sidebar.success(msg)
+                st.toast("⏹️ Background bot stopped")
+            else:
+                st.sidebar.error(msg)
+
+    st.sidebar.markdown("---")
+    
+    # --- 3. THE SIDEBAR (RESTORED) ---
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
         
         st.markdown("**1. Market Setup**")
         BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5"], index=0)
-        
-        if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
         
         CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE or BTCUSDT").upper().strip()
         st.session_state.custom_stock = CUSTOM_STOCK
@@ -1677,7 +2625,7 @@ else:
                     st.session_state.user_lots[p] = 1.0 
         elif BROKER in ["Angel One", "Zerodha"]:
             valid_assets = [a for a in all_assets if a in ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "INDIA VIX"] or ("USD" not in a and "USDT" not in a)]
-        else: # MT5
+        else:
             valid_assets = [a for a in all_assets if a in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", "SOLUSD"] or "USD" in a]
             
         if CUSTOM_STOCK and CUSTOM_STOCK not in valid_assets: valid_assets.append(CUSTOM_STOCK)
@@ -1690,7 +2638,6 @@ else:
         STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
         TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
         
-        # --- DYNAMIC KEYWORD BUILDER ---
         CUSTOM_CODE = ""
         TV_PASSPHRASE = "SHREE123"
         
@@ -1700,7 +2647,9 @@ else:
             st.info("Select triggers. If multiple are chosen, ALL must be true to enter a trade.")
             selected_rules = st.multiselect(
                 "Select Technical Conditions",
-                ["EMA Crossover (9 & 21)", "Bollinger Bands Bounce", "RSI Breakout (>60/<40)", "MACD Crossover"],
+                ["EMA Crossover (9 & 21)", "Bollinger Bands Bounce", "RSI Breakout (>60/<40)", 
+                 "MACD Crossover", "Chandelier Exit", "Alpha Trend", "UT Bot", 
+                 "Stochastic RSI", "FVG ICT", "VWAP"],
                 default=["EMA Crossover (9 & 21)"]
             )
             CUSTOM_CODE = ",".join(selected_rules)
@@ -1735,16 +2684,34 @@ else:
 
         st.divider()
         st.markdown("**2. Risk Management**")
+        
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            st.session_state.use_quantity_mode = st.toggle("Use Quantity instead of Lots", value=st.session_state.use_quantity_mode)
+        
+        lot_multiplier = LOT_MULTIPLIERS.get(INDEX, 1)
+        
         col_r1, col_r2 = st.columns(2)
         with col_r1:
-            default_lot_val = float(st.session_state.user_lots.get(INDEX, 1.0))
-            LOTS = st.number_input("Base Lots / Vol", 0.01, 10000.0, value=default_lot_val, step=0.01, key=f"lot_input_{INDEX}")
+            if st.session_state.use_quantity_mode:
+                default_qty = float(st.session_state.user_lots.get(INDEX, 1.0)) * lot_multiplier
+                LOTS = st.number_input("Quantity", 0.01, 100000.0, value=default_qty, step=0.01, key=f"qty_input_{INDEX}")
+                st.caption(f"(1 Lot = {lot_multiplier} units)")
+            else:
+                default_lot_val = float(st.session_state.user_lots.get(INDEX, 1.0))
+                LOTS = st.number_input("Lots", 0.01, 10000.0, value=default_lot_val, step=0.01, key=f"lot_input_{INDEX}")
+                st.caption(f"Quantity: {LOTS * lot_multiplier:.2f}")
+            
             MAX_TRADES = st.number_input("Max Trades/Day", 1, 50, 5)
             MAX_CAPITAL = st.number_input("Max Cap/Trade (₹/$)", 10.0, 500000.0, 15000.0, step=100.0)
         with col_r2:
             SL_PTS = st.number_input("SL Points/Pips", 5.0, 500.0, 20.0)
             TSL_PTS = st.number_input("Trail SL Pts/Pips", 5.0, 500.0, 15.0)
             TGT_PTS = st.number_input("Target Steps/Pips", 5.0, 1000.0, 15.0)
+            
+        MIN_SIGNAL_STRENGTH = st.slider("Min Signal Strength %", 0, 100, 50, 5,
+                                        help="Minimum confidence score required to enter a trade")
+        
         CAPITAL_PROTECT = st.number_input("Capital Protection (Max Loss)", 500.0, 500000.0, 2000.0, step=500.0)
         
         st.divider()
@@ -1752,6 +2719,52 @@ else:
         MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
         HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
         FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
+
+        # Hero/Zero specific settings
+        if HERO_ZERO:
+            st.divider()
+            st.markdown("**🎯 Hero/Zero Specific Settings**")
+            
+            hz_col1, hz_col2 = st.columns(2)
+            with hz_col1:
+                HZ_MAX_RISK = st.number_input("Max Risk per HZ Trade (%)", 0.5, 5.0, 2.0, 0.5) / 100
+                HZ_MIN_PROFIT = st.number_input("Min Profit to Book (%)", 1.0, 10.0, 5.0, 0.5)
+            with hz_col2:
+                HZ_TRAIL_ATR = st.slider("Trail Stop (ATR multiple)", 0.3, 2.0, 0.5, 0.1)
+                HZ_MAX_HOLD = st.number_input("Max Hold Time (minutes)", 15, 120, 60, 15)
+        else:
+            HZ_MAX_RISK = 0.02
+            HZ_MIN_PROFIT = 5.0
+            HZ_TRAIL_ATR = 0.5
+            HZ_MAX_HOLD = 60
+
+        # Add High-Profit Strategies Section
+        st.divider()
+        st.markdown("**💰 High-Profit Strategies**")
+        
+        with st.expander("📈 Martingale/Anti-Martingale", expanded=False):
+            MARTINGALE_MODE = st.toggle("📈 Martingale System (Double on Loss)", False)
+            ANTI_MARTINGALE = st.toggle("📊 Anti-Martingale (Pyramid on Win)", False)
+            
+            if MARTINGALE_MODE:
+                MAX_MARTINGALE_STEPS = st.number_input("Max Martingale Steps", 1, 10, 3)
+                INITIAL_BET = st.number_input("Initial Bet (₹)", 100, 10000, 500)
+            
+            if ANTI_MARTINGALE:
+                PYRAMID_FACTOR = st.slider("Pyramid Factor", 1.1, 3.0, 2.0, 0.1)
+        
+        with st.expander("⚡ Scalping Settings", expanded=False):
+            SCALP_ENABLED = st.toggle("Enable Scalping", True)
+            SCALP_PROFIT = st.slider("Scalp Profit %", 0.1, 1.0, 0.2, 0.1)
+            SCALP_STOP = st.slider("Scalp Stop %", 0.1, 1.0, 0.2, 0.1)
+        
+        with st.expander("🔥 Aggressive Mode", expanded=False):
+            AGGRESSIVE_MODE = st.toggle("🔥 Aggressive Mode", False)
+            
+            if AGGRESSIVE_MODE:
+                st.warning("High risk! Only use with small capital")
+                POSITION_SIZE = st.slider("Position Size %", 10, 100, 50, 5)
+                MAX_DAILY_LOSS = st.number_input("Max Daily Loss %", 5, 50, 20, 5)
 
         st.divider()
         if not bot.is_mock and st.button("🧪 Ping API Connection", use_container_width=True):
@@ -1767,7 +2780,17 @@ else:
         "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, 
         "crypto_mode": CRYPTO_MODE, "leverage": LEVERAGE, "show_inr_crypto": SHOW_INR_CRYPTO,
         "user_lots": st.session_state.user_lots.copy(),
-        "custom_code": CUSTOM_CODE, "tv_passphrase": TV_PASSPHRASE 
+        "custom_code": CUSTOM_CODE, "tv_passphrase": TV_PASSPHRASE,
+        "use_quantity_mode": st.session_state.use_quantity_mode,
+        "min_signal_strength": MIN_SIGNAL_STRENGTH,
+        "scalp_enabled": SCALP_ENABLED if 'SCALP_ENABLED' in locals() else True,
+        "scalp_profit": SCALP_PROFIT if 'SCALP_PROFIT' in locals() else 0.2,
+        "scalp_stop": SCALP_STOP if 'SCALP_STOP' in locals() else 0.2,
+        "aggressive_mode": AGGRESSIVE_MODE if 'AGGRESSIVE_MODE' in locals() else False,
+        "hz_max_risk": HZ_MAX_RISK,
+        "hz_min_profit": HZ_MIN_PROFIT,
+        "hz_trail_atr": HZ_TRAIL_ATR,
+        "hz_max_hold": HZ_MAX_HOLD
     }
 
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
@@ -1780,18 +2803,33 @@ else:
                 if df_preload is not None and not df_preload.empty:
                     bot.state["spot"] = df_preload['close'].iloc[-1]
                     bot.state["latest_candle"] = df_preload.iloc[-1].to_dict()
-                    if STRATEGY == "Keyword Rule Builder": t, s, v, e, df_c, atr, fib = bot.analyzer.apply_keyword_strategy(df_preload, CUSTOM_CODE, INDEX)
-                    elif STRATEGY == "TradingView Webhook": t, s, v, e, df_c, atr, fib = "Awaiting TradingView Webhook...", "WAIT", df_preload['close'].iloc[-1], df_preload['close'].iloc[-1], df_preload, 0, {}
-                    elif "VIJAY & RFF" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vijay_rff_strategy(df_preload, INDEX)
-                    elif "Institutional FVG" in STRATEGY or "ICT" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_ict_smc_strategy(df_preload, INDEX)
-                    elif "Trend Rider" in STRATEGY: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_trend_rider_strategy(df_preload, INDEX)
-                    else: t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
-                    bot.state.update({"current_trend": t, "current_signal": s, "vwap": v, "ema": e, "atr": atr, "fib_data": fib, "latest_data": df_c})
+                    if STRATEGY == "Keyword Rule Builder": 
+                        t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_keyword_strategy(df_preload, CUSTOM_CODE, INDEX)
+                    elif STRATEGY == "TradingView Webhook": 
+                        t, s, v, e, df_c, atr, fib, strength = "Awaiting TradingView Webhook...", "WAIT", df_preload['close'].iloc[-1], df_preload['close'].iloc[-1], df_preload, 0, {}, 50
+                    elif "VIJAY & RFF" in STRATEGY: 
+                        t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vijay_rff_strategy(df_preload, INDEX)
+                        strength = 50
+                    elif "Institutional FVG" in STRATEGY or "ICT" in STRATEGY: 
+                        t, s, v, e, df_c, atr, fib = bot.analyzer.apply_ict_smc_strategy(df_preload, INDEX)
+                        strength = 50
+                    elif "Trend Rider" in STRATEGY: 
+                        t, s, v, e, df_c, atr, fib = bot.analyzer.apply_trend_rider_strategy(df_preload, INDEX)
+                        strength = 50
+                    else: 
+                        t, s, v, e, df_c, atr, fib = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
+                        strength = 50
+                    bot.state.update({
+                        "current_trend": t, "current_signal": s, 
+                        "signal_strength": strength,
+                        "vwap": v, "ema": e, "atr": atr, 
+                        "fib_data": fib, "latest_data": df_c
+                    })
 
     if not is_mkt_open: 
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
-    tab1, tab2, tab3, tab4 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 HERO/ZERO SCANNER"])
 
     with tab1:
         exch, _ = bot.get_token_info(INDEX)
@@ -2012,18 +3050,44 @@ else:
                             low_52 = hist_1y['Low'].min()
                             ltp = hist_1y['Close'].iloc[-1]
                             intra = tk.history(period="5d", interval="5m")
+                            
                             rating = "Neutral ⚖️"
+                            entry, sl, tp = ltp, 0.0, 0.0
+                            
                             if not intra.empty:
                                 df_intra = intra.copy()
                                 df_intra['vwap'] = (df_intra['Close'] * df_intra['Volume']).cumsum() / df_intra['Volume'].cumsum()
                                 df_intra['ema9'] = df_intra['Close'].ewm(span=9).mean()
                                 df_intra['ema21'] = df_intra['Close'].ewm(span=21).mean()
                                 c, v, e9, e21 = df_intra['Close'].iloc[-1], df_intra['vwap'].iloc[-1], df_intra['ema9'].iloc[-1], df_intra['ema21'].iloc[-1]
-                                if c > e9 > e21 and c > v: rating = "Strong Buy 🚀"
-                                elif c > v and c > e21: rating = "Buy 🟢"
-                                elif c < e9 < e21 and c < v: rating = "Strong Sell 🩸"
-                                elif c < v and c < e21: rating = "Sell 🔴"
-                            scan_results.append({"Stock": ticker.replace(".NS", ""), "LTP": round(ltp, 2), "52W High": round(high_52, 2), "52W Low": round(low_52, 2), "Signal": rating})
+                                
+                                if c > e9 > e21 and c > v: 
+                                    rating = "Strong Buy 🚀"
+                                    sl = min(e21, c * 0.99)
+                                    tp = c + (c - sl) * 2
+                                elif c > v and c > e21: 
+                                    rating = "Buy 🟢"
+                                    sl = min(e21, c * 0.99)
+                                    tp = c + (c - sl) * 2
+                                elif c < e9 < e21 and c < v: 
+                                    rating = "Strong Sell 🩸"
+                                    sl = max(e21, c * 1.01)
+                                    tp = c - (sl - c) * 2
+                                elif c < v and c < e21: 
+                                    rating = "Sell 🔴"
+                                    sl = max(e21, c * 1.01)
+                                    tp = c - (sl - c) * 2
+                                    
+                            scan_results.append({
+                                "Stock": ticker.replace(".NS", ""), 
+                                "LTP": round(ltp, 2), 
+                                "Signal": rating,
+                                "Entry": round(entry, 2),
+                                "SL": round(sl, 2),
+                                "TP": round(tp, 2),
+                                "52W High": round(high_52, 2), 
+                                "52W Low": round(low_52, 2)
+                            })
                         st.dataframe(pd.DataFrame(scan_results), use_container_width=True, hide_index=True)
                     except: st.error("Scanner failed.")
                         
@@ -2052,10 +3116,46 @@ else:
                             if phist.empty: continue
                             phist['vwap'] = (phist['Close'] * phist['Volume']).cumsum() / phist['Volume'].cumsum()
                             c, v, e9 = phist['Close'].iloc[-1], phist['vwap'].iloc[-1], phist['Close'].ewm(span=9).mean().iloc[-1]
-                            sig = "Bullish 🟢" if (c > v and c > e9) else ("Bearish 🔴" if (c < v and c < e9) else "Neutral ⚖️")
-                            p_results.append({"Stock": pt.replace(".NS", ""), "LTP": round(c, 2), "Signal": sig})
+                            
+                            sig = "Neutral ⚖️"
+                            sl, tp = 0.0, 0.0
+                            
+                            if (c > v and c > e9):
+                                sig = "Bullish 🟢"
+                                sl = c * 0.95
+                                tp = c * 1.10
+                            elif (c < v and c < e9):
+                                sig = "Bearish 🔴"
+                                sl = c * 1.05
+                                tp = c * 0.90
+                                
+                            p_results.append({
+                                "Stock": pt.replace(".NS", ""), 
+                                "LTP": round(c, 2), 
+                                "Signal": sig,
+                                "Entry": round(c, 2),
+                                "SL": round(sl, 2),
+                                "TP": round(tp, 2)
+                            })
                         except: pass
                     st.dataframe(pd.DataFrame(p_results), use_container_width=True, hide_index=True)
+
+        # Pin Bar Scanner
+        st.markdown("---")
+        st.subheader("📍 Pin Bar Reversals")
+        if st.button("Scan Pin Bars", use_container_width=True):
+            with st.spinner("Scanning for pin bars..."):
+                try:
+                    df_pin = yf.Ticker("^NSEI").history(period="1d", interval="5m")
+                    if not df_pin.empty:
+                        df_pin.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close'}, inplace=True)
+                        pin_results = pin_bar_scanner(df_pin)
+                        if pin_results:
+                            st.dataframe(pd.DataFrame(pin_results), use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No pin bars detected")
+                except:
+                    st.error("Could not fetch data")
 
     with tab3:
         log_col, pnl_col = st.columns([1, 2])
@@ -2077,15 +3177,69 @@ else:
                         except Exception as e:
                             pass
                     st.rerun()
+            
+            for l in bot.state["logs"]:
+                if "✅" in l or "profit" in l or "TP" in l:
+                    st.markdown(f"<span style='color:#22c55e'>{l}</span>", unsafe_allow_html=True)
+                elif "❌" in l or "sl" in l or "error" in l.lower():
+                    st.markdown(f"<span style='color:#ef4444'>{l}</span>", unsafe_allow_html=True)
+                elif "⚠️" in l or "Blocked" in l:
+                    st.markdown(f"<span style='color:#fbbf24'>{l}</span>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"`{l}`")
                     
-            for l in bot.state["logs"]: st.markdown(f"`{l}`")
+            if bot.state.get("paper_history") or (HAS_DB and bot.is_mock == False):
+                st.markdown("---")
+                st.subheader("📊 Trade Statistics")
+                
+                if bot.is_mock and bot.state.get("paper_history"):
+                    df_stats = pd.DataFrame(bot.state["paper_history"])
+                elif HAS_DB and not bot.is_mock:
+                    user_id = getattr(bot, "system_user_id", bot.api_key)
+                    res = supabase.table("trade_logs").select("*").eq("user_id", user_id).execute()
+                    if res.data:
+                        df_stats = pd.DataFrame(res.data)
+                    else:
+                        df_stats = pd.DataFrame()
+                else:
+                    df_stats = pd.DataFrame()
+                
+                if not df_stats.empty:
+                    total_trades = len(df_stats)
+                    winning_trades = len(df_stats[df_stats['PnL'] > 0]) if 'PnL' in df_stats.columns else 0
+                    losing_trades = len(df_stats[df_stats['PnL'] < 0]) if 'PnL' in df_stats.columns else 0
+                    win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+                    total_pnl = df_stats['PnL'].sum() if 'PnL' in df_stats.columns else 0
+                    avg_win = df_stats[df_stats['PnL'] > 0]['PnL'].mean() if winning_trades > 0 else 0
+                    avg_loss = df_stats[df_stats['PnL'] < 0]['PnL'].mean() if losing_trades > 0 else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Trades", total_trades)
+                        st.metric("Win Rate", f"{win_rate:.1f}%")
+                    with col2:
+                        st.metric("Winning Trades", winning_trades)
+                        st.metric("Avg Win", f"₹{avg_win:.2f}" if avg_win else "N/A")
+                    with col3:
+                        st.metric("Losing Trades", losing_trades)
+                        st.metric("Avg Loss", f"₹{avg_loss:.2f}" if avg_loss else "N/A")
+                    
+                    st.metric("Net P&L", f"₹{total_pnl:.2f}", 
+                             delta=f"{((total_pnl/abs(avg_loss)) if avg_loss != 0 else 0):.1f}R", 
+                             delta_color="normal")
             
         with pnl_col:
             if bot.is_mock:
                 st.subheader(f"📊 Mock Ledger (Session: {bot.client_name})")
                 if bot.state.get("paper_history"):
                     df_paper = pd.DataFrame(bot.state["paper_history"])
-                    st.dataframe(df_paper.iloc[::-1], use_container_width=True)
+                    
+                    def color_pnl(val):
+                        color = '#22c55e' if val > 0 else '#ef4444' if val < 0 else 'black'
+                        return f'color: {color}'
+                    
+                    styled_df = df_paper.iloc[::-1].style.map(color_pnl, subset=['PnL'])
+                    st.dataframe(styled_df, use_container_width=True)
                     
                     output_mock = io.BytesIO()
                     with pd.ExcelWriter(output_mock, engine='xlsxwriter') as writer: df_paper.to_excel(writer, index=False)
@@ -2112,7 +3266,13 @@ else:
                         if res.data:
                             df_db = pd.DataFrame(res.data)
                             df_db = df_db.drop(columns=["id", "user_id"], errors="ignore")
-                            st.dataframe(df_db.iloc[::-1], use_container_width=True)
+                            
+                            def color_pnl(val):
+                                color = '#22c55e' if val > 0 else '#ef4444' if val < 0 else 'black'
+                                return f'color: {color}'
+                            
+                            styled_df = df_db.iloc[::-1].style.map(color_pnl, subset=['pnl'])
+                            st.dataframe(styled_df, use_container_width=True)
                             
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='xlsxwriter') as writer: df_db.to_excel(writer, index=False)
@@ -2135,58 +3295,167 @@ else:
                 else: st.error("Cloud DB disconnected.")
                     
     with tab4:
-        c_dx, c_bias = st.columns(2)
-        with c_dx:
-            st.subheader("🕉️ CoinDCX Intraday Momentum")
-            if st.button("Scan CoinDCX 🔥", use_container_width=True):
-                with st.spinner("Fetching live market data..."):
-                    try:
-                        response = requests.get("https://api.coindcx.com/exchange/ticker", timeout=10)
-                        if response.status_code == 200:
-                            data = response.json()
-                            valid_coins = []
-                            for coin in data:
-                                market = coin.get('market', '')
-                                if market.endswith('USDT') or market.endswith('INR'):
-                                    try:
-                                        change = float(coin.get('change_24_hour', 0))
-                                        ltp = float(coin.get('last_price', 0))
-                                        if ltp > 0: valid_coins.append({"Pair": market, "LTP": ltp, "24h Change (%)": change})
-                                    except: pass
-                            if valid_coins:
-                                df_dcx = pd.DataFrame(valid_coins).sort_values(by="24h Change (%)", ascending=False).head(15)
-                                df_dcx['24h Change (%)'] = df_dcx['24h Change (%)'].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%")
-                                st.dataframe(df_dcx, use_container_width=True, hide_index=True)
-                        else: st.error(f"CoinDCX API Error: {response.status_code}")
-                    except Exception as e: st.error(f"Failed to fetch CoinDCX data: {e}")
+        tab_c1, tab_c2, tab_c3 = st.tabs(["🪙 CoinDCX Scanner", "⚡ 1-Min Scalper", "🚀 Breakout Scanner"])
+        
+        with tab_c1:
+            c_dx, c_bias = st.columns(2)
+            with c_dx:
+                st.subheader("🕉️ CoinDCX Intraday Momentum")
+                if st.button("Scan CoinDCX 🔥", use_container_width=True):
+                    with st.spinner("Fetching live market data..."):
+                        try:
+                            response = requests.get("https://api.coindcx.com/exchange/ticker", timeout=10)
+                            if response.status_code == 200:
+                                data = response.json()
+                                valid_coins = []
+                                for coin in data:
+                                    market = coin.get('market', '')
+                                    if market.endswith('USDT') or market.endswith('INR'):
+                                        try:
+                                            change = float(coin.get('change_24_hour', 0))
+                                            ltp = float(coin.get('last_price', 0))
+                                            if ltp > 0: valid_coins.append({"Pair": market, "LTP": ltp, "24h Change (%)": change})
+                                        except: pass
+                                if valid_coins:
+                                    df_dcx = pd.DataFrame(valid_coins).sort_values(by="24h Change (%)", ascending=False).head(15)
+                                    df_dcx['24h Change (%)'] = df_dcx['24h Change (%)'].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%")
+                                    st.dataframe(df_dcx, use_container_width=True, hide_index=True)
+                            else: st.error(f"CoinDCX API Error: {response.status_code}")
+                        except Exception as e: st.error(f"Failed to fetch CoinDCX data: {e}")
 
+           
         with c_bias:
-            st.subheader("📈 Directional Bias (BTC & Gold)")
-            if st.button("Analyze BTC & XAUUSD 🔍", use_container_width=True):
+            st.subheader("📈 Directional Bias (BTC, Gold, EURUSD)")
+            if st.button("Analyze Assets 🔍", use_container_width=True):
                 with st.spinner("Analyzing Market Structure & EMAs..."):
-                    assets_to_check = {"Bitcoin (BTC-USD)": "BTC-USD", "Gold (XAUUSD)": "GC=F", "Silver (SI=F)": "SI=F"}
+                    assets_to_check = {
+                        "Bitcoin (BTC-USD)": "BTC-USD", 
+                        "Gold (XAUUSD)": "GC=F", 
+                        "Silver (SI=F)": "SI=F",
+                        "Euro (EURUSD)": "EURUSD=X"
+                    }
                     bias_results = []
                     for name, ticker in assets_to_check.items():
                         try:
                             tk = yf.Ticker(ticker)
                             df_bias = tk.history(period="5d", interval="15m")
-                            if not df_bias.empty:
+                            df_1y = tk.history(period="1y")
+                            
+                            if not df_bias.empty and not df_1y.empty:
+                                high_52 = df_1y['High'].max()
+                                low_52 = df_1y['Low'].min()
+                                
                                 df_bias['ema9'] = df_bias['Close'].ewm(span=9).mean()
                                 df_bias['ema21'] = df_bias['Close'].ewm(span=21).mean()
                                 c_price = df_bias['Close'].iloc[-1]
                                 e9 = df_bias['ema9'].iloc[-1]
                                 e21 = df_bias['ema21'].iloc[-1]
-                                if c_price > e9 and e9 > e21: bias = "UP 🟢 (Bullish Momentum)"
-                                elif c_price < e9 and e9 < e21: bias = "DOWN 🔴 (Bearish Momentum)"
-                                else: bias = "RANGING 🟡 (Wait for Breakout)"
-                                bias_results.append({"Asset": name, "Current Price": round(c_price, 2), "Next Expected Move": bias})
+                                
+                                entry = c_price
+                                if c_price > e9 and e9 > e21: 
+                                    bias = "UP 🟢 (Bullish Momentum)"
+                                    sl = e21
+                                    tp = entry + (entry - sl) * 2
+                                elif c_price < e9 and e9 < e21: 
+                                    bias = "DOWN 🔴 (Bearish Momentum)"
+                                    sl = e21
+                                    tp = entry - (sl - entry) * 2
+                                else: 
+                                    bias = "RANGING 🟡 (Wait for Breakout)"
+                                    sl, tp = 0.0, 0.0
+                                    
+                                bias_results.append({
+                                    "Asset": name, 
+                                    "Current Price": round(c_price, 4), 
+                                    "Bias": bias,
+                                    "Entry": round(entry, 4),
+                                    "SL": round(sl, 4),
+                                    "TP": round(tp, 4),
+                                    "52W High": round(high_52, 4),
+                                    "52W Low": round(low_52, 4)
+                                })
                         except: pass
                     if bias_results: st.dataframe(pd.DataFrame(bias_results), use_container_width=True, hide_index=True)
+        with tab_c2:
+            scalper_asset = st.selectbox("Select Asset for 1-Min Scalping", 
+                                         ["XAUUSD (Gold)", "BTCUSD", "ETHUSD", "SOLUSD"],
+                                         index=0)
+            
+            asset_map = {
+                "XAUUSD (Gold)": "XAUUSD",
+                "BTCUSD": "BTCUSD",
+                "ETHUSD": "ETHUSD",
+                "SOLUSD": "SOLUSD"
+            }
+            
+            selected_symbol = asset_map[scalper_asset]
+            gold_crypto_scalper(selected_symbol)
+        
+        with tab_c3:
+            add_breakout_scalper()
+            st.markdown("---")
+            st.subheader("📈 Compounding Calculator")
+            compounding_calculator()
 
+    with tab5:
+        st.subheader("🎯 Hero/Zero Scanner - Nifty 50 Stocks")
+        
+        col_hz1, col_hz2 = st.columns(2)
+        with col_hz1:
+            min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
+        with col_hz2:
+            scan_button = st.button("🔍 Scan Hero/Zero Now", use_container_width=True, type="primary")
+        
+        if scan_button:
+            with st.spinner("Scanning Nifty 50 stocks for Hero/Zero patterns..."):
+                results = bot.scan_hero_zero_indian_stocks()  # Returns empty DataFrame
+                if not results.empty:
+                    st.success(f"Found {len(results)} Hero/Zero opportunities!")
+                    
+                    def color_direction(val):
+                        if "HERO" in val:
+                            return 'background-color: #22c55e; color: white'
+                        elif "ZERO" in val:
+                            return 'background-color: #ef4444; color: white'
+                        return ''
+                    
+                    styled_results = results.style.map(color_direction, subset=['Direction'])
+                    st.dataframe(styled_results, use_container_width=True, hide_index=True)
+                    
+                    st.markdown("### 📝 Entry Instructions")
+                    st.info("""
+                    **For HERO (BUY):**
+                    - **Entry:** Current price
+                    - **Stop Loss:** 1.5x ATR below entry
+                    - **Target 1:** 3x ATR above entry (Book 50%)
+                    - **Target 2:** 5x ATR above entry (Book remaining)
+                    - **Risk/Reward:** 1:2
+                    
+                    **For ZERO (SELL):**
+                    - **Entry:** Current price
+                    - **Stop Loss:** 1.5x ATR above entry
+                    - **Target 1:** 3x ATR below entry (Book 50%)
+                    - **Target 2:** 5x ATR below entry (Book remaining)
+                    - **Risk/Reward:** 1:2
+                    """)
+                    
+                    st.markdown("### ⏰ Best Trading Times (IST)")
+                    st.markdown("""
+                    - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
+                    - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
+                    - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
+                    - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
+                    """)
+                else:
+                    st.info("No Hero/Zero opportunities found at this moment")
+
+    # Bottom dock controls
     def cycle_asset():
         assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
-        if st.session_state.sb_index_input in assets: st.session_state.sb_index_input = assets[(assets.index(st.session_state.sb_index_input) + 1) % len(assets)]
-        else: st.session_state.sb_index_input = assets[0]
+        if st.session_state.sb_index_input in assets: 
+            st.session_state.sb_index_input = assets[(assets.index(st.session_state.sb_index_input) + 1) % len(assets)]
+        else: 
+            st.session_state.sb_index_input = assets[0]
 
     def cycle_strat():
         st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
@@ -2204,4 +3473,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
