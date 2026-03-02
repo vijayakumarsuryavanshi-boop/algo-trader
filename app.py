@@ -1546,15 +1546,14 @@ class SniperBot:
 
     def get_market_data_oi(self, exchange, token):
         if self.is_mock or exchange in ["MT5", "COINDCX", "DELTA"]: return np.random.randint(50000, 150000), np.random.randint(1000, 10000)
-        # FIX: Ensure Angel One only handles Indian exchanges
-        if not self.api or exchange not in ["NSE", "NFO", "BSE", "MCX"]: return 0, 0
+        if not self.api: return 0, 0
         try:
             res = self.api.marketData({"mode": "FULL", "exchangeTokens": { exchange: [str(token)] }})
             if res and res.get('status') and res.get('data'): return res['data']['fetched'][0].get('opnInterest', 0), res['data']['fetched'][0].get('totMacVal', 0)
         except: pass
         return 0, 0
 
-   def get_live_price(self, exchange, symbol, token):
+    def get_live_price(self, exchange, symbol, token):
         if self.is_mock and token == "12345": 
             base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
             base = base_prices.get(symbol, 500)
@@ -1591,15 +1590,14 @@ class SniperBot:
                 return float(res[tsym]['last_price'])
             except: pass
 
-        # FIX: Guard Angel API from processing foreign exchanges
-        if self.api and exchange in ["NSE", "NFO", "BSE", "MCX"]:
+        if self.api:
             try:
                 trading_symbol = INDEX_SYMBOLS.get(symbol, symbol)
                 res = self.api.ltpData(exchange, trading_symbol, str(token))
                 if res and res.get('status'): return float(res['data']['ltp'])
             except: pass
-            
         return None
+
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
         if self.is_mock and token == "12345": return self._fallback_yfinance(symbol, interval)
         if exchange == "MT5" and self.is_mt5_connected:
@@ -1630,9 +1628,7 @@ class SniperBot:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                 df.index = df['timestamp']
                 return df
-                
-            # FIX: Guard Angel API from processing foreign exchanges
-            elif self.api and exchange in ["NSE", "NFO", "BSE", "MCX"]:
+            elif self.api:
                 interval_map = {"1m": "ONE_MINUTE", "3m": "THREE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE"}
                 api_interval = interval_map.get(interval, "FIVE_MINUTE")
                 res = self.api.getCandleData({"exchange": exchange, "symboltoken": str(token), "interval": api_interval, "fromdate": fromdate.strftime("%Y-%m-%d %H:%M"), "todate": now_ist.strftime("%Y-%m-%d %H:%M")})
@@ -1643,7 +1639,6 @@ class SniperBot:
                     df.index = df['timestamp']
                     return df
         except: pass
-        
         return self._fallback_yfinance(symbol, interval)
             
     def _fallback_yfinance(self, symbol, interval):
@@ -3491,7 +3486,6 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
 
 
 
