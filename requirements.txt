@@ -17,6 +17,8 @@ mt5linux
 plyer
 flask
 scikit-learn
+logzero
+
 
 
 
