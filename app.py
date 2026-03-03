@@ -259,7 +259,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS (original from first script for tab1, plus modern cards)
 # ==========================================
-st.set_page_config(page_title="HERO", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -368,8 +368,8 @@ st.markdown("""
     .risk-medium { color: #fbbf24; font-weight: bold; }
     .risk-high { color: #ef4444; font-weight: bold; }
     
-    /* Hero/Zero Specific Styles */
-    .hero-badge { background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+    /* SHREE/Zero Specific Styles */
+    .SHREE-badge { background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .zero-badge { background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .hz-stats { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 8px; margin: 10px 0; }
     
@@ -593,7 +593,7 @@ class MT5WebBridge:
                 "tp": tp if tp else 0,
                 "deviation": 20,
                 "magic": 234000,
-                "comment": "HERO Algo",
+                "comment": "SHREE Algo",
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
@@ -707,8 +707,8 @@ class BackgroundProcessManager:
     def __init__(self):
         self.process = None
         self.running = False
-        self.pid_file = "HERO_bot.pid"
-        self.log_file = "HERO_bot.log"
+        self.pid_file = "SHREE_bot.pid"
+        self.log_file = "SHREE_bot.log"
         
     def is_process_running(self, pid):
         """Check if process is running - without psutil"""
@@ -744,17 +744,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%%(asctime)s - %%(levelname)s - %%(message)s',
     handlers=[
-        logging.FileHandler('HERO_bg.log'),
+        logging.FileHandler('SHREE_bg.log'),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger('HERO_BG')
+logger = logging.getLogger('SHREE_BG')
 
 try:
     with open('bot_config.json', 'r') as f:
         config = json.load(f)
     
-    logger.info(f"Starting HERO background bot")
+    logger.info(f"Starting SHREE background bot")
     logger.info(f"Running 24/7 - Will trade according to market hours")
     
     running = True
@@ -1847,7 +1847,7 @@ class SniperBot:
         @app.route('/tv_webhook', methods=['POST'])
         def webhook():
             data = request.json
-            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "HERO123"):
+            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
                 action = data.get("action", "WAIT").upper()
                 symbol = data.get("symbol", "").upper()
                 self.state["tv_signal"] = {"action": action, "symbol": symbol, "timestamp": time.time()}
@@ -2115,9 +2115,9 @@ class SniperBot:
         df.index = df['timestamp']
         return df
 
-    def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
-        """Enhanced Hero/Zero detection for Indian markets"""
-        if not is_hero_zero or df is None or len(df) < 20:
+    def analyze_oi_and_greeks(self, df, is_SHREE_zero, signal):
+        """Enhanced SHREE/Zero detection for Indian markets"""
+        if not is_SHREE_zero or df is None or len(df) < 20:
             return True, ""
         
         last = df.iloc[-1]
@@ -2125,8 +2125,8 @@ class SniperBot:
         body = abs(last['close'] - last['open'])
         vol_sma = df['volume'].rolling(20).mean().iloc[-1]
         
-        # Hero/Zero specific conditions
-        is_hero = signal == "BUY_CE" and last['close'] > last['open'] * 1.02  # 2% up move
+        # SHREE/Zero specific conditions
+        is_SHREE = signal == "BUY_CE" and last['close'] > last['open'] * 1.02  # 2% up move
         is_zero = signal == "BUY_PE" and last['close'] < last['open'] * 0.98  # 2% down move
         
         # Volume confirmation
@@ -2134,7 +2134,7 @@ class SniperBot:
         
         # Price action confirmation
         price_action_confirm = (
-            (is_hero and last['close'] > last['high'] * 0.95) or  # Close near high
+            (is_SHREE and last['close'] > last['high'] * 0.95) or  # Close near high
             (is_zero and last['close'] < last['low'] * 1.05)      # Close near low
         )
         
@@ -2144,7 +2144,7 @@ class SniperBot:
         # Time of day check (avoid lunch hour)
         now_ist = get_ist()
         if 11 <= now_ist.hour <= 13:  # 11 AM to 1 PM lunch hour
-            return False, "⚠️ Avoid Hero/Zero during lunch hours"
+            return False, "⚠️ Avoid SHREE/Zero during lunch hours"
         
         # Check for previous signal cooldown (avoid overtrading)
         if self.state.get("hz_last_signal_time"):
@@ -2152,20 +2152,20 @@ class SniperBot:
             if time_diff < 15:  # 15 minute cooldown
                 return False, f"⏳ Cooldown: {15 - time_diff:.0f} mins remaining"
         
-        if is_hero and volume_confirm and price_action_confirm and volatility_ok:
+        if is_SHREE and volume_confirm and price_action_confirm and volatility_ok:
             self.state["hz_last_signal_time"] = get_ist()
-            return True, "🔥 HERO DETECTED: Strong buying pressure with volume"
+            return True, "🔥 SHREE DETECTED: Strong buying pressure with volume"
         
         if is_zero and volume_confirm and price_action_confirm and volatility_ok:
             self.state["hz_last_signal_time"] = get_ist()
             return True, "🩸 ZERO DETECTED: Strong selling pressure with volume"
         
-        return False, "⚠️ No Hero/Zero: Insufficient momentum"
+        return False, "⚠️ No SHREE/Zero: Insufficient momentum"
 
-    def calculate_hero_zero_position(self, signal_strength, atr, spot, capital):
-        """Dynamic position sizing for Hero/Zero trades"""
+    def calculate_SHREE_zero_position(self, signal_strength, atr, spot, capital):
+        """Dynamic position sizing for SHREE/Zero trades"""
         
-        # Base position size (smaller for Hero/Zero due to higher risk)
+        # Base position size (smaller for SHREE/Zero due to higher risk)
         base_size = capital * 0.02  # 2% of capital per trade
         
         # Signal strength multiplier
@@ -2210,8 +2210,8 @@ class SniperBot:
             "final": position_value
         }
 
-    def scan_hero_zero_indian_stocks(self, nifty_stocks=None):
-        """Scan Nifty 50 stocks for Hero/Zero patterns"""
+    def scan_SHREE_zero_indian_stocks(self, nifty_stocks=None):
+        """Scan Nifty 50 stocks for SHREE/Zero patterns"""
         
         if nifty_stocks is None:
             nifty_stocks = [
@@ -2245,12 +2245,12 @@ class SniperBot:
                 true_range = ranges.max(axis=1)
                 atr = true_range.rolling(14).mean().iloc[-1]
                 
-                # Hero/Zero detection
+                # SHREE/Zero detection
                 last = df.iloc[-1]
                 prev = df.iloc[-2]
                 
-                # Hero (Breakout up)
-                is_hero = (
+                # SHREE (Breakout up)
+                is_SHREE = (
                     last['Close'] > last['ema9'] and
                     last['ema9'] > last['ema21'] and
                     last['Volume'] > df['volume_ma'].iloc[-1] * 1.5 and
@@ -2269,11 +2269,11 @@ class SniperBot:
                     (last['High'] - last['Low']) > atr * 0.5  # Decent range
                 )
                 
-                if is_hero or is_zero:
-                    direction = "HERO (BUY)" if is_hero else "ZERO (SELL)"
+                if is_SHREE or is_zero:
+                    direction = "SHREE (BUY)" if is_SHREE else "ZERO (SELL)"
                     
                     # Calculate targets
-                    if is_hero:
+                    if is_SHREE:
                         entry = last['Close']
                         sl = last['Close'] - atr * 1.5
                         tp1 = last['Close'] + atr * 3
@@ -2518,7 +2518,7 @@ class SniperBot:
         subset = subset[subset['expiry'] == closest_expiry]
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
         
-        if self.settings.get("hero_zero"):
+        if self.settings.get("SHREE_zero"):
             otm_margin = spot * 0.003 
             if opt_type == "CE": candidates = subset[subset['strike'] > (spot + otm_margin)]
             else: candidates = subset[subset['strike'] < (spot - otm_margin)]
@@ -2674,13 +2674,13 @@ class SniperBot:
                                 trend = "MTF Blocked: 15m Bullish"
                                 signal_strength = 0
 
-                    is_hz = s.get("hero_zero")
+                    is_hz = s.get("SHREE_zero")
                     if is_hz and signal != "WAIT" and strategy != "TradingView Webhook":
                         if not self.is_mock and not (is_mt5_asset or is_crypto):
                             live_oi, live_vol = self.get_market_data_oi(exch, token)
                             if live_vol < 50000: 
                                 signal = "WAIT"
-                                trend = "Hero/Zero Blocked: Low Volume/OI"
+                                trend = "SHREE/Zero Blocked: Low Volume/OI"
                                 signal_strength = 0
                         
                         greek_pass, greek_msg = self.analyze_oi_and_greeks(df_candles, is_hz, signal)
@@ -2708,10 +2708,10 @@ class SniperBot:
 
                 if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time and signal_strength >= s.get('min_signal_strength', 50):
                     
-                    # Calculate position size (use Hero/Zero specific sizing if enabled)
+                    # Calculate position size (use SHREE/Zero specific sizing if enabled)
                     if is_hz:
-                        qty, sizing_info = self.calculate_hero_zero_position(signal_strength, current_atr, spot, s['max_capital'])
-                        self.log(f"📊 Hero/Zero Position Sizing: {sizing_info}")
+                        qty, sizing_info = self.calculate_SHREE_zero_position(signal_strength, current_atr, spot, s['max_capital'])
+                        self.log(f"📊 SHREE/Zero Position Sizing: {sizing_info}")
                     else:
                         qty = actual_qty
                     
@@ -2741,7 +2741,7 @@ class SniperBot:
                             tp2 = entry_ltp + (s['tgt_pts'] * 2)
                             tp3 = entry_ltp + (s['tgt_pts'] * 3)
 
-                        # For Hero/Zero, use ATR-based stops
+                        # For SHREE/Zero, use ATR-based stops
                         if is_hz and current_atr > 0:
                             if trade_type in ["CE", "BUY"]:
                                 dynamic_sl = entry_ltp - current_atr * 1.5
@@ -2772,7 +2772,7 @@ class SniperBot:
                         self.state["trades_today"] += 1
                         self.state["ghost_memory"][f"{index}_{signal}"] = get_ist()
                         
-                        # Track Hero/Zero entry
+                        # Track SHREE/Zero entry
                         if is_hz:
                             self.state["hz_trades"].append({
                                 "time": time_str,
@@ -2807,11 +2807,11 @@ class SniperBot:
                         self.state["active_trade"]["current_ltp"] = ltp
                         self.state["active_trade"]["floating_pnl"] = pnl
                         
-                        # Enhanced Hero/Zero exit logic
+                        # Enhanced SHREE/Zero exit logic
                         if trade.get('is_hz'):
                             profit_pct = (ltp - trade['entry']) / trade['entry'] * 100 if trade['type'] in ["CE", "BUY"] else (trade['entry'] - ltp) / trade['entry'] * 100
                             
-                            # Dynamic profit taking for Hero/Zero
+                            # Dynamic profit taking for SHREE/Zero
                             if profit_pct >= 5:  # 5% profit
                                 # Book 50% at 5%
                                 if not trade.get('booked_50'):
@@ -2942,7 +2942,7 @@ class SniperBot:
                                     "Exit Price": ltp, "PnL": round(pnl, 2), "Result": win_text
                                 })
                             
-                            # Track Hero/Zero performance
+                            # Track SHREE/Zero performance
                             if trade.get('is_hz'):
                                 self.state["hz_pnl"] += pnl
                                 if pnl > 0:
@@ -2977,7 +2977,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ HERO</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ SHREE</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -3218,7 +3218,7 @@ else:
         TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
         
         CUSTOM_CODE = ""
-        TV_PASSPHRASE = "HERO123"
+        TV_PASSPHRASE = "SHREE123"
         if STRATEGY == "Keyword Rule Builder":
             st.divider()
             st.markdown("**🧠 Keyword Logic Builder**")
@@ -3236,7 +3236,7 @@ else:
             st.markdown("**📡 TradingView Integration**")
             if HAS_FLASK:
                 st.success(f"Webhook URL: `http://{bot.client_ip}:5000/tv_webhook`")
-                TV_PASSPHRASE = st.text_input("Webhook Passphrase", value="HERO123")
+                TV_PASSPHRASE = st.text_input("Webhook Passphrase", value="SHREE123")
         
         if BROKER in ["CoinDCX", "Delta Exchange"]:
             st.divider()
@@ -3295,12 +3295,12 @@ else:
         st.divider()
         st.markdown("**3. Advanced Triggers**")
         MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
-        HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
+        SHREE_ZERO = st.toggle("🚀 SHREE/Zero Setup (Gamma Tracker)", False)
         FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
 
-        if HERO_ZERO:
+        if SHREE_ZERO:
             st.divider()
-            st.markdown("**🎯 Hero/Zero Specific Settings**")
+            st.markdown("**🎯 SHREE/Zero Specific Settings**")
             hz_col1, hz_col2 = st.columns(2)
             with hz_col1:
                 HZ_MAX_RISK = st.number_input("Max Risk per HZ Trade (%)", 0.5, 5.0, 2.0, 0.5) / 100
@@ -3326,7 +3326,7 @@ else:
         "primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, 
         "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, 
         "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": bot.is_mock, 
-        "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, 
+        "mtf_confirm": MTF_CONFIRM, "SHREE_zero": SHREE_ZERO, "fomo_entry": FOMO_ENTRY, 
         "crypto_mode": CRYPTO_MODE, "leverage": LEVERAGE, "show_inr_crypto": SHOW_INR_CRYPTO,
         "user_lots": st.session_state.user_lots.copy(),
         "custom_code": CUSTOM_CODE, "tv_passphrase": TV_PASSPHRASE,
@@ -3378,7 +3378,7 @@ else:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
     # ---- TABS ----
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 HERO/ZERO SCANNER"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 SHREE/ZERO SCANNER"])
 
     # ========== TAB1 : DASHBOARD (with news ticker) ==========
     with tab1:
@@ -3461,12 +3461,12 @@ else:
                 else:
                     st.write("No premium opps")
 
-        # Hero/Zero Performance Stats
-        if HERO_ZERO and bot.state.get("hz_trades"):
+        # SHREE/Zero Performance Stats
+        if SHREE_ZERO and bot.state.get("hz_trades"):
             hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
             st.markdown(f"""
             <div class="hz-stats">
-                <h4 style="color: white; margin:0 0 10px 0;">🎯 Hero/Zero Performance</h4>
+                <h4 style="color: white; margin:0 0 10px 0;">🎯 SHREE/Zero Performance</h4>
                 <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
                     <div>Total Trades: {len(bot.state['hz_trades'])}</div>
                     <div>Win Rate: {hz_win_rate:.1f}%</div>
@@ -3928,24 +3928,24 @@ else:
                 compounding_calculator()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== TAB5 : HERO/ZERO SCANNER ==========
+    # ========== TAB5 : SHREE/ZERO SCANNER ==========
     with tab5:
-        st.subheader("🎯 Hero/Zero Scanner - Nifty 50 Stocks")
+        st.subheader("🎯 SHREE/Zero Scanner - Nifty 50 Stocks")
         
         col_hz1, col_hz2 = st.columns(2)
         with col_hz1:
             min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
         with col_hz2:
-            scan_button = st.button("🔍 Scan Hero/Zero Now", use_container_width=True, type="primary")
+            scan_button = st.button("🔍 Scan SHREE/Zero Now", use_container_width=True, type="primary")
         
         if scan_button:
-            with st.spinner("Scanning Nifty 50 stocks for Hero/Zero patterns..."):
-                results = bot.scan_hero_zero_indian_stocks()
+            with st.spinner("Scanning Nifty 50 stocks for SHREE/Zero patterns..."):
+                results = bot.scan_SHREE_zero_indian_stocks()
                 if not results.empty:
-                    st.success(f"Found {len(results)} Hero/Zero opportunities!")
+                    st.success(f"Found {len(results)} SHREE/Zero opportunities!")
                     
                     def color_direction(val):
-                        if "HERO" in val:
+                        if "SHREE" in val:
                             return 'background-color: #22c55e; color: white'
                         elif "ZERO" in val:
                             return 'background-color: #ef4444; color: white'
@@ -3956,7 +3956,7 @@ else:
                     
                     st.markdown("### 📝 Entry Instructions")
                     st.info("""
-                    **For HERO (BUY):**
+                    **For SHREE (BUY):**
                     - **Entry:** Current price
                     - **Stop Loss:** 1.5x ATR below entry
                     - **Target 1:** 3x ATR above entry (Book 50%)
@@ -3979,7 +3979,7 @@ else:
                     - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                     """)
                 else:
-                    st.info("No Hero/Zero opportunities found at this moment")
+                    st.info("No SHREE/Zero opportunities found at this moment")
 
     # ========== Bottom Dock ==========
     def cycle_asset():
@@ -4003,3 +4003,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
