@@ -111,7 +111,7 @@ if 'use_quantity_mode' not in st.session_state:
     st.session_state.use_quantity_mode = False
 
 # ==========================================
-# 0. DATABASE & GLOBAL HELPERS (safe secrets)
+# 0. DATABASE & GLOBAL HELPERS
 # ==========================================
 def safe_secrets_get(key, default=None):
     try:
@@ -133,7 +133,6 @@ def init_supabase() -> Client:
 supabase = init_supabase()
 HAS_DB = supabase is not None
 
-# Global flag for 24/7 background running (kept but not used in UI)
 BACKGROUND_RUNNING = False
 BACKGROUND_THREAD = None
 STOP_EVENT = Event()
@@ -260,11 +259,10 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS
 # ==========================================
-st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="HERO", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
-    /* Global styles (original) */
     [data-testid="stAppViewContainer"] { background-color: #f4f7f6; color: #0f111a; font-family: 'Inter', sans-serif; }
     
     @media (max-width: 850px) {
@@ -282,9 +280,7 @@ st.markdown("""
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; border-radius: 2px !important;
     }
 
-    div[data-testid="stTabs"] {
-        background: transparent !important;
-    }
+    div[data-testid="stTabs"] { background: transparent !important; }
     
     div[data-baseweb="tab-list"] {
         background: #e2e8f0 !important; 
@@ -343,7 +339,6 @@ st.markdown("""
     .glass-panel { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06); padding: 30px; }
     .bottom-dock-container { position: fixed !important; bottom: -500px !important; opacity: 0.01 !important; z-index: -1 !important; }
     
-    /* Signal Strength Meter */
     .signal-meter {
         width: 100%;
         height: 10px;
@@ -359,22 +354,18 @@ st.markdown("""
         transition: width 0.3s ease;
     }
     
-    /* Trade Confidence Badge */
     .confidence-high { background: #22c55e; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
     .confidence-medium { background: #fbbf24; color: black; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
     .confidence-low { background: #ef4444; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
     
-    /* Risk Level Indicator */
     .risk-low { color: #22c55e; font-weight: bold; }
     .risk-medium { color: #fbbf24; font-weight: bold; }
     .risk-high { color: #ef4444; font-weight: bold; }
     
-    /* Hero/Zero Specific Styles */
     .hero-badge { background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .zero-badge { background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .hz-stats { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 8px; margin: 10px 0; }
     
-    /* Modern card styling (for tabs 2-5) */
     .modern-card {
         background: white;
         border-radius: 16px;
@@ -399,7 +390,6 @@ st.markdown("""
         margin-bottom: 15px;
     }
     
-    /* Broker badge */
     .broker-badge {
         display: inline-block;
         padding: 0.2rem 0.8rem;
@@ -411,7 +401,6 @@ st.markdown("""
         color: white;
     }
     
-    /* News Ticker */
     .news-ticker {
         background: #1e293b;
         color: white;
@@ -431,7 +420,6 @@ st.markdown("""
         100% { transform: translateX(-100%); }
     }
 
-    /* Bottom dock in one row */
     .bottom-dock {
         position: fixed;
         bottom: 10px;
@@ -469,7 +457,6 @@ DEFAULT_LOTS = {
     "FETUSD": 1.0, "RNDRUSD": 1.0, "TAOUSD": 0.01, "INJUSD": 1.0, "AGIXUSD": 1.0
 }
 
-# Lot multipliers for quantity calculation
 LOT_MULTIPLIERS = {
     "NIFTY": 65, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250,
     "GOLD": 100, "SILVER": 30, "XAUUSD": 1, "EURUSD": 1, "BTCUSD": 1, "ETHUSD": 1,
@@ -489,7 +476,6 @@ YF_TICKERS = {
 INDEX_SYMBOLS = {"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank", "SENSEX": "BSE SENSEX", "INDIA VIX": "INDIA VIX"}
 INDEX_TOKENS = {"NIFTY": ("NSE", "26000"), "BANKNIFTY": ("NSE", "26009"), "INDIA VIX": ("NSE", "26017"), "SENSEX": ("BSE", "99919000")}
 
-# Updated strategy list: Indian Options Scalper first, then Machine Learning
 STRAT_LIST = [
     "Indian Options Scalper (Nifty/BankNifty)",
     "Machine Learning",
@@ -502,7 +488,6 @@ STRAT_LIST = [
     "TradingView Webhook"
 ]
 
-# Initialize user_lots with defaults if empty
 if not st.session_state.user_lots:
     st.session_state.user_lots = DEFAULT_LOTS.copy()
 
@@ -519,11 +504,9 @@ def get_angel_scrip_master():
     except Exception: return pd.DataFrame()
 
 # ==========================================
-# 4. MT5 WEB API BRIDGE (No Desktop Required)
+# 4. MT5 WEB API BRIDGE
 # ==========================================
 class MT5WebBridge:
-    """MT5 trading without desktop - uses web APIs or lightweight bridge"""
-    
     def __init__(self, account=None, password=None, server=None, api_url=None):
         self.account = account
         self.password = password
@@ -535,9 +518,6 @@ class MT5WebBridge:
         self.use_direct_mt5 = HAS_MT5 and account and server
         
     def connect(self):
-        """Connect to MT5 using best available method"""
-        
-        # Method 1: Direct MT5 if available (Windows only)
         if self.use_direct_mt5:
             try:
                 if mt5.initialize():
@@ -547,7 +527,6 @@ class MT5WebBridge:
             except:
                 pass
         
-        # Method 2: MT5 Linux bridge
         if HAS_MT5_LINUX and not self.connected:
             try:
                 client = mt5linux.MT5Linux("localhost")
@@ -559,7 +538,6 @@ class MT5WebBridge:
             except:
                 pass
         
-        # Method 3: Web API (works everywhere - mobile, cloud)
         if not self.connected and self.api_url:
             try:
                 response = self.session.post(
@@ -583,7 +561,6 @@ class MT5WebBridge:
         return False, "Could not connect to MT5"
     
     def get_live_price(self, symbol):
-        """Get live price from MT5"""
         if self.use_direct_mt5 and mt5.initialize():
             tick = mt5.symbol_info_tick(symbol)
             if tick:
@@ -604,8 +581,6 @@ class MT5WebBridge:
         return None
     
     def place_order(self, symbol, volume, order_type, sl=None, tp=None):
-        """Place order via best available method"""
-        
         if self.use_direct_mt5 and mt5.initialize():
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -617,7 +592,7 @@ class MT5WebBridge:
                 "tp": tp if tp else 0,
                 "deviation": 20,
                 "magic": 234000,
-                "comment": "SHREE Algo",
+                "comment": "HERO Algo",
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
@@ -649,7 +624,6 @@ class MT5WebBridge:
         return None, "All MT5 connection methods failed"
     
     def get_historical_data(self, symbol, timeframe="M5", count=500):
-        """Get historical data"""
         timeframe_map = {
             "1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30",
             "1h": "H1", "4h": "H4", "1d": "D1"
@@ -691,7 +665,6 @@ class MT5WebBridge:
         return None
     
     def get_account_info(self):
-        """Get account information"""
         if self.use_direct_mt5 and mt5.initialize():
             acc = mt5.account_info()
             if acc:
@@ -716,21 +689,20 @@ class MT5WebBridge:
         return None
     
     def disconnect(self):
-        """Disconnect from MT5"""
         if self.use_direct_mt5:
             mt5.shutdown()
         self.connected = False
         self.token = None
 
 # ==========================================
-# 5. 24/7 BACKGROUND PROCESS MANAGER (kept for potential use but not exposed)
+# 5. 24/7 BACKGROUND PROCESS MANAGER (kept but not exposed)
 # ==========================================
 class BackgroundProcessManager:
     def __init__(self):
         self.process = None
         self.running = False
         self.pid_file = "HERO_bot.pid"
-        self.log_file = "SHREE_bot.log"
+        self.log_file = "HERO_bot.log"
         
     def is_process_running(self, pid):
         try:
@@ -764,17 +736,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%%(asctime)s - %%(levelname)s - %%(message)s',
     handlers=[
-        logging.FileHandler('SHREE_bg.log'),
+        logging.FileHandler('HERO_bg.log'),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger('SHREE_BG')
+logger = logging.getLogger('HERO_BG')
 
 try:
     with open('bot_config.json', 'r') as f:
         config = json.load(f)
     
-    logger.info(f"Starting SHREE background bot")
+    logger.info(f"Starting HERO background bot")
     logger.info(f"Running 24/7 - Will trade according to market hours")
     
     running = True
@@ -894,7 +866,6 @@ BACKGROUND_BOT = BackgroundProcessManager()
 # ==========================================
 # 6. HIGH PROFIT STRATEGY MODULES
 # ==========================================
-
 class ScalpingModule:
     def __init__(self, bot):
         self.bot = bot
@@ -1185,11 +1156,9 @@ def add_breakout_scalper():
                 st.info("No breakouts detected at this moment")
 
 def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
-    """1-minute scalper for Gold and Crypto with automatic SL/TP"""
     st.subheader(f"⚡ 1-Min Scalper: {symbol}")
     
     try:
-        # Map symbol to Yahoo Finance ticker
         if symbol in ["XAUUSD", "GOLD"]:
             ticker = "GC=F"
         elif symbol == "BTCUSD":
@@ -1400,8 +1369,6 @@ class TechnicalAnalyzer:
         df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
         df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
 
-        # Additional indicators for ICT
-        # (simplified, you can expand)
         df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
         df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
 
@@ -1414,7 +1381,6 @@ class TechnicalAnalyzer:
         trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
         signal_strength = 50
 
-        # Detect FVG
         latest_bull_fvg = df[df['fvg_bull']].iloc[-1] if any(df['fvg_bull']) else None
         latest_bear_fvg = df[df['fvg_bear']].iloc[-1] if any(df['fvg_bear']) else None
 
@@ -1545,7 +1511,6 @@ class TechnicalAnalyzer:
             
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data, signal_strength
 
-    # ---------- Indian Options Scalper ----------
     def apply_indian_options_scalper(self, df, index_name):
         if df is None or len(df) < 20:
             return "WAIT (insufficient data)", "WAIT", 0, 0, df, 0, {}, 0
@@ -1561,7 +1526,7 @@ class TechnicalAnalyzer:
         atr = self.get_atr(df).iloc[-1]
         signal = "WAIT"
         trend = "No clear signal"
-        strength = 0  # signal strength 0-100
+        strength = 0
         
         vol_spike = last['volume'] > df['volume_sma'].iloc[-1] * 1.2
         
@@ -1576,7 +1541,6 @@ class TechnicalAnalyzer:
         
         return trend, signal, last['vwap'], last['ema9'], df, atr, {}, strength
 
-    # ---------- Keyword Strategy ----------
     def apply_keyword_strategy(self, df, keywords, index_name):
         if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
         df = self.calculate_indicators(df, index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
@@ -1605,18 +1569,6 @@ class TechnicalAnalyzer:
             if 'bbl' in df.columns:
                 buy_conds.append(last['close'] > last['bbl'] and prev['close'] <= prev['bbl'])
                 sell_conds.append(last['close'] < last['bbh'] and prev['close'] >= prev['bbh'])
-
-        if "Chandelier Exit" in keys:
-            # Placeholder – you can add if needed
-            pass
-
-        if "Alpha Trend" in keys:
-            # Placeholder
-            pass
-
-        if "UT Bot" in keys:
-            # Placeholder
-            pass
 
         if "Stochastic RSI" in keys:
             if 'stoch_k' in df.columns:
@@ -1690,7 +1642,6 @@ class MLPredictor:
         if HAS_PTA:
             bbands = ta.bbands(df['close'], length=20, std=2)
             if bbands is not None:
-                # Take first three columns as lower, middle, upper
                 df['bb_lower'] = bbands.iloc[:, 0]
                 df['bb_middle'] = bbands.iloc[:, 1]
                 df['bb_upper'] = bbands.iloc[:, 2]
@@ -1827,7 +1778,6 @@ class SniperBot:
         self.settings = {}
 
     def connect_mt5(self):
-        """Connect to MT5 using the bridge (no desktop required)"""
         if self.mt5_acc and self.mt5_server:
             self.mt5_bridge = MT5WebBridge(
                 account=self.mt5_acc,
@@ -1857,7 +1807,7 @@ class SniperBot:
         @app.route('/tv_webhook', methods=['POST'])
         def webhook():
             data = request.json
-            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
+            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "HERO123"):
                 action = data.get("action", "WAIT").upper()
                 symbol = data.get("symbol", "").upper()
                 self.state["tv_signal"] = {"action": action, "symbol": symbol, "timestamp": time.time()}
@@ -2126,7 +2076,6 @@ class SniperBot:
         return df
 
     def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
-        """Enhanced Hero/Zero detection for Indian markets"""
         if not is_hero_zero or df is None or len(df) < 20:
             return True, ""
         
@@ -2135,31 +2084,25 @@ class SniperBot:
         body = abs(last['close'] - last['open'])
         vol_sma = df['volume'].rolling(20).mean().iloc[-1]
         
-        # Hero/Zero specific conditions
-        is_hero = signal == "BUY_CE" and last['close'] > last['open'] * 1.02  # 2% up move
-        is_zero = signal == "BUY_PE" and last['close'] < last['open'] * 0.98  # 2% down move
+        is_hero = signal == "BUY_CE" and last['close'] > last['open'] * 1.02
+        is_zero = signal == "BUY_PE" and last['close'] < last['open'] * 0.98
         
-        # Volume confirmation
         volume_confirm = last['volume'] > vol_sma * 1.5
         
-        # Price action confirmation
         price_action_confirm = (
-            (is_hero and last['close'] > last['high'] * 0.95) or  # Close near high
-            (is_zero and last['close'] < last['low'] * 1.05)      # Close near low
+            (is_hero and last['close'] > last['high'] * 0.95) or
+            (is_zero and last['close'] < last['low'] * 1.05)
         )
         
-        # ATR-based volatility check
-        volatility_ok = body > atr * 0.5  # Decent size candle
+        volatility_ok = body > atr * 0.5
         
-        # Time of day check (avoid lunch hour)
         now_ist = get_ist()
-        if 11 <= now_ist.hour <= 13:  # 11 AM to 1 PM lunch hour
+        if 11 <= now_ist.hour <= 13:
             return False, "⚠️ Avoid Hero/Zero during lunch hours"
         
-        # Check for previous signal cooldown (avoid overtrading)
         if self.state.get("hz_last_signal_time"):
             time_diff = (get_ist() - self.state["hz_last_signal_time"]).seconds / 60
-            if time_diff < 15:  # 15 minute cooldown
+            if time_diff < 15:
                 return False, f"⏳ Cooldown: {15 - time_diff:.0f} mins remaining"
         
         if is_hero and volume_confirm and price_action_confirm and volatility_ok:
@@ -2173,14 +2116,10 @@ class SniperBot:
         return False, "⚠️ No Hero/Zero: Insufficient momentum"
 
     def calculate_hero_zero_position(self, signal_strength, atr, spot, capital):
-        """Dynamic position sizing for Hero/Zero trades"""
+        base_size = capital * 0.02
         
-        # Base position size (smaller for Hero/Zero due to higher risk)
-        base_size = capital * 0.02  # 2% of capital per trade
-        
-        # Signal strength multiplier
         if signal_strength >= 90:
-            strength_mult = 1.5  # 50% larger for ultra-strong signals
+            strength_mult = 1.5
         elif signal_strength >= 75:
             strength_mult = 1.2
         elif signal_strength >= 60:
@@ -2188,25 +2127,20 @@ class SniperBot:
         else:
             strength_mult = 0.5
         
-        # ATR-based adjustment (smaller size for higher volatility)
         volatility_mult = min(1.5, 30 / atr) if atr > 0 else 1.0
         
-        # Time of day adjustment (Indian market)
         now_ist = get_ist()
         hour = now_ist.hour
         
-        # Higher confidence in first hour and last hour
-        if hour in [9, 10, 14, 15]:  # 9-10 AM and 2-3 PM IST
+        if hour in [9, 10, 14, 15]:
             time_mult = 1.3
-        elif hour in [11, 12, 13]:  # Lunch hours
+        elif hour in [11, 12, 13]:
             time_mult = 0.7
         else:
             time_mult = 0.5
         
-        # Calculate final position
         position_value = base_size * strength_mult * volatility_mult * time_mult
         
-        # Convert to quantity
         if spot > 0:
             quantity = position_value / spot
         else:
@@ -2221,8 +2155,26 @@ class SniperBot:
         }
 
     def scan_hero_zero_indian_stocks(self, nifty_stocks=None):
-        """Scan Nifty 50 stocks for Hero/Zero patterns"""
+        # If in mock mode, generate synthetic data
+        if self.is_mock:
+            mock_results = []
+            stocks = nifty_stocks if nifty_stocks else ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"]
+            for stock in stocks:
+                mock_results.append({
+                    "Stock": stock,
+                    "Direction": "HERO (BUY)" if np.random.rand() > 0.5 else "ZERO (SELL)",
+                    "Price": round(np.random.uniform(100, 2000), 2),
+                    "Volume Spike": f"{np.random.uniform(1.5, 3.0):.1f}x",
+                    "ATR": round(np.random.uniform(5, 20), 2),
+                    "Entry": round(np.random.uniform(100, 2000), 2),
+                    "SL": round(np.random.uniform(90, 1900), 2),
+                    "Target 1": round(np.random.uniform(110, 2100), 2),
+                    "Target 2": round(np.random.uniform(120, 2200), 2),
+                    "Risk/Reward": "1:2"
+                })
+            return pd.DataFrame(mock_results)
         
+        # Real scanning logic
         if nifty_stocks is None:
             nifty_stocks = [
                 "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY",
@@ -2235,19 +2187,16 @@ class SniperBot:
         
         for stock in nifty_stocks:
             try:
-                # Get 5-minute data
                 ticker = f"{stock}.NS"
                 df = yf.Ticker(ticker).history(period="1d", interval="5m")
                 
                 if df.empty or len(df) < 20:
                     continue
                 
-                # Calculate indicators
                 df['ema9'] = df['Close'].ewm(span=9).mean()
                 df['ema21'] = df['Close'].ewm(span=21).mean()
                 df['volume_ma'] = df['Volume'].rolling(20).mean()
                 
-                # Calculate ATR
                 high_low = df['High'] - df['Low']
                 high_close = abs(df['High'] - df['Close'].shift())
                 low_close = abs(df['Low'] - df['Close'].shift())
@@ -2255,34 +2204,30 @@ class SniperBot:
                 true_range = ranges.max(axis=1)
                 atr = true_range.rolling(14).mean().iloc[-1]
                 
-                # Hero/Zero detection
                 last = df.iloc[-1]
                 prev = df.iloc[-2]
                 
-                # Hero (Breakout up)
                 is_hero = (
                     last['Close'] > last['ema9'] and
                     last['ema9'] > last['ema21'] and
                     last['Volume'] > df['volume_ma'].iloc[-1] * 1.5 and
                     last['Close'] > prev['High'] and
-                    (last['Close'] - last['Low']) > (last['High'] - last['Close']) * 2 and  # Strong close
-                    (last['High'] - last['Low']) > atr * 0.5  # Decent range
+                    (last['Close'] - last['Low']) > (last['High'] - last['Close']) * 2 and
+                    (last['High'] - last['Low']) > atr * 0.5
                 )
                 
-                # Zero (Breakout down)
                 is_zero = (
                     last['Close'] < last['ema9'] and
                     last['ema9'] < last['ema21'] and
                     last['Volume'] > df['volume_ma'].iloc[-1] * 1.5 and
                     last['Close'] < prev['Low'] and
-                    (last['High'] - last['Close']) > (last['Close'] - last['Low']) * 2 and  # Weak close
-                    (last['High'] - last['Low']) > atr * 0.5  # Decent range
+                    (last['High'] - last['Close']) > (last['Close'] - last['Low']) * 2 and
+                    (last['High'] - last['Low']) > atr * 0.5
                 )
                 
                 if is_hero or is_zero:
                     direction = "HERO (BUY)" if is_hero else "ZERO (SELL)"
                     
-                    # Calculate targets
                     if is_hero:
                         entry = last['Close']
                         sl = last['Close'] - atr * 1.5
@@ -2310,6 +2255,51 @@ class SniperBot:
                 continue
         
         return pd.DataFrame(results)
+
+    def scan_penny_stocks(self):
+        penny_list = [
+            "IDEA", "YESBANK", "SAIL", "PNB", "IOC", "BHEL", "SUZLON", "JPASSOCIAT",
+            "GMRINFRA", "NHPC", "NTPC", "PFC", "RECLTD", "VEDL", "TATAMOTORS"
+        ]
+        return self.scan_hero_zero_indian_stocks(penny_list)
+
+    def scan_pin_bars(self):
+        if self.is_mock:
+            mock_pins = []
+            symbols = ["NIFTY", "SENSEX", "BANKNIFTY", "GOLD"]
+            for sym in symbols:
+                mock_pins.append({
+                    "Symbol": sym,
+                    "Time": "09:35",
+                    "Direction": "🟢 BUY" if np.random.rand() > 0.5 else "🔴 SELL",
+                    "Entry": round(np.random.uniform(100, 2000), 2),
+                    "Stop": round(np.random.uniform(90, 1900), 2),
+                    "Target": round(np.random.uniform(110, 2100), 2),
+                    "Risk/Reward": "1:2",
+                    "Confidence": "High"
+                })
+            return mock_pins
+        
+        symbols = {
+            "NIFTY": "^NSEI",
+            "SENSEX": "^BSESN",
+            "BANKNIFTY": "^NSEBANK",
+            "GOLD": "GC=F"
+        }
+        results = []
+        for name, ticker in symbols.items():
+            try:
+                df = yf.Ticker(ticker).history(period="1d", interval="5m")
+                if df.empty or len(df) < 20:
+                    continue
+                df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
+                pins = pin_bar_scanner(df, lookback=10)
+                for pin in pins:
+                    pin["Symbol"] = name
+                    results.append(pin)
+            except:
+                continue
+        return results
 
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
         if self.is_mock: return "MOCK_" + uuid.uuid4().hex[:6].upper()
@@ -2424,7 +2414,6 @@ class SniperBot:
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
-        # ANGLE ONE EXECUTION BLOCK
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             
@@ -2591,7 +2580,6 @@ class SniperBot:
                 else:
                     actual_qty = s['lots'] * base_lot_size
                 
-                # Check for scalp signals
                 if df_candles is not None and not df_candles.empty:
                     scalp_signal = self.scalper.scalp_signal(df_candles)
                     if scalp_signal != "WAIT":
@@ -2602,13 +2590,11 @@ class SniperBot:
                             "index": index
                         })
                 
-                # Check for arbitrage
                 prices = {index: spot}
                 arb_opps = self.arbitrage.detect_arbitrage(prices)
                 if arb_opps:
                     self.state["arbitrage_opps"] = arb_opps
                 
-                # Check for premium opportunities
                 if index in ["NIFTY", "BANKNIFTY"]:
                     premium_opps = self.option_seller.find_premium_opportunities(index, spot, 7)
                     if premium_opps:
@@ -2718,7 +2704,6 @@ class SniperBot:
 
                 if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time and signal_strength >= s.get('min_signal_strength', 50):
                     
-                    # Calculate position size (use Hero/Zero specific sizing if enabled)
                     if is_hz:
                         qty, sizing_info = self.calculate_hero_zero_position(signal_strength, current_atr, spot, s['max_capital'])
                         self.log(f"📊 Hero/Zero Position Sizing: {sizing_info}")
@@ -2751,7 +2736,6 @@ class SniperBot:
                             tp2 = entry_ltp + (s['tgt_pts'] * 2)
                             tp3 = entry_ltp + (s['tgt_pts'] * 3)
 
-                        # For Hero/Zero, use ATR-based stops
                         if is_hz and current_atr > 0:
                             if trade_type in ["CE", "BUY"]:
                                 dynamic_sl = entry_ltp - current_atr * 1.5
@@ -2782,7 +2766,6 @@ class SniperBot:
                         self.state["trades_today"] += 1
                         self.state["ghost_memory"][f"{index}_{signal}"] = get_ist()
                         
-                        # Track Hero/Zero entry
                         if is_hz:
                             self.state["hz_trades"].append({
                                 "time": time_str,
@@ -2817,13 +2800,10 @@ class SniperBot:
                         self.state["active_trade"]["current_ltp"] = ltp
                         self.state["active_trade"]["floating_pnl"] = pnl
                         
-                        # Enhanced Hero/Zero exit logic
                         if trade.get('is_hz'):
                             profit_pct = (ltp - trade['entry']) / trade['entry'] * 100 if trade['type'] in ["CE", "BUY"] else (trade['entry'] - ltp) / trade['entry'] * 100
                             
-                            # Dynamic profit taking for Hero/Zero
-                            if profit_pct >= 5:  # 5% profit
-                                # Book 50% at 5%
+                            if profit_pct >= 5:
                                 if not trade.get('booked_50'):
                                     qty_to_book = trade['qty'] * 0.5
                                     if not self.is_mock:
@@ -2832,12 +2812,9 @@ class SniperBot:
                                     trade['qty'] *= 0.5
                                     trade['booked_50'] = True
                                     self.log(f"💰 Booked 50% at {profit_pct:.1f}% profit")
-                                    
-                                    # Trail stop to breakeven
                                     trade['sl'] = trade['entry']
                                     
-                            elif profit_pct >= 10:  # 10% profit
-                                # Book another 30%
+                            elif profit_pct >= 10:
                                 if not trade.get('booked_80'):
                                     qty_to_book = trade['qty'] * 0.6
                                     if not self.is_mock:
@@ -2846,17 +2823,14 @@ class SniperBot:
                                     trade['qty'] *= 0.4
                                     trade['booked_80'] = True
                                     self.log(f"💰 Booked 80% total at {profit_pct:.1f}% profit")
-                                    
-                                    # Trail stop aggressively
                                     if trade['type'] in ["CE", "BUY"]:
-                                        trade['sl'] = max(trade['sl'], ltp * 0.97)  # Trail at 3%
+                                        trade['sl'] = max(trade['sl'], ltp * 0.97)
                                     else:
                                         trade['sl'] = min(trade['sl'], ltp * 1.03)
                             
-                            # Trail stop based on ATR
                             if self.state.get("atr", 0) > 0:
                                 if trade['type'] in ["CE", "BUY"]:
-                                    new_sl = ltp - (self.state["atr"] * 0.5)  # Trail 0.5 ATR
+                                    new_sl = ltp - (self.state["atr"] * 0.5)
                                     if new_sl > trade['sl']:
                                         trade['sl'] = new_sl
                                 else:
@@ -2865,7 +2839,6 @@ class SniperBot:
                                         trade['sl'] = new_sl
                         
                         else:
-                            # Regular trailing logic
                             if trade['type'] == "SELL":
                                 lowest = trade.get('lowest_price', trade['entry'])
                                 if ltp < lowest:
@@ -2952,7 +2925,6 @@ class SniperBot:
                                     "Exit Price": ltp, "PnL": round(pnl, 2), "Result": win_text
                                 })
                             
-                            # Track Hero/Zero performance
                             if trade.get('is_hz'):
                                 self.state["hz_pnl"] += pnl
                                 if pnl > 0:
@@ -2987,7 +2959,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ SHREE</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ HERO</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -3122,7 +3094,6 @@ if not getattr(st.session_state, "bot", None):
 else:
     bot = st.session_state.bot
     
-    # --- HEADER with broker badge and connected exchanges ---
     head_c1, head_c2, head_c3 = st.columns([2, 1, 1])
     with head_c1: 
         broker_name = bot.settings.get("primary_broker", "Unknown")
@@ -3132,7 +3103,6 @@ else:
             unsafe_allow_html=True
         )
     with head_c2:
-        # Show connected exchanges
         connected = []
         if bot.api: connected.append("Angel")
         if bot.kite: connected.append("Zerodha")
@@ -3152,7 +3122,6 @@ else:
 
     st.sidebar.markdown("---")
 
-    # --- SIDEBAR (merged) ---
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
         
@@ -3229,7 +3198,7 @@ else:
         
         lot_multiplier = LOT_MULTIPLIERS.get(INDEX, 1)
         
-        col_r1, col_r2 = st.columns([3, 1])  # 3 parts for input, 1 for button
+        col_r1, col_r2 = st.columns([3, 1])
         with col_r1:
             if st.session_state.use_quantity_mode:
                 default_qty = float(st.session_state.user_lots.get(INDEX, 1.0)) * lot_multiplier
@@ -3240,8 +3209,7 @@ else:
                 LOTS = st.number_input("Lots", 0.01, 10000.0, value=default_lot_val, step=0.01, key=f"lot_input_{INDEX}")
                 st.caption(f"Quantity: {LOTS * lot_multiplier:.2f}")
         with col_r2:
-            st.markdown("######")  # spacer
-            # Double lot callback
+            st.markdown("######")
             def double_lot():
                 asset = st.session_state.sb_index_input
                 key = f"lot_input_{asset}"
@@ -3292,7 +3260,6 @@ else:
 
         render_signature()
 
-    # Update bot settings
     bot.settings = {
         "primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, 
         "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, 
@@ -3311,7 +3278,6 @@ else:
         "hz_max_hold": HZ_MAX_HOLD
     }
 
-    # Preload data
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
         st.session_state.prev_index = INDEX
         if bot.state.get("is_running"): bot.state["spot"] = 0.0 
@@ -3338,28 +3304,51 @@ else:
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_trend_rider_strategy(df_preload, INDEX)
                     else: 
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
+                    
+                    # Ensure common indicators for chart
+                    if df_preload is not None and not df_preload.empty:
+                        # Compute VWAP if not present
+                        if 'vwap' not in df_preload.columns:
+                            is_index = INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+                            if not is_index:
+                                df_preload['vwap'] = (df_preload['close'] * df_preload['volume']).cumsum() / df_preload['volume'].cumsum()
+                            else:
+                                df_preload['vwap'] = df_preload['close']
+                        # Compute EMA9 and EMA21 if not present
+                        if 'ema9' not in df_preload.columns:
+                            df_preload['ema9'] = df_preload['close'].ewm(span=9, adjust=False).mean()
+                        if 'ema21' not in df_preload.columns:
+                            df_preload['ema21'] = df_preload['close'].ewm(span=21, adjust=False).mean()
+                        # Compute AVWAP using calculate_indicators
+                        temp_df = bot.analyzer.calculate_indicators(df_preload, INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
+                        if 'avwap' in temp_df.columns:
+                            df_preload['avwap'] = temp_df['avwap']
+                    
                     bot.state.update({
                         "current_trend": t, "current_signal": s, 
                         "signal_strength": strength,
                         "vwap": v, "ema": e, "atr": atr, 
-                        "fib_data": fib, "latest_data": df_c
+                        "fib_data": fib, "latest_data": df_preload
                     })
 
     if not is_mkt_open: 
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
-    # ---- TABS ----
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 HERO/ZERO SCANNER"])
 
-    # ========== TAB1 : DASHBOARD (with news ticker) ==========
+    # ========== TAB1 : DASHBOARD ==========
     with tab1:
-        # --- News Ticker ---
         news_items = bot.state.get("news_cache", [])
         if not news_items:
             news_items = fetch_news(INDEX)
         if news_items:
             ticker_text = " 🔹 ".join([f"{n['title']} ({n['source']})" for n in news_items])
             st.markdown(f'<div class="news-ticker"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+
+        # Get daily P&L
+        daily_pnl = bot.state.get("daily_pnl", 0.0)
+        pnl_color = "#22c55e" if daily_pnl >= 0 else "#ef4444"
+        pnl_sign = "+" if daily_pnl > 0 else ""
 
         exch, _ = bot.get_token_info(INDEX)
         if exch == "MT5": term_type = "🌍 MT5 Forex Terminal (Web Bridge)"
@@ -3372,8 +3361,16 @@ else:
                 <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
                 <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
-                    <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
-                    <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
+                    <div style="display: flex; justify-content: space-between;">
+                        <div>
+                            <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
+                            <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
+                            <span style="font-size: 1.2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         """, unsafe_allow_html=True)
@@ -3407,8 +3404,7 @@ else:
                 if bot.state["active_trade"]: bot.state["manual_exit"] = True
                 st.toast("System Terminated & Trades Closed", icon="☠️")
 
-       
-        # Hero/Zero Performance Stats
+        # Hero/Zero Performance Stats (only if enabled)
         if HERO_ZERO and bot.state.get("hz_trades"):
             hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
             st.markdown(f"""
@@ -3584,14 +3580,22 @@ else:
             }
             chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
 
+            # Add indicator lines if present
             if 'avwap' in chart_df.columns:
                 avwap_data = chart_df[['time', 'avwap']].dropna().rename(columns={'avwap': 'value'}).to_dict('records')
                 if avwap_data: chart_series.append({"type": 'Line', "data": avwap_data, "options": { "color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP' }})
             if 'vwap' in chart_df.columns:
                 vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
                 if vwap_data: chart_series.append({"type": 'Line', "data": vwap_data, "options": { "color": '#ff9800', "lineWidth": 2, "title": 'VWAP' }})
-            ema_col = 'ema_fast' if 'ema_fast' in chart_df.columns else 'ema9'
-            if ema_col in chart_df.columns:
+            # Look for EMA columns
+            ema_col = None
+            if 'ema_fast' in chart_df.columns:
+                ema_col = 'ema_fast'
+            elif 'ema_short' in chart_df.columns:
+                ema_col = 'ema_short'
+            elif 'ema9' in chart_df.columns:
+                ema_col = 'ema9'
+            if ema_col:
                 ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
                 if ema_data: chart_series.append({"type": 'Line', "data": ema_data, "options": { "color": '#0ea5e9', "lineWidth": 2, "title": 'EMA' }})
 
@@ -3616,7 +3620,6 @@ else:
                             low_52 = hist['Low'].min()
                             atr = (hist['High'] - hist['Low']).rolling(14).mean().iloc[-1]
                             
-                            # Determine bias: if price above midpoint, bias long, else short
                             midpoint = (high_52 + low_52) / 2
                             if ltp > midpoint:
                                 direction = "LONG"
@@ -3881,9 +3884,9 @@ else:
                 compounding_calculator()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== TAB5 : HERO/ZERO SCANNER ==========
+    # ========== TAB5 : HERO/ZERO SCANNER (with Penny Stocks & Pin Bars) ==========
     with tab5:
-        st.subheader("🎯 Hero/Zero Scanner - Nifty 50 Stocks")
+        st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
         
         col_hz1, col_hz2 = st.columns(2)
         with col_hz1:
@@ -3892,10 +3895,11 @@ else:
             scan_button = st.button("🔍 Scan Hero/Zero Now", use_container_width=True, type="primary")
         
         if scan_button:
-            with st.spinner("Scanning Nifty 50 stocks for Hero/Zero patterns..."):
-                results = bot.scan_hero_zero_indian_stocks()
-                if not results.empty:
-                    st.success(f"Found {len(results)} Hero/Zero opportunities!")
+            with st.spinner("Scanning for Hero/Zero patterns..."):
+                st.markdown("### Nifty 50 Stocks")
+                nifty_results = bot.scan_hero_zero_indian_stocks()
+                if not nifty_results.empty:
+                    st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
                     
                     def color_direction(val):
                         if "HERO" in val:
@@ -3904,37 +3908,54 @@ else:
                             return 'background-color: #ef4444; color: white'
                         return ''
                     
-                    styled_results = results.style.map(color_direction, subset=['Direction'])
+                    styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
                     st.dataframe(styled_results, use_container_width=True, hide_index=True)
-                    
-                    st.markdown("### 📝 Entry Instructions")
-                    st.info("""
-                    **For HERO (BUY):**
-                    - **Entry:** Current price
-                    - **Stop Loss:** 1.5x ATR below entry
-                    - **Target 1:** 3x ATR above entry (Book 50%)
-                    - **Target 2:** 5x ATR above entry (Book remaining)
-                    - **Risk/Reward:** 1:2
-                    
-                    **For ZERO (SELL):**
-                    - **Entry:** Current price
-                    - **Stop Loss:** 1.5x ATR above entry
-                    - **Target 1:** 3x ATR below entry (Book 50%)
-                    - **Target 2:** 5x ATR below entry (Book remaining)
-                    - **Risk/Reward:** 1:2
-                    """)
-                    
-                    st.markdown("### ⏰ Best Trading Times (IST)")
-                    st.markdown("""
-                    - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
-                    - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
-                    - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
-                    - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
-                    """)
                 else:
-                    st.info("No Hero/Zero opportunities found at this moment")
+                    st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
+                
+                st.markdown("### Penny Stocks")
+                penny_results = bot.scan_penny_stocks()
+                if not penny_results.empty:
+                    st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
+                    penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
+                    st.dataframe(penny_styled, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
+                
+                st.markdown("### Pin Bar Reversals (Indices & Gold)")
+                pin_results = bot.scan_pin_bars()
+                if pin_results:
+                    pin_df = pd.DataFrame(pin_results)
+                    st.dataframe(pin_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No pin bar reversals detected at this moment")
+                
+                st.markdown("### 📝 Entry Instructions")
+                st.info("""
+                **For HERO (BUY):**
+                - **Entry:** Current price
+                - **Stop Loss:** 1.5x ATR below entry
+                - **Target 1:** 3x ATR above entry (Book 50%)
+                - **Target 2:** 5x ATR above entry (Book remaining)
+                - **Risk/Reward:** 1:2
+                
+                **For ZERO (SELL):**
+                - **Entry:** Current price
+                - **Stop Loss:** 1.5x ATR above entry
+                - **Target 1:** 3x ATR below entry (Book 50%)
+                - **Target 2:** 5x ATR below entry (Book remaining)
+                - **Risk/Reward:** 1:2
+                """)
+                
+                st.markdown("### ⏰ Best Trading Times (IST)")
+                st.markdown("""
+                - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
+                - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
+                - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
+                - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
+                """)
 
-    # ========== Bottom Dock (single row) ==========
+    # ========== Bottom Dock ==========
     def cycle_asset():
         assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
         if st.session_state.sb_index_input in assets:
@@ -3945,7 +3966,6 @@ else:
     def cycle_strat():
         st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
 
-    # Use custom HTML/CSS for a fixed bottom dock with three buttons in one row
     st.markdown("""
     <div class="bottom-dock">
         <button onclick="document.querySelector('[data-testid=\\'baseButton-dock_back\\']').click()">◀️</button>
@@ -3954,7 +3974,6 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-    # Hidden buttons to trigger functions
     col1, col2, col3 = st.columns(3)
     with col1:
         st.button("◀️", key="dock_back", on_click=cycle_asset, help="Cycle Asset")
@@ -3966,4 +3985,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
