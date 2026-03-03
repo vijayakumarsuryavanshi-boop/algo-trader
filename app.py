@@ -260,7 +260,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS
 # ==========================================
-st.set_page_config(page_title="HERO", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -617,7 +617,7 @@ class MT5WebBridge:
                 "tp": tp if tp else 0,
                 "deviation": 20,
                 "magic": 234000,
-                "comment": "HERO Algo",
+                "comment": "SHREE Algo",
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
@@ -730,7 +730,7 @@ class BackgroundProcessManager:
         self.process = None
         self.running = False
         self.pid_file = "HERO_bot.pid"
-        self.log_file = "HERO_bot.log"
+        self.log_file = "SHREE_bot.log"
         
     def is_process_running(self, pid):
         try:
@@ -764,17 +764,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%%(asctime)s - %%(levelname)s - %%(message)s',
     handlers=[
-        logging.FileHandler('HERO_bg.log'),
+        logging.FileHandler('SHREE_bg.log'),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger('HERO_BG')
+logger = logging.getLogger('SHREE_BG')
 
 try:
     with open('bot_config.json', 'r') as f:
         config = json.load(f)
     
-    logger.info(f"Starting HERO background bot")
+    logger.info(f"Starting SHREE background bot")
     logger.info(f"Running 24/7 - Will trade according to market hours")
     
     running = True
@@ -1857,7 +1857,7 @@ class SniperBot:
         @app.route('/tv_webhook', methods=['POST'])
         def webhook():
             data = request.json
-            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "HERO123"):
+            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
                 action = data.get("action", "WAIT").upper()
                 symbol = data.get("symbol", "").upper()
                 self.state["tv_signal"] = {"action": action, "symbol": symbol, "timestamp": time.time()}
@@ -2987,7 +2987,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ HERO</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ SHREE</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -3966,3 +3966,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
