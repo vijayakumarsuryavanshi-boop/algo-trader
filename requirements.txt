@@ -18,6 +18,8 @@ plyer
 flask
 scikit-learn
 logzero
+websocket
+
 
 
 
