@@ -22,6 +22,14 @@ XlsxWriter
 supabase
 kiteconnect
 Flask
+scikit-learn>=1.0.0              # ML strategies
+mt5linux
+textblob>=0.17.1                  # News sentiment
+vaderSentiment>=3.3.2             # Alternative sentiment
+MetaTrader5
+feedparser
+
+
 
 
 
