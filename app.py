@@ -261,7 +261,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS
 # ==========================================
-st.set_page_config(page_title="HERO", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -364,7 +364,7 @@ st.markdown("""
     .risk-medium { color: #fbbf24; font-weight: bold; }
     .risk-high { color: #ef4444; font-weight: bold; }
     
-    .hero-badge { background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+    .SHREE-badge { background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .zero-badge { background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .hz-stats { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 8px; margin: 10px 0; }
     
@@ -594,7 +594,7 @@ class MT5WebBridge:
                 "tp": tp if tp else 0,
                 "deviation": 20,
                 "magic": 234000,
-                "comment": "HERO Algo",
+                "comment": "SHREE Algo",
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
@@ -703,8 +703,8 @@ class BackgroundProcessManager:
     def __init__(self):
         self.process = None
         self.running = False
-        self.pid_file = "HERO_bot.pid"
-        self.log_file = "HERO_bot.log"
+        self.pid_file = "SHREE_bot.pid"
+        self.log_file = "SHREE_bot.log"
         
     def is_process_running(self, pid):
         try:
@@ -738,17 +738,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%%(asctime)s - %%(levelname)s - %%(message)s',
     handlers=[
-        logging.FileHandler('HERO_bg.log'),
+        logging.FileHandler('SHREE_bg.log'),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger('HERO_BG')
+logger = logging.getLogger('SHREE_BG')
 
 try:
     with open('bot_config.json', 'r') as f:
         config = json.load(f)
     
-    logger.info(f"Starting HERO background bot")
+    logger.info(f"Starting SHREE background bot")
     logger.info(f"Running 24/7 - Will trade according to market hours")
     
     running = True
@@ -1809,7 +1809,7 @@ class SniperBot:
         @app.route('/tv_webhook', methods=['POST'])
         def webhook():
             data = request.json
-            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "HERO123"):
+            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
                 action = data.get("action", "WAIT").upper()
                 symbol = data.get("symbol", "").upper()
                 self.state["tv_signal"] = {"action": action, "symbol": symbol, "timestamp": time.time()}
@@ -2077,7 +2077,7 @@ class SniperBot:
         df.index = df['timestamp']
         return df
 
-    def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
+    def analyze_oi_and_greeks(self, df, is_SHREE_zero, signal):
         if not is_hero_zero or df is None or len(df) < 20:
             return True, ""
         
@@ -2962,7 +2962,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ HERO</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ SHREE</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -3161,7 +3161,7 @@ else:
         TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
         
         CUSTOM_CODE = ""
-        TV_PASSPHRASE = "HERO123"
+        TV_PASSPHRASE = "SHREE123"
         if STRATEGY == "Keyword Rule Builder":
             st.divider()
             st.markdown("**🧠 Keyword Logic Builder**")
@@ -3179,7 +3179,7 @@ else:
             st.markdown("**📡 TradingView Integration**")
             if HAS_FLASK:
                 st.success(f"Webhook URL: `http://{bot.client_ip}:5000/tv_webhook`")
-                TV_PASSPHRASE = st.text_input("Webhook Passphrase", value="HERO123")
+                TV_PASSPHRASE = st.text_input("Webhook Passphrase", value="SHREE123")
         
         if BROKER in ["CoinDCX", "Delta Exchange"]:
             st.divider()
@@ -3990,3 +3990,4 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
+
