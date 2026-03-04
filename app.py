@@ -261,7 +261,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 # 2. UI & CUSTOM CSS
 # ==========================================
-st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="HERO", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -364,7 +364,7 @@ st.markdown("""
     .risk-medium { color: #fbbf24; font-weight: bold; }
     .risk-high { color: #ef4444; font-weight: bold; }
     
-    .SHREE-badge { background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+    .hero-badge { background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .zero-badge { background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .hz-stats { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 8px; margin: 10px 0; }
     
@@ -506,7 +506,7 @@ def get_angel_scrip_master():
     except Exception: return pd.DataFrame()
 
 # ==========================================
-# 4. MT5 WEB API BRIDGE
+# 4. MT5 WEB API BRIDGE (kept from script1)
 # ==========================================
 class MT5WebBridge:
     def __init__(self, account=None, password=None, server=None, api_url=None):
@@ -594,7 +594,7 @@ class MT5WebBridge:
                 "tp": tp if tp else 0,
                 "deviation": 20,
                 "magic": 234000,
-                "comment": "SHREE Algo",
+                "comment": "HERO Algo",
                 "type_time": mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
@@ -703,8 +703,8 @@ class BackgroundProcessManager:
     def __init__(self):
         self.process = None
         self.running = False
-        self.pid_file = "SHREE_bot.pid"
-        self.log_file = "SHREE_bot.log"
+        self.pid_file = "HERO_bot.pid"
+        self.log_file = "HERO_bot.log"
         
     def is_process_running(self, pid):
         try:
@@ -738,17 +738,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%%(asctime)s - %%(levelname)s - %%(message)s',
     handlers=[
-        logging.FileHandler('SHREE_bg.log'),
+        logging.FileHandler('HERO_bg.log'),
         logging.StreamHandler()
     ]
 )
-logger = logging.getLogger('SHREE_BG')
+logger = logging.getLogger('HERO_BG')
 
 try:
     with open('bot_config.json', 'r') as f:
         config = json.load(f)
     
-    logger.info(f"Starting SHREE background bot")
+    logger.info(f"Starting HERO background bot")
     logger.info(f"Running 24/7 - Will trade according to market hours")
     
     running = True
@@ -866,7 +866,7 @@ logger.info("Background bot stopped")
 BACKGROUND_BOT = BackgroundProcessManager()
 
 # ==========================================
-# 6. HIGH PROFIT STRATEGY MODULES
+# 6. HIGH PROFIT STRATEGY MODULES (from script1)
 # ==========================================
 class ScalpingModule:
     def __init__(self, bot):
@@ -1285,7 +1285,7 @@ def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
         st.error(f"Error in scalper: {e}")
 
 # ==========================================
-# 7. TECHNICAL ANALYZER
+# 7. TECHNICAL ANALYZER (enhanced with script2 fixes and script1 extras)
 # ==========================================
 class TechnicalAnalyzer:
     def get_atr(self, df, period=14):
@@ -1735,7 +1735,7 @@ def fetch_news(query="stock market"):
     return news_list
 
 # ==========================================
-# 9. CORE BOT ENGINE
+# 9. CORE BOT ENGINE (enhanced with script2 execution fixes)
 # ==========================================
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", mt5_api_url="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", is_mock=False):
@@ -1809,7 +1809,7 @@ class SniperBot:
         @app.route('/tv_webhook', methods=['POST'])
         def webhook():
             data = request.json
-            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
+            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "HERO123"):
                 action = data.get("action", "WAIT").upper()
                 symbol = data.get("symbol", "").upper()
                 self.state["tv_signal"] = {"action": action, "symbol": symbol, "timestamp": time.time()}
@@ -2077,7 +2077,7 @@ class SniperBot:
         df.index = df['timestamp']
         return df
 
-    def analyze_oi_and_greeks(self, df, is_SHREE_zero, signal):
+    def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
         if not is_hero_zero or df is None or len(df) < 20:
             return True, ""
         
@@ -2359,18 +2359,11 @@ class SniperBot:
                 except: pass
 
                 if market_type in ["Futures", "Options"]:
-                    ltp = self.get_live_price(exchange, symbol, token)
-                    if ltp is None:
-                        self.log("❌ Cannot get LTP for limit order")
-                        return None
-                    limit_price = ltp * 1.001 if side.upper() == "BUY" else ltp * 0.999
-                    limit_price = round(limit_price, 2)
                     payload = {
                         "side": side.lower(),
-                        "order_type": "limit_order",
+                        "order_type": "market",
                         "pair": exact_pair,
                         "total_quantity": clean_qty,
-                        "limit_price": limit_price,
                         "timestamp": ts
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
@@ -2420,6 +2413,7 @@ class SniperBot:
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             
+            # 🛡️ Anti-Freak Trade Protection for Options
             order_type = "MARKET"
             exec_price = 0.0
             
@@ -2962,7 +2956,7 @@ if not getattr(st.session_state, "bot", None):
     with login_col:
         st.markdown("""
             <div style='text-align: center; background: linear-gradient(135deg, #0f111a, #0284c7); padding: 30px; border-radius: 4px 4px 0 0; border-bottom: none;'>
-                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ SHREE</h1>
+                <h1 style='color: white; margin:0; font-weight: 900; letter-spacing: 2px; font-size: 2.2rem;'>🕉️ HERO</h1>
                 <p style='color: #bae6fd; margin-top:5px; font-size: 1rem; font-weight: 600; letter-spacing: 1px;'>SECURE MULTI-BROKER GATEWAY</p>
             </div>
         """, unsafe_allow_html=True)
@@ -3161,7 +3155,7 @@ else:
         TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
         
         CUSTOM_CODE = ""
-        TV_PASSPHRASE = "SHREE123"
+        TV_PASSPHRASE = "HERO123"
         if STRATEGY == "Keyword Rule Builder":
             st.divider()
             st.markdown("**🧠 Keyword Logic Builder**")
@@ -3179,7 +3173,7 @@ else:
             st.markdown("**📡 TradingView Integration**")
             if HAS_FLASK:
                 st.success(f"Webhook URL: `http://{bot.client_ip}:5000/tv_webhook`")
-                TV_PASSPHRASE = st.text_input("Webhook Passphrase", value="SHREE123")
+                TV_PASSPHRASE = st.text_input("Webhook Passphrase", value="HERO123")
         
         if BROKER in ["CoinDCX", "Delta Exchange"]:
             st.divider()
@@ -3990,4 +3984,3 @@ else:
     if bot.state.get("is_running"):
         time.sleep(2)
         st.rerun()
-
