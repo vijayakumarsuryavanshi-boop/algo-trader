@@ -109,6 +109,8 @@ if 'asset_options' not in st.session_state:
     st.session_state.asset_options = ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "XAUUSD", "BTCUSD", "ETHUSD", "SOLUSD"]
 if 'use_quantity_mode' not in st.session_state:
     st.session_state.use_quantity_mode = False
+if 'hz_demo_mode' not in st.session_state:
+    st.session_state.hz_demo_mode = False
 
 # ==========================================
 # 0. DATABASE & GLOBAL HELPERS
@@ -2155,8 +2157,8 @@ class SniperBot:
         }
 
     def scan_hero_zero_indian_stocks(self, nifty_stocks=None):
-        # If in mock mode, generate synthetic data
-        if self.is_mock:
+        # If demo mode is active (checked in UI), return mock data regardless of mock flag
+        if st.session_state.get('hz_demo_mode', False):
             mock_results = []
             stocks = nifty_stocks if nifty_stocks else ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"]
             for stock in stocks:
@@ -2174,7 +2176,7 @@ class SniperBot:
                 })
             return pd.DataFrame(mock_results)
         
-        # Real scanning logic
+        # Real scanning logic (used when demo mode is off)
         if nifty_stocks is None:
             nifty_stocks = [
                 "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY",
@@ -2207,22 +2209,23 @@ class SniperBot:
                 last = df.iloc[-1]
                 prev = df.iloc[-2]
                 
+                # Relaxed conditions for real mode
                 is_hero = (
                     last['Close'] > last['ema9'] and
                     last['ema9'] > last['ema21'] and
-                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.5 and
-                    last['Close'] > prev['High'] and
-                    (last['Close'] - last['Low']) > (last['High'] - last['Close']) * 2 and
-                    (last['High'] - last['Low']) > atr * 0.5
+                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and  # reduced from 1.5
+                    last['Close'] > prev['High'] * 0.99 and  # allow slightly below previous high
+                    (last['Close'] - last['Low']) > (last['High'] - last['Close']) * 1.5 and
+                    (last['High'] - last['Low']) > atr * 0.4
                 )
                 
                 is_zero = (
                     last['Close'] < last['ema9'] and
                     last['ema9'] < last['ema21'] and
-                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.5 and
-                    last['Close'] < prev['Low'] and
-                    (last['High'] - last['Close']) > (last['Close'] - last['Low']) * 2 and
-                    (last['High'] - last['Low']) > atr * 0.5
+                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and
+                    last['Close'] < prev['Low'] * 1.01 and
+                    (last['High'] - last['Close']) > (last['Close'] - last['Low']) * 1.5 and
+                    (last['High'] - last['Low']) > atr * 0.4
                 )
                 
                 if is_hero or is_zero:
@@ -2264,7 +2267,7 @@ class SniperBot:
         return self.scan_hero_zero_indian_stocks(penny_list)
 
     def scan_pin_bars(self):
-        if self.is_mock:
+        if st.session_state.get('hz_demo_mode', False):
             mock_pins = []
             symbols = ["NIFTY", "SENSEX", "BANKNIFTY", "GOLD"]
             for sym in symbols:
@@ -3888,11 +3891,13 @@ else:
     with tab5:
         st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
         
-        col_hz1, col_hz2 = st.columns(2)
+        col_hz1, col_hz2, col_hz3 = st.columns(3)
         with col_hz1:
             min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
         with col_hz2:
             scan_button = st.button("🔍 Scan Hero/Zero Now", use_container_width=True, type="primary")
+        with col_hz3:
+            st.session_state.hz_demo_mode = st.checkbox("Use Demo Data", value=False, help="Generate sample signals even in real mode")
         
         if scan_button:
             with st.spinner("Scanning for Hero/Zero patterns..."):
