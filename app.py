@@ -84,31 +84,34 @@ except ImportError:
     HAS_FEEDPARSER = False
 
 # ==========================================
-# SOUND FUNCTIONS (UI based, uses components.html)
+# Interactive Brokers (requires ib_insync)
+# ==========================================
+try:
+    from ib_insync import *
+    HAS_IB = True
+except ImportError:
+    HAS_IB = False
+
+# ==========================================
+# SOUND FUNCTIONS (fixed – reliable beep)
 # ==========================================
 def play_sound_ui(sound_type="entry"):
-    """Play a sound via HTML5 audio (works in cloud). Requires audio enabled."""
+    """Play a sound via HTML5 audio."""
     if not st.session_state.get("audio_enabled", False):
-        return  # Audio not enabled yet
-    sound_map = {
-        "entry": "https://cdn.freesound.org/previews/320/320655_5260872-lq.mp3",  # short beep
-        "tp": "https://cdn.freesound.org/previews/320/320655_5260872-lq.mp3",     # success sound
-        "sl": "https://cdn.freesound.org/previews/256/256116_4486188-lq.mp3"      # error buzz
-    }
-    url = sound_map.get(sound_type, sound_map["entry"])
+        return
+    # Use a reliable beep URL
+    beep_url = "https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3"
     components.html(f"""
         <audio autoplay>
-            <source src="{url}" type="audio/mpeg">
+            <source src="{beep_url}" type="audio/mpeg">
         </audio>
     """, height=0)
 
 def unlock_audio():
-    """Play a silent sound to unlock audio in the browser."""
-    # Use a very short silent MP3 (base64 encoded)
-    silent_mp3 = "data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTG9uZWx5TWVkaWEuY29tIFNvdW5kIEVmZmVjdHMAAAAAAFRBTkNFAAAAQ29udGVudCBUaGF0IFdvcmtzLCBJbmMuIAAAADM2MDAwMDAwTk9STUFMAAAAJVRoYXRzIGEgdGVzdCBzb3VuZC4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
-    components.html(f"""
+    """Silent sound to unlock audio in browser."""
+    components.html("""
         <audio autoplay>
-            <source src="{silent_mp3}" type="audio/mp3">
+            <source src="data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTG9uZWx5TWVkaWEuY29tIFNvdW5kIEVmZmVjdHMAAAAAAFRBTkNFAAAAQ29udGVudCBUaGF0IFdvcmtzLCBJbmMuIAAAADM2MDAwMDAwTk9STUFMAAAAJVRoYXRzIGEgdGVzdCBzb3VuZC4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" type="audio/mp3">
         </audio>
     """, height=0)
 
@@ -118,19 +121,14 @@ def unlock_audio():
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
 def generate_market_prediction(asset="NIFTY"):
-    """Generate a market movement prediction based on bot's current signal."""
     if st.session_state.bot is None:
         return "⚖️ Market prediction unavailable (bot not started)"
-    
     bot = st.session_state.bot
     signal = bot.state.get("current_signal", "WAIT")
     strength = bot.state.get("signal_strength", 0)
     trend = bot.state.get("current_trend", "Neutral")
-    
-    # Use ML probabilities if available
     ml_up = bot.state.get("ml_prob_up", 50)
     ml_down = bot.state.get("ml_prob_down", 50)
-    
     if signal == "BUY_CE":
         direction = "🟢 UP"
         confidence = strength
@@ -138,7 +136,6 @@ def generate_market_prediction(asset="NIFTY"):
         direction = "🔴 DOWN"
         confidence = strength
     else:
-        # If no signal, use ML or neutral
         if ml_up > ml_down + 10:
             direction = "🟢 UP (ML)"
             confidence = ml_up
@@ -148,13 +145,11 @@ def generate_market_prediction(asset="NIFTY"):
         else:
             direction = "⚪ SIDEWAYS"
             confidence = 50
-    
     return f"📈 Prediction: Market likely to move {direction} in next 30 mins | Confidence: {confidence:.0f}% | {trend}"
 
 import xml.etree.ElementTree as ET
 
 def fetch_feed(url):
-    """Fetch and parse an RSS feed using requests and ElementTree."""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10)
         resp.raise_for_status()
@@ -168,10 +163,8 @@ def fetch_feed(url):
     except Exception:
         return None
 
-@st.cache_data(ttl=3000)
+@st.cache_data(ttl=600)
 def fetch_english_news(asset="NIFTY"):
-    """Live English news from multiple sources; fallback to market prediction."""
-    # Try Google News RSS first
     asset_terms = {
         "NIFTY": "Nifty 50",
         "BANKNIFTY": "Bank Nifty",
@@ -188,52 +181,36 @@ def fetch_english_news(asset="NIFTY"):
     term = asset_terms.get(asset, asset)
     query = f"{term} stock market"
     google_url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
-    
     titles = fetch_feed(google_url)
     if titles and len(titles) >= 3:
         return [f"📰 {t}" for t in titles[:8]]
-    
-    # Try Reuters Money News as backup
     reuters_url = "https://feeds.reuters.com/news/wealth"
     titles = fetch_feed(reuters_url)
     if titles and len(titles) >= 3:
         return [f"📰 {t}" for t in titles[:8]]
-    
-    # Try a simple Yahoo Finance RSS (if available)
     yahoo_url = f"https://finance.yahoo.com/news/rssindex"
     titles = fetch_feed(yahoo_url)
     if titles and len(titles) >= 3:
         return [f"📰 {t}" for t in titles[:8]]
-    
-    # If all live sources fail, return market prediction
     return [generate_market_prediction(asset)]
 
-@st.cache_data(ttl=3000)
+@st.cache_data(ttl=600)
 def fetch_kannada_news(asset="NIFTY"):
-    """Fetch live Kannada news from multiple RSS sources; fallback to market prediction."""
-    
-    # List of working Kannada news RSS feeds (business/finance sections)
     rss_feeds = [
-        "https://kannada.oneindia.com/rss/news-business-feed.xml",  # OneIndia Kannada – Business
-        "https://www.prajavani.net/rss/ವಾಣಿಜ್ಯ",                    # Prajavani – Business (Kannada in URL)
-        "https://vijaykarnataka.com/rss/business",                  # Vijay Karnataka – Business
-        "https://kannada.asianetnews.com/rss/business"              # Asianet News – Business
+        "https://kannada.oneindia.com/rss/news-business-feed.xml",
+        "https://www.prajavani.net/rss/ವಾಣಿಜ್ಯ",
+        "https://vijaykarnataka.com/rss/business",
+        "https://kannada.asianetnews.com/rss/business"
     ]
-    
-    # Try each feed until we get at least 3 headlines
     for feed_url in rss_feeds:
         try:
-            titles = fetch_feed(feed_url)  # uses your existing fetch_feed function
+            titles = fetch_feed(feed_url)
             if titles and len(titles) >= 3:
-                # Return first 5 headlines
                 return [f"📰 {t}" for t in titles[:5]]
-        except Exception as e:
-            # Optional: log the error for debugging (remove in production)
-            # print(f"Kannada feed failed: {feed_url} – {e}")
+        except Exception:
             continue
-    
-    # If no live news, return market prediction based on bot's signal
     return [generate_market_prediction(asset)]
+
 # ==========================================
 # SESSION STATE INITIALIZATION
 # ==========================================
@@ -241,20 +218,15 @@ import threading
 import time
 
 def news_updater():
-    """Background thread to update news every 2 hours."""
     while True:
-        # Update Kannada and English news for the current asset
         asset = st.session_state.get('sb_index_input', 'NIFTY')
         st.session_state.kannada_news = fetch_kannada_news(asset)
         st.session_state.english_news = fetch_english_news(asset)
-        # Sleep for 2 hours
-        time.sleep(7200)
+        time.sleep(600)
 
-# Initialize news in session state
 if 'kannada_news' not in st.session_state:
     st.session_state.kannada_news = []
     st.session_state.english_news = []
-    # Start background thread only once
     if 'news_thread_started' not in st.session_state:
         thread = threading.Thread(target=news_updater, daemon=True)
         thread.start()
@@ -284,7 +256,7 @@ if 'audio_enabled' not in st.session_state:
     st.session_state.audio_enabled = False
 
 # ==========================================
-# 0. DATABASE & GLOBAL HELPERS
+# DATABASE & GLOBAL HELPERS
 # ==========================================
 def safe_secrets_get(key, default=None):
     try:
@@ -382,7 +354,7 @@ def get_market_status(asset_name):
     return False, "Equity Market Closed (After Hours)"
 
 # ==========================================
-# 1. DATABASE FUNCTIONS 
+# DATABASE FUNCTIONS 
 # ==========================================
 def get_user_hash(user_id):
     if not user_id: return "guest"
@@ -401,10 +373,10 @@ def load_creds(user_id):
         "tg_token": "", "tg_chat": "", "wa_phone": "", "wa_api": "", 
         "mt5_acc": "", "mt5_pass": "", "mt5_server": "", "mt5_api_url": "",
         "zerodha_api": "", "zerodha_secret": "", "coindcx_api": "", "coindcx_secret": "",
-        "delta_api": "", "delta_secret": ""
+        "delta_api": "", "delta_secret": "", "ib_host": "", "ib_port": 7497, "ib_client_id": 1
     }
 
-def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_chat, wa_phone, wa_api, mt5_acc, mt5_pass, mt5_server, mt5_api_url, zerodha_api, zerodha_secret, coindcx_api, coindcx_secret, delta_api, delta_secret):
+def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_chat, wa_phone, wa_api, mt5_acc, mt5_pass, mt5_server, mt5_api_url, zerodha_api, zerodha_secret, coindcx_api, coindcx_secret, delta_api, delta_secret, ib_host, ib_port, ib_client_id):
     if HAS_DB:
         data = {
             "user_id": user_id, "angel_api": angel_api, "client_id": client_id, "pwd": pwd, 
@@ -413,7 +385,8 @@ def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_cha
             "mt5_acc": mt5_acc, "mt5_pass": mt5_pass, "mt5_server": mt5_server, "mt5_api_url": mt5_api_url,
             "zerodha_api": zerodha_api, "zerodha_secret": zerodha_secret,
             "coindcx_api": coindcx_api, "coindcx_secret": coindcx_secret,
-            "delta_api": delta_api, "delta_secret": delta_secret
+            "delta_api": delta_api, "delta_secret": delta_secret,
+            "ib_host": ib_host, "ib_port": ib_port, "ib_client_id": ib_client_id
         }
         try: supabase.table("user_credentials").upsert(data).execute()
         except: pass
@@ -430,7 +403,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
         except: pass
 
 # ==========================================
-# 2. UI & CUSTOM CSS (with slower ticker)
+# UI & CUSTOM CSS
 # ==========================================
 st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
@@ -575,7 +548,7 @@ st.markdown("""
     .news-ticker span {
         display: inline-block;
         padding-left: 100%;
-        animation: ticker 60s linear infinite;  /* slower */
+        animation: ticker 60s linear infinite;
     }
     @keyframes ticker {
         0% { transform: translateX(0); }
@@ -607,22 +580,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. CONSTANTS AND DEFAULTS
+# CONSTANTS AND DEFAULTS
 # ==========================================
-DEFAULT_LOTS = {
-    "NIFTY": 65, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250, 
-    "GOLD": 100, "SILVER": 30, "XAUUSD": 0.01, "EURUSD": 0.01, "BTCUSD": 0.01, 
-    "ETHUSD": 0.1, "SOLUSD": 1.0, "INDIA VIX": 1,
-    "XRPUSD": 10.0, "ARBUSD": 1.0, "ADAUSD": 10.0, "XAGUSD": 0.1, "DOGEUSD": 100.0, 
-    "BNBUSD": 0.05, "1000PEPEUSD": 1.0, "SUIUSD": 1.0, "NEARUSD": 1.0, "ENAUSD": 1.0, 
-    "TIAUSD": 1.0, "1000BONKUSD": 1.0, "MEUSD": 1.0,
-    "FETUSD": 1.0, "RNDRUSD": 1.0, "TAOUSD": 0.01, "INJUSD": 1.0, "AGIXUSD": 1.0
-}
-
-LOT_MULTIPLIERS = {
-    "NIFTY": 65, "BANKNIFTY": 30, "SENSEX": 20, "CRUDEOIL": 100, "NATURALGAS": 1250,
-    "GOLD": 100, "SILVER": 30, "XAUUSD": 1, "EURUSD": 1, "BTCUSD": 1, "ETHUSD": 1,
-    "SOLUSD": 1, "XRPUSD": 1, "ADAUSD": 1, "DOGEUSD": 1, "BNBUSD": 1
+LOT_SIZES = {
+    "NIFTY": 65,
+    "BANKNIFTY": 30,
+    "SENSEX": 20,
+    "CRUDEOIL": 100,
+    "NATURALGAS": 1250,
+    "GOLD": 100,
+    "SILVER": 30,
+    "XAUUSD": 1,
+    "EURUSD": 1,
+    "BTCUSD": 1,
+    "ETHUSD": 1,
+    "SOLUSD": 1,
+    "XRPUSD": 1,
+    "ADAUSD": 1,
+    "DOGEUSD": 1,
+    "BNBUSD": 1
 }
 
 YF_TICKERS = {
@@ -640,16 +616,16 @@ INDEX_TOKENS = {"NIFTY": ("NSE", "26000"), "BANKNIFTY": ("NSE", "26009"), "INDIA
 
 STRAT_LIST = [
     "Momentum Breakout + S&R",
-    "Indian Options Scalper (Nifty/BankNifty)",
     "Machine Learning",
     "VIJAY & RFF All-In-One", 
-    "Institutional FVG + SMC", 
+    "Institutional FVG + SMC",
+    "Lux Algo Institutional ICT",
     "Keyword Rule Builder", 
     "TradingView Webhook"
 ]
 
 if not st.session_state.user_lots:
-    st.session_state.user_lots = DEFAULT_LOTS.copy()
+    st.session_state.user_lots = LOT_SIZES.copy()
 
 is_mkt_open, mkt_status_msg = get_market_status(st.session_state.sb_index_input)
 
@@ -664,7 +640,7 @@ def get_angel_scrip_master():
     except Exception: return pd.DataFrame()
 
 # ==========================================
-# 4. MT5 WEB API BRIDGE
+# BROKER BRIDGES (MT5, IB)
 # ==========================================
 class MT5WebBridge:
     def __init__(self, account=None, password=None, server=None, api_url=None):
@@ -747,7 +723,7 @@ class MT5WebBridge:
                 "symbol": symbol,
                 "volume": float(volume),
                 "type": mt5.ORDER_TYPE_BUY if order_type.upper() == "BUY" else mt5.ORDER_TYPE_SELL,
-                "price": mt5.symbol_info_tick(symbol).ask if order_type.upper() == "BUY" else mt5.symbol_info_tick(symbol).bid,
+                "price": 0.0,
                 "sl": sl if sl else 0,
                 "tp": tp if tp else 0,
                 "deviation": 20,
@@ -778,8 +754,10 @@ class MT5WebBridge:
                 if response.status_code == 200:
                     data = response.json()
                     return data.get('order_id'), "Order placed via web API"
-            except:
-                pass
+                else:
+                    return None, f"HTTP {response.status_code}: {response.text}"
+            except Exception as e:
+                return None, f"Exception: {e}"
         
         return None, "All MT5 connection methods failed"
     
@@ -854,177 +832,107 @@ class MT5WebBridge:
         self.connected = False
         self.token = None
 
+class IBBridge:
+    def __init__(self, host='127.0.0.1', port=7497, client_id=1):
+        self.host = host
+        self.port = port
+        self.client_id = client_id
+        self.ib = None
+        self.connected = False
+
+    def connect(self):
+        if not HAS_IB:
+            return False, "ib_insync not installed"
+        self.ib = IB()
+        try:
+            self.ib.connect(self.host, self.port, clientId=self.client_id)
+            self.connected = True
+            return True, "Connected to Interactive Brokers"
+        except Exception as e:
+            return False, f"IB connection failed: {e}"
+
+    def get_live_price(self, symbol, exchange='SMART', currency='USD'):
+        if not self.connected:
+            return None
+        contract = Stock(symbol, exchange, currency)
+        self.ib.reqMktData(contract, '', False, False)
+        time.sleep(1)
+        ticker = self.ib.ticker(contract)
+        return (ticker.bid + ticker.ask) / 2 if ticker.bid and ticker.ask else ticker.last
+
+    def place_order(self, symbol, qty, order_type, exchange='SMART', currency='USD'):
+        if not self.connected:
+            return None, "Not connected"
+        contract = Stock(symbol, exchange, currency)
+        action = 'BUY' if order_type.upper() == 'BUY' else 'SELL'
+        order = MarketOrder(action, qty)
+        trade = self.ib.placeOrder(contract, order)
+        self.ib.sleep(1)
+        if trade.orderStatus.status == 'Filled':
+            return trade.order.orderId, f"Order filled at {trade.orderStatus.avgFillPrice}"
+        return trade.order.orderId, f"Order submitted: {trade.orderStatus.status}"
+
+    def disconnect(self):
+        if self.ib:
+            self.ib.disconnect()
+        self.connected = False
+
 # ==========================================
-# 5. 24/7 BACKGROUND PROCESS MANAGER (kept but not exposed)
+# FOMO SCANNER (includes indices & commodities)
 # ==========================================
-class BackgroundProcessManager:
+class FOMOScanner:
     def __init__(self):
-        self.process = None
-        self.running = False
-        self.pid_file = "SHREE_bot.pid"
-        self.log_file = "SHREE_bot.log"
+        self.watchlist = {
+            "INDIAN_STOCKS": ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS"],
+            "US_STOCKS": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "NFLX", "DIS", "JPM"],
+            "CRYPTO": ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD"],
+            "INDICES": ["^NSEI", "^BSESN", "^NSEBANK"],
+            "COMMODITIES": ["GC=F", "SI=F", "CL=F", "NG=F"]
+        }
+        self.signals = deque(maxlen=50)
+        self.scan_interval = 60
+        self.last_scan = 0
         
-    def is_process_running(self, pid):
-        try:
-            if sys.platform == "win32":
-                result = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], 
-                                      capture_output=True, text=True, timeout=5)
-                return str(pid) in result.stdout
-            else:
-                os.kill(pid, 0)
-                return True
-        except:
-            return False
-        
-    def start_background_bot(self, bot_config):
-        if self.is_running():
-            return False, "Bot already running in background"
-        
-        config_file = "bot_config.json"
-        with open(config_file, 'w') as f:
-            json.dump(bot_config, f)
-        
-        bg_script = """
-import sys
-import json
-import time
-import logging
-from datetime import datetime
-import os
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%%(asctime)s - %%(levelname)s - %%(message)s',
-    handlers=[
-        logging.FileHandler('SHREE_bg.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger('SHREE_BG')
-
-try:
-    with open('bot_config.json', 'r') as f:
-        config = json.load(f)
-    
-    logger.info(f"Starting SHREE background bot")
-    logger.info(f"Running 24/7 - Will trade according to market hours")
-    
-    running = True
-    while running:
-        try:
-            if os.path.exists('stop_bot.flag'):
-                running = False
-                logger.info("Stop flag detected, shutting down")
-                break
-                
-            logger.info(f"Bot heartbeat at {datetime.now()}")
-            time.sleep(60)
-            
-        except Exception as e:
-            logger.error(f"Error in main loop: {e}")
-            time.sleep(60)
-            
-except Exception as e:
-    logger.error(f"Fatal error: {e}")
-    
-logger.info("Background bot stopped")
-"""
-        
-        with open("background_bot.py", 'w') as f:
-            f.write(bg_script)
-        
-        try:
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-                
-                self.process = subprocess.Popen(
-                    [sys.executable, "background_bot.py"],
-                    startupinfo=startupinfo,
-                    stdout=open(self.log_file, 'a'),
-                    stderr=subprocess.STDOUT,
-                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-                )
-            else:
-                pid = os.fork()
-                if pid == 0:
-                    os.setsid()
-                    pid2 = os.fork()
-                    if pid2 == 0:
-                        sys.stdout.flush()
-                        sys.stderr.flush()
-                        with open(self.log_file, 'a') as f:
-                            os.dup2(f.fileno(), sys.stdout.fileno())
-                            os.dup2(f.fileno(), sys.stderr.fileno())
-                        
-                        os.execvp(sys.executable, [sys.executable, "background_bot.py"])
-                        sys.exit(0)
-                    else:
-                        sys.exit(0)
-                else:
-                    os.waitpid(pid, 0)
-                    self.process = None
-            
-            with open(self.pid_file, 'w') as f:
-                f.write(str(self.process.pid if self.process else os.getpid()))
-            
-            self.running = True
-            return True, "Bot started in background (24/7 mode)"
-        except Exception as e:
-            return False, f"Failed to start background bot: {e}"
-    
-    def stop_background_bot(self):
-        try:
-            with open('stop_bot.flag', 'w') as f:
-                f.write('stop')
-            
-            if os.path.exists(self.pid_file):
-                with open(self.pid_file, 'r') as f:
-                    pid = int(f.read().strip())
-                
+    def scan(self):
+        signals = []
+        for category, tickers in self.watchlist.items():
+            for ticker in tickers:
                 try:
-                    if sys.platform == "win32":
-                        subprocess.run(["taskkill", "/F", "/PID", str(pid)], 
-                                     capture_output=True, timeout=5)
-                    else:
-                        os.kill(pid, signal.SIGTERM)
+                    df = yf.Ticker(ticker).history(period="1d", interval="5m")
+                    if len(df) < 20:
+                        continue
+                    df['volume_ma'] = df['Volume'].rolling(20).mean()
+                    df['volume_ratio'] = df['Volume'] / df['volume_ma']
+                    df['high_20'] = df['High'].rolling(20).max()
+                    df['low_20'] = df['Low'].rolling(20).min()
+                    last = df.iloc[-1]
+                    if last['volume_ratio'] > 1.5 and last['Close'] > last['high_20'] * 0.99:
+                        signals.append({
+                            "time": get_ist().strftime("%H:%M"),
+                            "symbol": ticker,
+                            "category": category,
+                            "price": round(last['Close'], 2),
+                            "volume_spike": f"{last['volume_ratio']:.1f}x",
+                            "signal": "BUY 🚀"
+                        })
+                    elif last['volume_ratio'] > 1.5 and last['Close'] < last['low_20'] * 1.01:
+                        signals.append({
+                            "time": get_ist().strftime("%H:%M"),
+                            "symbol": ticker,
+                            "category": category,
+                            "price": round(last['Close'], 2),
+                            "volume_spike": f"{last['volume_ratio']:.1f}x",
+                            "signal": "SELL 🔻"
+                        })
                 except:
-                    pass
-                
-                for f in [self.pid_file, 'stop_bot.flag', 'background_bot.py', 'bot_config.json']:
-                    if os.path.exists(f):
-                        try:
-                            os.remove(f)
-                        except:
-                            pass
-                
-                self.running = False
-                return True, "Background bot stopped"
-        except Exception as e:
-            return False, f"Failed to stop: {e}"
-        
-        return False, "Bot not running"
-    
-    def is_running(self):
-        if os.path.exists(self.pid_file):
-            try:
-                with open(self.pid_file, 'r') as f:
-                    pid = int(f.read().strip())
-                return self.is_process_running(pid)
-            except:
-                return False
-        return False
-    
-    def get_status(self):
-        if self.is_running():
-            return "🟢 Background bot running (24/7)"
-        return "🔴 Background bot stopped"
+                    continue
+        self.signals.extend(signals)
+        return signals
 
-BACKGROUND_BOT = BackgroundProcessManager()
+fomo_scanner = FOMOScanner()
 
 # ==========================================
-# 6. HIGH PROFIT STRATEGY MODULES
+# Scalping Module (always active)
 # ==========================================
 class ScalpingModule:
     def __init__(self, bot):
@@ -1036,21 +944,24 @@ class ScalpingModule:
         if df is None or len(df) < 20:
             return "WAIT"
             
+        df['ema9'] = df['close'].ewm(span=9).mean()
+        df['ema21'] = df['close'].ewm(span=21).mean()
         df['body'] = abs(df['close'] - df['open'])
         df['upper_wick'] = df['high'] - df[['close', 'open']].max(axis=1)
         df['lower_wick'] = df[['close', 'open']].min(axis=1) - df['low']
         df['tick_ratio'] = df['volume'] / df['volume'].rolling(5).mean()
         
         last = df.iloc[-1]
+        prev = df.iloc[-2]
         
-        if (last['lower_wick'] > last['body'] * 1.5 and 
-            last['tick_ratio'] > 1.2 and
-            last['close'] > last['open']):
+        if last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'] and last['tick_ratio'] > 1.2:
             return "SCALP_BUY"
-            
-        if (last['upper_wick'] > last['body'] * 1.5 and 
-            last['tick_ratio'] > 1.2 and
-            last['close'] < last['open']):
+        if last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'] and last['tick_ratio'] > 1.2:
+            return "SCALP_SELL"
+        
+        if (last['lower_wick'] > last['body'] * 1.5 and last['tick_ratio'] > 1.2 and last['close'] > last['open']):
+            return "SCALP_BUY"
+        if (last['upper_wick'] > last['body'] * 1.5 and last['tick_ratio'] > 1.2 and last['close'] < last['open']):
             return "SCALP_SELL"
             
         return "WAIT"
@@ -1082,6 +993,513 @@ class ScalpingModule:
             }
         return None
 
+# ==========================================
+# TECHNICAL ANALYZER (full definition)
+# ==========================================
+class TechnicalAnalyzer:
+    def get_atr(self, df, period=14):
+        df = df.copy()
+        df['tr0'] = abs(df['high'] - df['low'])
+        df['tr1'] = abs(df['high'] - df['close'].shift())
+        df['tr2'] = abs(df['low'] - df['close'].shift())
+        df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
+        return df['tr'].rolling(period).mean()
+
+    def calculate_indicators(self, df, is_index=False):
+        try:
+            df = df.copy()
+            df['vol_sma'] = df['volume'].rolling(20).mean()
+            if is_index: 
+                df['vol_spike'] = True
+            else: 
+                df['vol_spike'] = df['volume'] >= (df['vol_sma'] * 0.8)
+            
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            df['rsi'] = 100 - (100 / (1 + (gain / loss)))
+            
+            df['tr0'] = abs(df['high'] - df['low'])
+            df['tr1'] = abs(df['high'] - df['close'].shift())
+            df['tr2'] = abs(df['low'] - df['close'].shift())
+            df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
+            df['atr'] = df['tr'].rolling(14).mean()
+            
+            df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+            df['is_sideways'] = (df['rsi'].between(45, 55)) & (abs(df['close'] - df['ema21']) < (df['atr'] * 0.4))
+            df['inside_bar'] = (df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1))
+            
+            try:
+                df['date'] = df.index.date
+                if 'volume' in df.columns and df['volume'].sum() > 0:
+                    df['vol_price'] = df['close'] * df['volume']
+                    df['avwap'] = df.groupby('date')['vol_price'].cumsum() / df.groupby('date')['volume'].cumsum()
+                else: 
+                    df['avwap'] = df.groupby('date')['close'].transform(lambda x: x.expanding().mean())
+            except: 
+                df['avwap'] = df['close']
+            
+            if 'ema9' not in df.columns:
+                df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+            if 'ema21' not in df.columns:
+                df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+            
+            df['returns_1'] = df['close'].pct_change(1)
+            df['returns_3'] = df['close'].pct_change(3)
+            df['returns_5'] = df['close'].pct_change(5)
+            df['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
+            df['high_low_ratio'] = df['high'] / df['low']
+            df['close_open_ratio'] = df['close'] / df['open']
+            df['volatility_10'] = df['returns_1'].rolling(10).std()
+            
+            return df
+        except Exception as e:
+            print(f"❌ Error in calculate_indicators: {e}")
+            import traceback
+            traceback.print_exc()
+            return df
+
+    def calculate_fib_zones(self, df, lookback=100):
+        if df is None or len(df) < 10:
+            return 0, 0, 0, 0
+        actual_lookback = min(lookback, len(df))
+        major_high = df['high'].rolling(actual_lookback).max().iloc[-1]
+        major_low = df['low'].rolling(actual_lookback).min().iloc[-1]
+        diff = major_high - major_low
+        
+        fib_618 = major_high - (diff * 0.618)
+        fib_650 = major_high - (diff * 0.650)
+        
+        return major_high, major_low, min(fib_618, fib_650), max(fib_618, fib_650)
+
+    def detect_order_blocks(self, df):
+        df = df.copy()
+        df['body'] = abs(df['close'] - df['open'])
+        avg_body = df['body'].rolling(10).mean()
+        strong_up = (df['close'] > df['open']) & (df['body'] > avg_body * 1.2)
+        strong_down = (df['close'] < df['open']) & (df['body'] > avg_body * 1.2)
+        bob_h, bob_l, beob_h, beob_l = 0.0, 0.0, 0.0, 0.0
+        
+        for i in range(len(df)-1, max(0, len(df)-50), -1):
+            if strong_up.iloc[i] and bob_h == 0.0:
+                for j in range(i-1, max(0, i-10), -1):
+                    if df['close'].iloc[j] < df['open'].iloc[j]: 
+                        bob_h, bob_l = df['high'].iloc[j], df['low'].iloc[j]; break
+            if strong_down.iloc[i] and beob_h == 0.0:
+                for j in range(i-1, max(0, i-10), -1):
+                    if df['close'].iloc[j] > df['open'].iloc[j]: 
+                        beob_h, beob_l = df['high'].iloc[j], df['low'].iloc[j]; break
+            if bob_h != 0.0 and beob_h != 0.0: break
+        return {"bob_high": bob_h, "bob_low": bob_l, "beob_high": beob_h, "beob_low": beob_l}
+
+    def detect_pin_bar(self, df):
+        if df is None or len(df) < 2:
+            return "None"
+        last = df.iloc[-1]
+        body = abs(last['close'] - last['open'])
+        upper_wick = last['high'] - max(last['close'], last['open'])
+        lower_wick = min(last['close'], last['open']) - last['low']
+        if lower_wick > body * 1.5 and last['close'] > last['open']:
+            return "Bullish Pin 📌"
+        elif upper_wick > body * 1.5 and last['close'] < last['open']:
+            return "Bearish Pin 📌"
+        return "None"
+
+    def apply_institutional_fvg_strategy(self, df, index_name="NIFTY"):
+        if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        df = self.calculate_indicators(df, is_index)
+        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
+
+        df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+
+        df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
+        df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
+
+        last = df.iloc[-1]
+        atr = self.get_atr(df).iloc[-1]
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        smc_blocks = self.detect_order_blocks(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
+
+        trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
+        signal_strength = 50
+
+        latest_bull_fvg = df[df['fvg_bull']].iloc[-1] if any(df['fvg_bull']) else None
+        latest_bear_fvg = df[df['fvg_bear']].iloc[-1] if any(df['fvg_bear']) else None
+
+        if latest_bull_fvg is not None:
+            mitigated_bull = (last['low'] <= latest_bull_fvg['high'].shift(1)) and (last['low'] >= latest_bull_fvg['low'].shift(1))
+            if mitigated_bull and last['close'] > last['open']:
+                signal = "BUY_CE"
+                trend = "BULL FVG REVERSAL CONFIRMED 🟢"
+                signal_strength = 75
+
+        if latest_bear_fvg is not None:
+            mitigated_bear = (last['high'] >= latest_bear_fvg['low'].shift(1)) and (last['high'] <= latest_bear_fvg['high'].shift(1))
+            if mitigated_bear and last['close'] < last['open']:
+                signal = "BUY_PE"
+                trend = "BEAR FVG REVERSAL CONFIRMED 🔴"
+                signal_strength = 75
+
+        return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
+
+    def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
+        if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        
+        df = self.calculate_indicators(df, is_index)
+        atr = self.get_atr(df).iloc[-1]
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        smc_blocks = self.detect_order_blocks(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
+        
+        if not HAS_PTA:
+            return "WAIT (pandas_ta required)", "WAIT", df['close'].iloc[-1], df['close'].iloc[-1], df, atr, fib_data, 0
+
+        df_ta = df.copy()
+        df_ta.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+        
+        df_ta['EMA_5'] = ta.ema(df_ta['Close'], length=5)
+        df_ta['EMA_13'] = ta.ema(df_ta['Close'], length=13)
+        df_ta['EMA_21'] = ta.ema(df_ta['Close'], length=21)
+        
+        df_ta['RSI_14'] = ta.rsi(df_ta['Close'], length=14)
+        if df_ta['RSI_14'] is None: 
+            df_ta['RSI_14'] = df_ta['Close'] * 0 + 50
+        
+        df_ta['VWAP'] = ta.vwap(df_ta['High'], df_ta['Low'], df_ta['Close'], df_ta['Volume'])
+        if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all() or is_index:
+            df_ta['VWAP'] = df_ta['Close']
+
+        df_ta['EMA_Cross_Up'] = (df_ta['EMA_5'] > df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) <= df_ta['EMA_13'].shift(1))
+        df_ta['EMA_Cross_Dn'] = (df_ta['EMA_5'] < df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) >= df_ta['EMA_13'].shift(1))
+
+        df_ta['Buy_Signal'] = df_ta['EMA_Cross_Up']
+        df_ta['Sell_Signal'] = df_ta['EMA_Cross_Dn']
+        
+        df['vwap'] = df_ta['VWAP']
+        df['ema_fast'] = df_ta['EMA_13']
+        
+        last = df_ta.iloc[-1]
+        
+        signal = "WAIT"
+        trend = "RANGING 🟡 (VIJAY_RFF)"
+        signal_strength = 50
+        
+        if last['Buy_Signal']:
+            signal = "BUY_CE"
+            trend = "VIJAY_RFF UPTREND CROSSOVER 🟢"
+            signal_strength = 80
+        elif last['Sell_Signal']:
+            signal = "BUY_PE"
+            trend = "VIJAY_RFF DOWNTREND CROSSOVER 🔴"
+            signal_strength = 80
+            
+        return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data, signal_strength
+
+    def apply_lux_algo_ict_strategy(self, df, index_name="NIFTY"):
+        if df is None or len(df) < 50:
+            return "WAIT (insufficient data)", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        df = self.calculate_indicators(df, is_index)
+        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
+        
+        df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
+        df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
+        
+        df['body'] = abs(df['close'] - df['open'])
+        avg_body = df['body'].rolling(10).mean()
+        df['bull_ob'] = (df['close'] < df['open']) & (df['body'] > avg_body * 1.2)
+        df['bear_ob'] = (df['close'] > df['open']) & (df['body'] > avg_body * 1.2)
+        
+        df['hh'] = df['high'] > df['high'].shift(1)
+        df['ll'] = df['low'] < df['low'].shift(1)
+        df['bos_up'] = df['high'] > df['high'].rolling(20).max().shift(1)
+        df['bos_down'] = df['low'] < df['low'].rolling(20).min().shift(1)
+        
+        last = df.iloc[-1]
+        atr = self.get_atr(df).iloc[-1]
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        smc_blocks = self.detect_order_blocks(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
+        
+        signal = "WAIT"
+        trend = "ICT Neutral"
+        signal_strength = 50
+        
+        if last['fvg_bull'] and last['close'] > last['vwap'] and last['bos_up']:
+            signal = "BUY_CE"
+            trend = "LUX ICT BULLISH: FVG + OB + BOS 🟢"
+            signal_strength = 85
+        elif last['fvg_bear'] and last['close'] < last['vwap'] and last['bos_down']:
+            signal = "BUY_PE"
+            trend = "LUX ICT BEARISH: FVG + OB + BOS 🔴"
+            signal_strength = 85
+        
+        return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
+
+    def apply_vwap_ema_strategy(self, df, index_name="NIFTY"):
+        if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        df = self.calculate_indicators(df, is_index)
+        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
+        df['ema_short'] = df['close'].ewm(span=9, adjust=False).mean()
+        df['ema_long'] = df['close'].ewm(span=21, adjust=False).mean()
+        atr = self.get_atr(df).iloc[-1]
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
+        last = df.iloc[-1]
+        signal, trend = "WAIT", "FLAT"
+        signal_strength = 50
+        
+        benchmark = last['ema_long'] if is_index else last['vwap']
+        if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark):
+            trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
+            signal_strength = 70
+        elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark):
+            trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
+            signal_strength = 70
+            
+        return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data, signal_strength
+
+    def apply_keyword_strategy(self, df, keywords, index_name):
+        if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
+        df = self.calculate_indicators(df, index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
+        
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        buy_conds, sell_conds = [], []
+        keys = keywords.split(',') if keywords else []
+        signal_strength = 50
+
+        if "EMA Crossover (9 & 21)" in keys:
+            buy_conds.append(last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'])
+            sell_conds.append(last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'])
+
+        if "RSI Breakout (>60/<40)" in keys:
+            buy_conds.append(last['rsi'] > 50)
+            sell_conds.append(last['rsi'] < 50)
+
+        if "MACD Crossover" in keys:
+            if 'macd' in df.columns:
+                buy_conds.append(last['macd'] > last['macds'] and prev['macd'] <= prev['macds'])
+                sell_conds.append(last['macd'] < last['macds'] and prev['macd'] >= prev['macds'])
+
+        if "Bollinger Bands Bounce" in keys:
+            if 'bbl' in df.columns:
+                buy_conds.append(last['close'] > last['bbl'] and prev['close'] <= prev['bbl'])
+                sell_conds.append(last['close'] < last['bbh'] and prev['close'] >= prev['bbh'])
+
+        if "Stochastic RSI" in keys:
+            if 'stoch_k' in df.columns:
+                buy_conds.append(last['stoch_k'] > last['stoch_d'] and last['stoch_k'] < 30)
+                sell_conds.append(last['stoch_k'] < last['stoch_d'] and last['stoch_k'] > 70)
+
+        if "FVG ICT" in keys:
+            if 'fvg_bull' in df.columns and df['fvg_bull'].iloc[-1]:
+                buy_conds.append(True)
+            if 'fvg_bear' in df.columns and df['fvg_bear'].iloc[-1]:
+                sell_conds.append(True)
+
+        if "VWAP" in keys:
+            buy_conds.append(last['close'] > last['vwap'])
+            sell_conds.append(last['close'] < last['vwap'])
+
+        signal, trend = "WAIT", "Awaiting Keyword Match 🟡"
+
+        if buy_conds and all(buy_conds):
+            signal, trend = "BUY_CE", "Keyword Setup Met: BULLISH 🟢"
+            signal_strength = 70 + (len(buy_conds) * 5)
+        elif sell_conds and all(sell_conds):
+            signal, trend = "BUY_PE", "Keyword Setup Met: BEARISH 🔴"
+            signal_strength = 70 + (len(sell_conds) * 5)
+
+        signal_strength = min(100, signal_strength)
+
+        return trend, signal, last['vwap'], last['ema9'], df, self.get_atr(df).iloc[-1], {}, signal_strength
+
+    def apply_ml_strategy(self, df, index_name, prob_threshold=0.3, persistence=1):
+        global ml_predictor
+        if df is None or len(df) < 50:
+            return "WAIT (insufficient data)", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        df = self.calculate_indicators(df, is_index)
+        
+        if not ml_predictor.is_trained:
+            ml_predictor.train(df)
+        prob_up, prob_down = ml_predictor.predict(df)
+        
+        last = df.iloc[-1]
+        atr = self.get_atr(df).iloc[-1]
+        
+        up_thresh = prob_threshold
+        down_thresh = prob_threshold
+        
+        trend = f"ML Ensemble: Up {prob_up:.2f} / Down {prob_down:.2f}"
+        signal = "WAIT"
+        strength = int(max(prob_up, prob_down) * 100)
+        if prob_up > up_thresh:
+            signal = "BUY_CE"
+        elif prob_down > down_thresh:
+            signal = "BUY_PE"
+        
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
+        return trend, signal, last['close'], last['close'], df, atr, fib_data, strength
+
+# ==========================================
+# MACHINE LEARNING ENSEMBLE
+# ==========================================
+class MLPredictor:
+    def __init__(self):
+        self.rf_model = None
+        self.xgb_model = None
+        self.mlp_model = None
+        self.scaler = StandardScaler()
+        self.is_trained = False
+        self.last_train_index = 0
+        self.feature_cols = None
+        self.signal_history = deque(maxlen=10)
+
+    def prepare_features(self, df):
+        df = df.copy()
+        df['returns_1'] = df['close'].pct_change(1)
+        df['returns_3'] = df['close'].pct_change(3)
+        df['returns_5'] = df['close'].pct_change(5)
+        df['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
+        df['high_low_ratio'] = df['high'] / df['low']
+        df['close_open_ratio'] = df['close'] / df['open']
+        df['sma5'] = df['close'].rolling(5).mean()
+        df['sma20'] = df['close'].rolling(20).mean()
+        df['ema9'] = df['close'].ewm(span=9).mean()
+        df['ema21'] = df['close'].ewm(span=21).mean()
+        
+        df['volatility_10'] = df['returns_1'].rolling(10).std()
+        df['volatility_20'] = df['returns_1'].rolling(20).std()
+        
+        if HAS_PTA:
+            df['rsi'] = ta.rsi(df['close'], 14)
+        else:
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['rsi'] = 100 - (100 / (1 + rs))
+        
+        if HAS_PTA:
+            bbands = ta.bbands(df['close'], length=20, std=2)
+            if bbands is not None:
+                df['bb_lower'] = bbands.iloc[:, 0]
+                df['bb_middle'] = bbands.iloc[:, 1]
+                df['bb_upper'] = bbands.iloc[:, 2]
+            else:
+                df['bb_lower'] = df['bb_middle'] = df['bb_upper'] = df['close']
+        else:
+            df['bb_lower'] = df['bb_middle'] = df['bb_upper'] = df['close']
+        
+        future_return = df['close'].shift(-3) / df['close'] - 1
+        df['target'] = 0
+        df.loc[future_return > 0.005, 'target'] = 1
+        df.loc[future_return < -0.005, 'target'] = 2
+        
+        df = df.dropna()
+        self.feature_cols = ['returns_1', 'returns_3', 'returns_5', 'volume_ratio', 
+                            'high_low_ratio', 'close_open_ratio', 'sma5', 'sma20',
+                            'ema9', 'ema21', 'volatility_10', 'volatility_20',
+                            'rsi', 'bb_lower', 'bb_middle', 'bb_upper']
+        X = df[self.feature_cols]
+        y = df['target']
+        return X, y
+
+    def train(self, df, force=False):
+        if len(df) < 50:
+            return False
+        train_df = df.iloc[-500:].copy()
+        X, y = self.prepare_features(train_df)
+        if len(X) < 30:
+            return False
+        X_scaled = self.scaler.fit_transform(X)
+        
+        self.rf_model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+        self.rf_model.fit(X_scaled, y)
+        
+        if HAS_XGB:
+            self.xgb_model = xgb.XGBClassifier(n_estimators=100, max_depth=5, learning_rate=0.1,
+                                               subsample=0.8, colsample_bytree=0.8, reg_lambda=1.5,
+                                               random_state=42, use_label_encoder=False, eval_metric='mlogloss')
+            self.xgb_model.fit(X_scaled, y)
+        
+        self.mlp_model = MLPClassifier(hidden_layer_sizes=(50, 25), max_iter=500, random_state=42)
+        self.mlp_model.fit(X_scaled, y)
+        
+        self.is_trained = True
+        self.last_train_index = len(df) - 1
+        print(f"✅ ML Ensemble trained on {len(X)} samples")
+        return True
+
+    def predict(self, df):
+        if not self.is_trained:
+            return 0.5, 0.5
+        X, _ = self.prepare_features(df.iloc[-100:])
+        if X.empty:
+            return 0.5, 0.5
+        X_scaled = self.scaler.transform(X.iloc[-1:])
+        
+        prob_up_list = []
+        prob_down_list = []
+        
+        if self.rf_model is not None:
+            proba = self.rf_model.predict_proba(X_scaled)[0]
+            if len(proba) == 3:
+                prob_up_list.append(proba[1])
+                prob_down_list.append(proba[2])
+            elif len(proba) == 2:
+                prob_up_list.append(proba[1])
+                prob_down_list.append(1 - proba[1])
+            else:
+                prob_up_list.append(0.5); prob_down_list.append(0.5)
+        
+        if HAS_XGB and self.xgb_model is not None:
+            proba = self.xgb_model.predict_proba(X_scaled)[0]
+            if len(proba) == 3:
+                prob_up_list.append(proba[1]); prob_down_list.append(proba[2])
+            elif len(proba) == 2:
+                prob_up_list.append(proba[1]); prob_down_list.append(1 - proba[1])
+            else:
+                prob_up_list.append(0.5); prob_down_list.append(0.5)
+        
+        if self.mlp_model is not None:
+            proba = self.mlp_model.predict_proba(X_scaled)[0]
+            if len(proba) == 3:
+                prob_up_list.append(proba[1]); prob_down_list.append(proba[2])
+            elif len(proba) == 2:
+                prob_up_list.append(proba[1]); prob_down_list.append(1 - proba[1])
+            else:
+                prob_up_list.append(0.5); prob_down_list.append(0.5)
+        
+        prob_up = np.mean(prob_up_list) if prob_up_list else 0.5
+        prob_down = np.mean(prob_down_list) if prob_down_list else 0.5
+        
+        pred_class = 1 if prob_up > prob_down else 2 if prob_down > prob_up else 0
+        self.signal_history.append(pred_class)
+        
+        return prob_up, prob_down
+
+    def should_retrain(self, df):
+        if not self.is_trained:
+            return True
+        if len(df) - self.last_train_index >= 50:
+            return True
+        return False
+
+ml_predictor = MLPredictor()
+
+# ==========================================
+# HIGH PROFIT STRATEGY MODULES
+# ==========================================
 class ArbitrageModule:
     def __init__(self):
         self.pairs = {
@@ -1356,23 +1774,11 @@ def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
         df['vol_ma'] = df['Volume'].rolling(20).mean()
         df['vol_spike'] = df['Volume'] > df['vol_ma'] * 1.2
         
-        df['resistance'] = df['High'].rolling(20).max()
-        df['support'] = df['Low'].rolling(20).min()
-        
         last = df.iloc[-1]
         prev = df.iloc[-2]
         
-        buy_signal = (
-            last['Close'] > last['ema9'] > last['ema21'] and
-            last['vol_spike'] and
-            last['Close'] > last['ema9']
-        )
-        
-        sell_signal = (
-            last['Close'] < last['ema9'] < last['ema21'] and
-            last['vol_spike'] and
-            last['Close'] < last['ema9']
-        )
+        buy_signal = (last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'] and last['vol_spike'])
+        sell_signal = (last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'] and last['vol_spike'])
         
         current_atr = last['atr']
         if "XAU" in symbol or "GOLD" in symbol:
@@ -1427,9 +1833,9 @@ def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
         st.markdown("### 📊 Market Structure")
         struct_col1, struct_col2, struct_col3 = st.columns(3)
         with struct_col1:
-            st.markdown(f"**Support:** ${last['support']:.2f}")
+            st.markdown(f"**Support:** ${df['Low'].tail(20).min():.2f}")
         with struct_col2:
-            st.markdown(f"**Resistance:** ${last['resistance']:.2f}")
+            st.markdown(f"**Resistance:** ${df['High'].tail(20).max():.2f}")
         with struct_col3:
             trend = "🟢 UPTREND" if last['ema9'] > last['ema21'] else "🔴 DOWNTREND"
             st.markdown(f"**Trend:** {trend}")
@@ -1441,519 +1847,23 @@ def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
         st.error(f"Error in scalper: {e}")
 
 # ==========================================
-# 7. TECHNICAL ANALYZER (relaxed for normal mode)
-# ==========================================
-class TechnicalAnalyzer:
-    def get_atr(self, df, period=14):
-        df = df.copy()
-        df['tr0'] = abs(df['high'] - df['low'])
-        df['tr1'] = abs(df['high'] - df['close'].shift())
-        df['tr2'] = abs(df['low'] - df['close'].shift())
-        df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
-        return df['tr'].rolling(period).mean()
-
-    def calculate_indicators(self, df, is_index=False):
-        try:
-            df = df.copy()
-            df['vol_sma'] = df['volume'].rolling(20).mean()
-            if is_index: 
-                df['vol_spike'] = True
-            else: 
-                df['vol_spike'] = df['volume'] >= (df['vol_sma'] * 0.8)   # relaxed
-            
-            delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            df['rsi'] = 100 - (100 / (1 + (gain / loss)))
-            
-            # ATR
-            df['tr0'] = abs(df['high'] - df['low'])
-            df['tr1'] = abs(df['high'] - df['close'].shift())
-            df['tr2'] = abs(df['low'] - df['close'].shift())
-            df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
-            df['atr'] = df['tr'].rolling(14).mean()
-            
-            df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-            df['is_sideways'] = (df['rsi'].between(45, 55)) & (abs(df['close'] - df['ema21']) < (df['atr'] * 0.4))  # relaxed
-            df['inside_bar'] = (df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1))
-            
-            try:
-                df['date'] = df.index.date
-                if 'volume' in df.columns and df['volume'].sum() > 0:
-                    df['vol_price'] = df['close'] * df['volume']
-                    df['avwap'] = df.groupby('date')['vol_price'].cumsum() / df.groupby('date')['volume'].cumsum()
-                else: 
-                    df['avwap'] = df.groupby('date')['close'].transform(lambda x: x.expanding().mean())
-            except: 
-                df['avwap'] = df['close']
-            
-            # Also compute simple EMAs if not present
-            if 'ema9' not in df.columns:
-                df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
-            if 'ema21' not in df.columns:
-                df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-            
-            # Add additional features for ML
-            df['returns_1'] = df['close'].pct_change(1)
-            df['returns_3'] = df['close'].pct_change(3)
-            df['returns_5'] = df['close'].pct_change(5)
-            df['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
-            df['high_low_ratio'] = df['high'] / df['low']
-            df['close_open_ratio'] = df['close'] / df['open']
-            df['volatility_10'] = df['returns_1'].rolling(10).std()
-            
-            return df
-        except Exception as e:
-            print(f"❌ Error in calculate_indicators: {e}")
-            import traceback
-            traceback.print_exc()
-            return df
-
-    def calculate_fib_zones(self, df, lookback=100):
-        if df is None or len(df) < 10:
-            return 0, 0, 0, 0
-        actual_lookback = min(lookback, len(df))
-        major_high = df['high'].rolling(actual_lookback).max().iloc[-1]
-        major_low = df['low'].rolling(actual_lookback).min().iloc[-1]
-        diff = major_high - major_low
-        
-        fib_618 = major_high - (diff * 0.618)
-        fib_650 = major_high - (diff * 0.650)
-        
-        return major_high, major_low, min(fib_618, fib_650), max(fib_618, fib_650)
-
-    def detect_order_blocks(self, df):
-        df = df.copy()
-        df['body'] = abs(df['close'] - df['open'])
-        avg_body = df['body'].rolling(10).mean()
-        strong_up = (df['close'] > df['open']) & (df['body'] > avg_body * 1.2)  # relaxed
-        strong_down = (df['close'] < df['open']) & (df['body'] > avg_body * 1.2)
-        bob_h, bob_l, beob_h, beob_l = 0.0, 0.0, 0.0, 0.0
-        
-        for i in range(len(df)-1, max(0, len(df)-50), -1):
-            if strong_up.iloc[i] and bob_h == 0.0:
-                for j in range(i-1, max(0, i-10), -1):
-                    if df['close'].iloc[j] < df['open'].iloc[j]: 
-                        bob_h, bob_l = df['high'].iloc[j], df['low'].iloc[j]; break
-            if strong_down.iloc[i] and beob_h == 0.0:
-                for j in range(i-1, max(0, i-10), -1):
-                    if df['close'].iloc[j] > df['open'].iloc[j]: 
-                        beob_h, beob_l = df['high'].iloc[j], df['low'].iloc[j]; break
-            if bob_h != 0.0 and beob_h != 0.0: break
-        return {"bob_high": bob_h, "bob_low": bob_l, "beob_high": beob_h, "beob_low": beob_l}
-
-    def detect_pin_bar(self, df):
-        if df is None or len(df) < 2:
-            return "None"
-        last = df.iloc[-1]
-        body = abs(last['close'] - last['open'])
-        upper_wick = last['high'] - max(last['close'], last['open'])
-        lower_wick = min(last['close'], last['open']) - last['low']
-        if lower_wick > body * 1.5 and last['close'] > last['open']:
-            return "Bullish Pin 📌"
-        elif upper_wick > body * 1.5 and last['close'] < last['open']:
-            return "Bearish Pin 📌"
-        return "None"
-
-    def apply_institutional_fvg_strategy(self, df, index_name="NIFTY"):
-        if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
-        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
-        df = self.calculate_indicators(df, is_index)
-        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
-
-        df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
-        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-
-        df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
-        df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
-
-        last = df.iloc[-1]
-        atr = self.get_atr(df).iloc[-1]
-        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
-        smc_blocks = self.detect_order_blocks(df)
-        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
-
-        trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
-        signal_strength = 50
-
-        latest_bull_fvg = df[df['fvg_bull']].iloc[-1] if any(df['fvg_bull']) else None
-        latest_bear_fvg = df[df['fvg_bear']].iloc[-1] if any(df['fvg_bear']) else None
-
-        if latest_bull_fvg is not None:
-            mitigated_bull = (last['low'] <= latest_bull_fvg['high'].shift(1)) and (last['low'] >= latest_bull_fvg['low'].shift(1))
-            if mitigated_bull and last['close'] > last['open']:
-                signal = "BUY_CE"
-                trend = "BULL FVG REVERSAL CONFIRMED 🟢"
-                signal_strength = 75
-
-        if latest_bear_fvg is not None:
-            mitigated_bear = (last['high'] >= latest_bear_fvg['low'].shift(1)) and (last['high'] <= latest_bear_fvg['high'].shift(1))
-            if mitigated_bear and last['close'] < last['open']:
-                signal = "BUY_PE"
-                trend = "BEAR FVG REVERSAL CONFIRMED 🔴"
-                signal_strength = 75
-
-        return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
-
-    def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
-        if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
-        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
-        
-        df = self.calculate_indicators(df, is_index)
-        atr = self.get_atr(df).iloc[-1]
-        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
-        smc_blocks = self.detect_order_blocks(df)
-        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
-        
-        if not HAS_PTA:
-            return "WAIT (pandas_ta required)", "WAIT", df['close'].iloc[-1], df['close'].iloc[-1], df, atr, fib_data, 0
-
-        df_ta = df.copy()
-        df_ta.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
-        
-        df_ta['EMA_5'] = ta.ema(df_ta['Close'], length=5)
-        df_ta['EMA_13'] = ta.ema(df_ta['Close'], length=13)
-        df_ta['EMA_21'] = ta.ema(df_ta['Close'], length=21)
-        
-        df_ta['RSI_14'] = ta.rsi(df_ta['Close'], length=14)
-        if df_ta['RSI_14'] is None: 
-            df_ta['RSI_14'] = df_ta['Close'] * 0 + 50
-        
-        df_ta['VWAP'] = ta.vwap(df_ta['High'], df_ta['Low'], df_ta['Close'], df_ta['Volume'])
-        if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all() or is_index:
-            df_ta['VWAP'] = df_ta['Close']
-
-        # Crossover detection (immediate)
-        df_ta['EMA_Cross_Up'] = (df_ta['EMA_5'] > df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) <= df_ta['EMA_13'].shift(1))
-        df_ta['EMA_Cross_Dn'] = (df_ta['EMA_5'] < df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) >= df_ta['EMA_13'].shift(1))
-
-        df_ta['Buy_Signal'] = df_ta['EMA_Cross_Up']
-        df_ta['Sell_Signal'] = df_ta['EMA_Cross_Dn']
-        
-        df['vwap'] = df_ta['VWAP']
-        df['ema_fast'] = df_ta['EMA_13']
-        
-        last = df_ta.iloc[-1]
-        
-        signal = "WAIT"
-        trend = "RANGING 🟡 (VIJAY_RFF)"
-        signal_strength = 50
-        
-        if last['Buy_Signal']:
-            signal = "BUY_CE"
-            trend = "VIJAY_RFF UPTREND CROSSOVER 🟢"
-            signal_strength = 80
-        elif last['Sell_Signal']:
-            signal = "BUY_PE"
-            trend = "VIJAY_RFF DOWNTREND CROSSOVER 🔴"
-            signal_strength = 80
-            
-        return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data, signal_strength
-
-    def apply_vwap_ema_strategy(self, df, index_name="NIFTY"):
-        if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
-        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
-        df = self.calculate_indicators(df, is_index)
-        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
-        df['ema_short'] = df['close'].ewm(span=9, adjust=False).mean()
-        df['ema_long'] = df['close'].ewm(span=21, adjust=False).mean()
-        atr = self.get_atr(df).iloc[-1]
-        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
-        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
-        last = df.iloc[-1]
-        signal, trend = "WAIT", "FLAT"
-        signal_strength = 50
-        
-        benchmark = last['ema_long'] if is_index else last['vwap']
-        if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark):
-            trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
-            signal_strength = 70
-        elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark):
-            trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
-            signal_strength = 70
-            
-        return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data, signal_strength
-
-    def apply_indian_options_scalper(self, df, index_name):
-        if df is None or len(df) < 20:
-            return "WAIT (insufficient data)", "WAIT", 0, 0, df, 0, {}, 0
-        if index_name not in ["NIFTY", "BANKNIFTY", "SENSEX"]:
-            return "WAIT (only indices)", "WAIT", 0, 0, df, 0, {}, 0
-        
-        df = self.calculate_indicators(df, is_index=True)
-        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum()
-        df['ema9'] = df['close'].ewm(span=9).mean()
-        df['volume_sma'] = df['volume'].rolling(20).mean()
-        
-        last = df.iloc[-1]
-        atr = self.get_atr(df).iloc[-1]
-        signal = "WAIT"
-        trend = "No clear signal"
-        strength = 0
-        
-        vol_spike = last['volume'] > df['volume_sma'].iloc[-1] * 1.0
-        rsi_thresh_high = 50
-        rsi_thresh_low = 50
-        
-        if last['close'] > last['vwap'] and last['rsi'] > rsi_thresh_high and vol_spike:
-            signal = "BUY_CE"
-            trend = "INDIAN OPTIONS SCALPER: BULLISH 🚀"
-            strength = min(100, int((last['rsi'] - rsi_thresh_high) * 5))
-        elif last['close'] < last['vwap'] and last['rsi'] < rsi_thresh_low and vol_spike:
-            signal = "BUY_PE"
-            trend = "INDIAN OPTIONS SCALPER: BEARISH 🔻"
-            strength = min(100, int((rsi_thresh_low - last['rsi']) * 5))
-        
-        return trend, signal, last['vwap'], last['ema9'], df, atr, {}, strength
-
-    def apply_keyword_strategy(self, df, keywords, index_name):
-        if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
-        df = self.calculate_indicators(df, index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
-        
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-
-        buy_conds, sell_conds = [], []
-        keys = keywords.split(',') if keywords else []
-        signal_strength = 50
-
-        if "EMA Crossover (9 & 21)" in keys:
-            buy_conds.append(last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'])
-            sell_conds.append(last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'])
-
-        if "RSI Breakout (>60/<40)" in keys:
-            buy_conds.append(last['rsi'] > 50)   # relaxed
-            sell_conds.append(last['rsi'] < 50)
-
-        if "MACD Crossover" in keys:
-            if 'macd' in df.columns:
-                buy_conds.append(last['macd'] > last['macds'] and prev['macd'] <= prev['macds'])
-                sell_conds.append(last['macd'] < last['macds'] and prev['macd'] >= prev['macds'])
-
-        if "Bollinger Bands Bounce" in keys:
-            if 'bbl' in df.columns:
-                buy_conds.append(last['close'] > last['bbl'] and prev['close'] <= prev['bbl'])
-                sell_conds.append(last['close'] < last['bbh'] and prev['close'] >= prev['bbh'])
-
-        if "Stochastic RSI" in keys:
-            if 'stoch_k' in df.columns:
-                buy_conds.append(last['stoch_k'] > last['stoch_d'] and last['stoch_k'] < 30)
-                sell_conds.append(last['stoch_k'] < last['stoch_d'] and last['stoch_k'] > 70)
-
-        if "FVG ICT" in keys:
-            if 'fvg_bull' in df.columns and df['fvg_bull'].iloc[-1]:
-                buy_conds.append(True)
-            if 'fvg_bear' in df.columns and df['fvg_bear'].iloc[-1]:
-                sell_conds.append(True)
-
-        if "VWAP" in keys:
-            buy_conds.append(last['close'] > last['vwap'])
-            sell_conds.append(last['close'] < last['vwap'])
-
-        signal, trend = "WAIT", "Awaiting Keyword Match 🟡"
-
-        if buy_conds and all(buy_conds):
-            signal, trend = "BUY_CE", "Keyword Setup Met: BULLISH 🟢"
-            signal_strength = 70 + (len(buy_conds) * 5)
-        elif sell_conds and all(sell_conds):
-            signal, trend = "BUY_PE", "Keyword Setup Met: BEARISH 🔴"
-            signal_strength = 70 + (len(sell_conds) * 5)
-
-        signal_strength = min(100, signal_strength)
-
-        return trend, signal, last['vwap'], last['ema9'], df, self.get_atr(df).iloc[-1], {}, signal_strength
-
-    def apply_ml_strategy(self, df, index_name, prob_threshold=0.3, persistence=1):
-        global ml_predictor
-        if df is None or len(df) < 50:
-            return "WAIT (insufficient data)", "WAIT", 0, 0, df, 0, {}, 0
-        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
-        df = self.calculate_indicators(df, is_index)
-        
-        if not ml_predictor.is_trained:
-            ml_predictor.train(df)
-        prob_up, prob_down = ml_predictor.predict(df)
-        
-        last = df.iloc[-1]
-        atr = self.get_atr(df).iloc[-1]
-        
-        up_thresh = prob_threshold
-        down_thresh = prob_threshold
-        
-        trend = f"ML Ensemble: Up {prob_up:.2f} / Down {prob_down:.2f}"
-        signal = "WAIT"
-        strength = int(max(prob_up, prob_down) * 100)
-        if prob_up > up_thresh:
-            signal = "BUY_CE"
-        elif prob_down > down_thresh:
-            signal = "BUY_PE"
-        
-        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
-        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
-        return trend, signal, last['close'], last['close'], df, atr, fib_data, strength
-
-# ==========================================
-# 8. MACHINE LEARNING ENSEMBLE
-# ==========================================
-class MLPredictor:
-    def __init__(self):
-        self.rf_model = None
-        self.xgb_model = None
-        self.mlp_model = None
-        self.scaler = StandardScaler()
-        self.is_trained = False
-        self.last_train_index = 0
-        self.feature_cols = None
-        self.signal_history = deque(maxlen=10)
-
-    def prepare_features(self, df):
-        df = df.copy()
-        df['returns_1'] = df['close'].pct_change(1)
-        df['returns_3'] = df['close'].pct_change(3)
-        df['returns_5'] = df['close'].pct_change(5)
-        df['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
-        df['high_low_ratio'] = df['high'] / df['low']
-        df['close_open_ratio'] = df['close'] / df['open']
-        df['sma5'] = df['close'].rolling(5).mean()
-        df['sma20'] = df['close'].rolling(20).mean()
-        df['ema9'] = df['close'].ewm(span=9).mean()
-        df['ema21'] = df['close'].ewm(span=21).mean()
-        
-        df['volatility_10'] = df['returns_1'].rolling(10).std()
-        df['volatility_20'] = df['returns_1'].rolling(20).std()
-        
-        if HAS_PTA:
-            df['rsi'] = ta.rsi(df['close'], 14)
-        else:
-            delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            df['rsi'] = 100 - (100 / (1 + rs))
-        
-        if HAS_PTA:
-            bbands = ta.bbands(df['close'], length=20, std=2)
-            if bbands is not None:
-                df['bb_lower'] = bbands.iloc[:, 0]
-                df['bb_middle'] = bbands.iloc[:, 1]
-                df['bb_upper'] = bbands.iloc[:, 2]
-            else:
-                df['bb_lower'] = df['bb_middle'] = df['bb_upper'] = df['close']
-        else:
-            df['bb_lower'] = df['bb_middle'] = df['bb_upper'] = df['close']
-        
-        future_return = df['close'].shift(-3) / df['close'] - 1
-        df['target'] = 0
-        df.loc[future_return > 0.005, 'target'] = 1
-        df.loc[future_return < -0.005, 'target'] = 2
-        
-        df = df.dropna()
-        self.feature_cols = ['returns_1', 'returns_3', 'returns_5', 'volume_ratio', 
-                            'high_low_ratio', 'close_open_ratio', 'sma5', 'sma20',
-                            'ema9', 'ema21', 'volatility_10', 'volatility_20',
-                            'rsi', 'bb_lower', 'bb_middle', 'bb_upper']
-        X = df[self.feature_cols]
-        y = df['target']
-        return X, y
-
-    def train(self, df, force=False):
-        if len(df) < 50:
-            return False
-        train_df = df.iloc[-500:].copy()
-        X, y = self.prepare_features(train_df)
-        if len(X) < 30:
-            return False
-        X_scaled = self.scaler.fit_transform(X)
-        
-        self.rf_model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
-        self.rf_model.fit(X_scaled, y)
-        
-        if HAS_XGB:
-            self.xgb_model = xgb.XGBClassifier(n_estimators=100, max_depth=5, learning_rate=0.1,
-                                               subsample=0.8, colsample_bytree=0.8, reg_lambda=1.5,
-                                               random_state=42, use_label_encoder=False, eval_metric='mlogloss')
-            self.xgb_model.fit(X_scaled, y)
-        
-        self.mlp_model = MLPClassifier(hidden_layer_sizes=(50, 25), max_iter=500, random_state=42)
-        self.mlp_model.fit(X_scaled, y)
-        
-        self.is_trained = True
-        self.last_train_index = len(df) - 1
-        print(f"✅ ML Ensemble trained on {len(X)} samples")
-        return True
-
-    def predict(self, df):
-        if not self.is_trained:
-            return 0.5, 0.5
-        X, _ = self.prepare_features(df.iloc[-100:])
-        if X.empty:
-            return 0.5, 0.5
-        X_scaled = self.scaler.transform(X.iloc[-1:])
-        
-        prob_up_list = []
-        prob_down_list = []
-        
-        if self.rf_model is not None:
-            proba = self.rf_model.predict_proba(X_scaled)[0]
-            if len(proba) == 3:
-                prob_up_list.append(proba[1])
-                prob_down_list.append(proba[2])
-            elif len(proba) == 2:
-                prob_up_list.append(proba[1])
-                prob_down_list.append(1 - proba[1])
-            else:
-                prob_up_list.append(0.5); prob_down_list.append(0.5)
-        
-        if HAS_XGB and self.xgb_model is not None:
-            proba = self.xgb_model.predict_proba(X_scaled)[0]
-            if len(proba) == 3:
-                prob_up_list.append(proba[1]); prob_down_list.append(proba[2])
-            elif len(proba) == 2:
-                prob_up_list.append(proba[1]); prob_down_list.append(1 - proba[1])
-            else:
-                prob_up_list.append(0.5); prob_down_list.append(0.5)
-        
-        if self.mlp_model is not None:
-            proba = self.mlp_model.predict_proba(X_scaled)[0]
-            if len(proba) == 3:
-                prob_up_list.append(proba[1]); prob_down_list.append(proba[2])
-            elif len(proba) == 2:
-                prob_up_list.append(proba[1]); prob_down_list.append(1 - proba[1])
-            else:
-                prob_up_list.append(0.5); prob_down_list.append(0.5)
-        
-        prob_up = np.mean(prob_up_list) if prob_up_list else 0.5
-        prob_down = np.mean(prob_down_list) if prob_down_list else 0.5
-        
-        pred_class = 1 if prob_up > prob_down else 2 if prob_down > prob_up else 0
-        self.signal_history.append(pred_class)
-        
-        return prob_up, prob_down
-
-    def should_retrain(self, df):
-        if not self.is_trained:
-            return True
-        if len(df) - self.last_train_index >= 50:
-            return True
-        return False
-
-ml_predictor = MLPredictor()
-
-# ==========================================
-# 9. CORE BOT ENGINE (with sound queue)
+# CORE BOT ENGINE (with FOMO integration & trailing stop with min profit)
 # ==========================================
 class SniperBot:
-    def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", mt5_api_url="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", is_mock=False):
+    def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", mt5_api_url="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", ib_host="", ib_port=7497, ib_client_id=1, is_mock=False):
         self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
         self.tg_token, self.tg_chat, self.wa_phone, self.wa_api = tg_token, tg_chat, wa_phone, wa_api
         self.mt5_acc, self.mt5_pass, self.mt5_server, self.mt5_api_url = mt5_acc, mt5_pass, mt5_server, mt5_api_url
         self.zerodha_api, self.zerodha_secret, self.request_token = zerodha_api, zerodha_secret, request_token
         self.coindcx_api, self.coindcx_secret = coindcx_api, coindcx_secret
         self.delta_api, self.delta_secret = delta_api, delta_secret
+        self.ib_host, self.ib_port, self.ib_client_id = ib_host, ib_port, ib_client_id
         
         self.api, self.kite, self.token_map, self.is_mock = None, None, None, is_mock
         self.mt5_bridge = None
+        self.ib_bridge = None
         self.is_mt5_connected = False
+        self.is_ib_connected = False
         self.client_name = "Offline User"
         self.client_ip = get_client_ip()
         self.user_hash = get_user_hash(self.api_key)
@@ -1972,7 +1882,7 @@ class SniperBot:
             "manual_exit": False,
             "ghost_memory": {},
             "tv_signal": {"action": "WAIT", "symbol": "", "timestamp": 0},
-            "scalp_signals": [],
+            "scalp_signals": deque(maxlen=20),
             "arbitrage_opps": [],
             "premium_opps": [],
             "hz_trades": deque(maxlen=100),
@@ -1983,7 +1893,8 @@ class SniperBot:
             "news_cache": [],
             "signal_history": deque(maxlen=5),
             "mock_price": None,
-            "sound_queue": deque(maxlen=10)   # Queue for UI sounds
+            "sound_queue": deque(maxlen=10),
+            "fomo_signals": deque(maxlen=20)
         }
         self.settings = {}
 
@@ -2004,29 +1915,17 @@ class SniperBot:
                 self.log(f"❌ MT5 Bridge failed: {msg}")
         return False
 
-    def start_webhook_listener(self):
-        if not HAS_FLASK:
-            self.log("⚠️ Flask not installed. Webhook listener won't work.")
-            return
-            
-        app = Flask(__name__)
-        import logging
-        log = logging.getLogger('werkzeug')
-        log.setLevel(logging.ERROR)
-        
-        @app.route('/tv_webhook', methods=['POST'])
-        def webhook():
-            data = request.json
-            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
-                action = data.get("action", "WAIT").upper()
-                symbol = data.get("symbol", "").upper()
-                self.state["tv_signal"] = {"action": action, "symbol": symbol, "timestamp": time.time()}
-                self.log(f"🔔 TV Webhook Alert: {action} on {symbol}")
-                return jsonify({"status": "success"}), 200
-            return jsonify({"status": "unauthorized"}), 401
-            
-        threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 5000, 'use_reloader': False}, daemon=True).start()
-        self.log("🌐 TradingView Webhook Listener Active on Port 5000")
+    def connect_ib(self):
+        if self.ib_host:
+            self.ib_bridge = IBBridge(self.ib_host, self.ib_port, self.ib_client_id)
+            success, msg = self.ib_bridge.connect()
+            if success:
+                self.is_ib_connected = True
+                self.log(f"✅ Interactive Brokers Connected: {msg}")
+                return True
+            else:
+                self.log(f"❌ IB Connection failed: {msg}")
+        return False
 
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
@@ -2044,7 +1943,6 @@ class SniperBot:
         self.state["logs"].appendleft(f"[{get_ist().strftime('%H:%M:%S')}] {msg}")
 
     def get_balance(self):
-        """Fetch live balance from all connected brokers, no mock fallback."""
         b_str = []
         
         if self.api:
@@ -2115,6 +2013,9 @@ class SniperBot:
                     b_str.append(f"MT5: $ {acc_info.get('balance', 0):,.2f}")
             except:
                 pass
+
+        if self.is_ib_connected and self.ib_bridge:
+            b_str.append("IB: connected")
             
         return " | ".join(b_str) if b_str else "N/A"
 
@@ -2153,6 +2054,10 @@ class SniperBot:
             if self.connect_mt5():
                 success = True
 
+        if self.ib_host:
+            if self.connect_ib():
+                success = True
+
         if self.coindcx_api and self.coindcx_secret:
             self.log(f"✅ CoinDCX Credentials Loaded")
             success = True
@@ -2166,6 +2071,30 @@ class SniperBot:
             self.start_webhook_listener()
             return True
         return False
+
+    def start_webhook_listener(self):
+        if not HAS_FLASK:
+            self.log("⚠️ Flask not installed. Webhook listener won't work.")
+            return
+            
+        app = Flask(__name__)
+        import logging
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+        
+        @app.route('/tv_webhook', methods=['POST'])
+        def webhook():
+            data = request.json
+            if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
+                action = data.get("action", "WAIT").upper()
+                symbol = data.get("symbol", "").upper()
+                self.state["tv_signal"] = {"action": action, "symbol": symbol, "timestamp": time.time()}
+                self.log(f"🔔 TV Webhook Alert: {action} on {symbol}")
+                return jsonify({"status": "success"}), 200
+            return jsonify({"status": "unauthorized"}), 401
+            
+        threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 5000, 'use_reloader': False}, daemon=True).start()
+        self.log("🌐 TradingView Webhook Listener Active on Port 5000")
 
     def get_master(self):
         if self.token_map is None or self.token_map.empty: self.token_map = get_angel_scrip_master()
@@ -2224,6 +2153,9 @@ class SniperBot:
                 for coin in res:
                     if coin['market'].upper() == market_symbol.upper():
                         return float(coin['last_price'])
+                for coin in res:
+                    if coin['market'].replace('_', '').upper() == market_symbol.upper():
+                        return float(coin['last_price'])
             except Exception as e:
                 self.log(f"⚠️ CoinDCX price fetch error: {e}")
                 return None
@@ -2250,6 +2182,12 @@ class SniperBot:
                 res = self.api.ltpData(exchange, trading_symbol, str(token))
                 if res and res.get('status'): return float(res['data']['ltp'])
             except: pass
+
+        if self.is_ib_connected and self.ib_bridge:
+            try:
+                return self.ib_bridge.get_live_price(symbol)
+            except:
+                pass
         return None
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
@@ -2665,6 +2603,15 @@ class SniperBot:
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
+        if self.is_ib_connected and self.ib_bridge:
+            order_id, msg = self.ib_bridge.place_order(symbol, int(qty), side)
+            if order_id:
+                self.log(f"✅ IB Order: {msg}")
+                return order_id
+            else:
+                self.log(f"❌ IB Order Failed: {msg}")
+                return None
+
         try: 
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             
@@ -2823,10 +2770,8 @@ class SniperBot:
                 
                 df_candles = self.get_historical_data(exch, token, symbol=index, interval=timeframe) if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval=timeframe)
                 
-                user_lots_dict = s.get('user_lots', DEFAULT_LOTS)
-                base_lot_size = user_lots_dict.get(index, 25) if not (is_mt5_asset or is_crypto) else 0.01
-                
-                actual_qty = s['lots'] * base_lot_size
+                lot_size = LOT_SIZES.get(index, 1)
+                actual_qty = s['lots'] * lot_size
                 
                 if df_candles is not None and not df_candles.empty:
                     scalp_signal = self.scalper.scalp_signal(df_candles)
@@ -2838,33 +2783,32 @@ class SniperBot:
                             "index": index
                         })
                 
-                prices = {index: spot}
-                arb_opps = self.arbitrage.detect_arbitrage(prices)
-                if arb_opps:
-                    self.state["arbitrage_opps"] = arb_opps
-                
-                if index in ["NIFTY", "BANKNIFTY"]:
-                    premium_opps = self.option_seller.find_premium_opportunities(index, spot, 7)
-                    if premium_opps:
-                        self.state["premium_opps"] = premium_opps
-                
-                if strategy == "TradingView Webhook":
-                    trend = "Listening for TV Webhook 📡"
-                    signal = "WAIT"
-                    signal_strength = 50
-                    vwap, ema, df_chart, current_atr, fib_data = spot, spot, df_candles, 0, {}
-                    
-                    tv_action = self.state.get("tv_signal", {}).get("action")
-                    tv_symbol = self.state.get("tv_signal", {}).get("symbol")
-                    tv_time = self.state.get("tv_signal", {}).get("timestamp", 0)
-                    
-                    if tv_action in ["BUY_CE", "BUY_PE"] and (time.time() - tv_time) < 60:
-                        if tv_symbol == index or tv_symbol == "ALL":
-                            signal = tv_action
-                            trend = f"TV Alert Triggered: {signal} 🚀"
-                            signal_strength = 100
-                            self.state["tv_signal"]["action"] = "WAIT" 
-                
+                fomo_signal = None
+                fomo_signals = fomo_scanner.scan()
+                for fs in fomo_signals:
+                    asset_key = index.replace(".NS", "").upper()
+                    if asset_key in fs['symbol'].upper() or fs['symbol'].upper() in asset_key:
+                        fomo_signal = fs
+                        break
+                if fomo_signal:
+                    self.state["fomo_signals"].append(fomo_signal)
+                    if self.state["active_trade"] is None:
+                        if fomo_signal['signal'].startswith("BUY"):
+                            signal = "BUY_CE"
+                            trend = f"FOMO BUY on {fomo_signal['symbol']}"
+                            signal_strength = 90
+                        elif fomo_signal['signal'].startswith("SELL"):
+                            signal = "BUY_PE"
+                            trend = f"FOMO SELL on {fomo_signal['symbol']}"
+                            signal_strength = 90
+                        else:
+                            signal = "WAIT"
+                            trend = "FOMO neutral"
+                            signal_strength = 50
+                    else:
+                        signal = "WAIT"
+                        trend = "FOMO ignored (trade active)"
+                        signal_strength = 0
                 elif spot and df_candles is not None and not df_candles.empty:
                     self.state["spot"] = spot
                     last_candle = df_candles.iloc[-1]
@@ -2881,12 +2825,12 @@ class SniperBot:
                             df_candles, index, prob_threshold, persistence
                         )
                         self.log(f"ML Prob: Up={trend.split()[2]}, Down={trend.split()[4]}, Signal={signal}")
-                    elif strategy == "Indian Options Scalper (Nifty/BankNifty)":
-                        trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_indian_options_scalper(df_candles, index)
                     elif "VIJAY & RFF" in strategy: 
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_vijay_rff_strategy(df_candles, index)
                     elif "Institutional FVG" in strategy: 
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_institutional_fvg_strategy(df_candles, index)
+                    elif "Lux Algo" in strategy:
+                        trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_lux_algo_ict_strategy(df_candles, index)
                     else:  # Momentum Breakout + S&R
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
 
@@ -2903,18 +2847,6 @@ class SniperBot:
                                 signal_strength = 0
                     else:
                         self.state["signal_history"].clear()
-
-                    if s.get("fomo_entry") and strategy != "TradingView Webhook":
-                        body = abs(last_candle['close'] - last_candle['open'])
-                        avg_body = abs(df_chart['close'] - df_chart['open']).rolling(14).mean().iloc[-1]
-                        vol_spike = last_candle['volume'] > (df_chart['volume'].rolling(20).mean().iloc[-1] * 1.0)
-                        
-                        if body > (avg_body * 1.5) and vol_spike: 
-                            signal = "BUY_CE" if last_candle['close'] > last_candle['open'] else "BUY_PE"
-                            trend = "🚨 FOMO BREAKOUT ACTIVE"
-                            signal_strength = 90
-                            if self.state["active_trade"] is None:
-                                self.push_notify("🚨 FOMO ALERT", f"High Momentum Detected on {index}!")
 
                     if s.get("mtf_confirm") and signal != "WAIT" and strategy != "TradingView Webhook":
                         df_htf = self.get_historical_data(exch, token, symbol=index, interval="15m") if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval="15m")
@@ -2951,6 +2883,13 @@ class SniperBot:
                 else:
                     trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = "Waiting for Market Data", "WAIT", 0, 0, df_candles, 0, {}, 0
 
+                # Merge all indicator columns into df_chart for later rendering
+                if df_chart is not None and hasattr(df_chart, 'columns'):
+                    temp_df = self.analyzer.calculate_indicators(df_chart, index in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
+                    for col in temp_df.columns:
+                        if col not in df_chart.columns:
+                            df_chart[col] = temp_df[col]
+
                 self.state.update({
                     "current_trend": trend, 
                     "current_signal": signal, 
@@ -2961,9 +2900,6 @@ class SniperBot:
                     "fib_data": fib_data, 
                     "latest_data": df_chart
                 })
-
-                if df_chart is not None:
-                    self.log(f"DEBUG: {strategy} columns: {list(df_chart.columns)}")
 
                 if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time and signal_strength >= s.get('min_signal_strength', 50):
                     
@@ -3025,7 +2961,7 @@ class SniperBot:
                             self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch)
                             
                         self.push_notify("Trade Entered", f"Entered {qty} {strike_sym} @ {entry_ltp} (Signal Strength: {signal_strength}%)")
-                        self.state["sound_queue"].append("entry")  # Queue sound
+                        self.state["sound_queue"].append("entry")
                         self.state["active_trade"] = new_trade
                         self.state["trades_today"] += 1
                         self.state["ghost_memory"][f"{index}_{signal}"] = get_ist()
@@ -3063,6 +2999,10 @@ class SniperBot:
 
                         self.state["active_trade"]["current_ltp"] = ltp
                         self.state["active_trade"]["floating_pnl"] = pnl
+                        
+                        # Minimum profit threshold for trailing stop (0.5% of entry)
+                        min_profit = trade['entry'] * 0.005
+                        profit = pnl if trade['type'] in ["CE", "BUY"] else -pnl  # profit in trade direction
                         
                         if trade.get('is_hz'):
                             profit_pct = (ltp - trade['entry']) / trade['entry'] * 100 if trade['type'] in ["CE", "BUY"] else (trade['entry'] - ltp) / trade['entry'] * 100
@@ -3107,9 +3047,11 @@ class SniperBot:
                                 lowest = trade.get('lowest_price', trade['entry'])
                                 if ltp < lowest:
                                     trade['lowest_price'] = ltp
-                                    tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
-                                    new_sl = ltp + tsl_buffer
-                                    if new_sl < trade['sl']: trade['sl'] = new_sl
+                                    # Only trail if profit exceeds min_profit
+                                    if profit > min_profit:
+                                        tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                        new_sl = ltp + tsl_buffer
+                                        if new_sl < trade['sl']: trade['sl'] = new_sl
                                 
                                 hit_tp = False if ("Trend Rider" in strategy) else (ltp <= trade['tgt'])
                                 hit_sl = ltp >= trade['sl']
@@ -3118,16 +3060,17 @@ class SniperBot:
                                 if ltp > highest:
                                     trade['highest_price'] = ltp
                                     
-                                    if trade.get('is_hz'):
-                                        if ltp >= trade['entry'] * 3.0:    new_sl = ltp * 0.85 
-                                        elif ltp >= trade['entry'] * 2.0:  new_sl = ltp * 0.80 
-                                        elif ltp >= trade['entry'] * 1.5:  new_sl = trade['entry'] * 1.10 
-                                        else:                              new_sl = trade['sl']
-                                        if new_sl > trade['sl']: trade['sl'] = new_sl
-                                    else:
-                                        tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
-                                        new_sl = ltp - tsl_buffer
-                                        if new_sl > trade['sl']: trade['sl'] = new_sl
+                                    if profit > min_profit:
+                                        if trade.get('is_hz'):
+                                            if ltp >= trade['entry'] * 3.0:    new_sl = ltp * 0.85 
+                                            elif ltp >= trade['entry'] * 2.0:  new_sl = ltp * 0.80 
+                                            elif ltp >= trade['entry'] * 1.5:  new_sl = trade['entry'] * 1.10 
+                                            else:                              new_sl = trade['sl']
+                                            if new_sl > trade['sl']: trade['sl'] = new_sl
+                                        else:
+                                            tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                            new_sl = ltp - tsl_buffer
+                                            if new_sl > trade['sl']: trade['sl'] = new_sl
                                         
                                 hit_tp = False if ("Trend Rider" in strategy and not trade.get('is_hz')) else (ltp >= trade['tgt'])
                                 hit_sl = ltp <= trade['sl']
@@ -3136,10 +3079,10 @@ class SniperBot:
                             reach_tp1 = (ltp <= trade['tp1']) if trade['type'] == "SELL" else (ltp >= trade['tp1'])
                             if reach_tp1:
                                 if index in ["NIFTY", "SENSEX", "XAUUSD"] or is_crypto:
-                                    lots_held = trade['qty'] / base_lot_size
+                                    lots_held = trade['qty'] / lot_size
                                     half_lots = int(lots_held / 2) if not (is_mt5_asset or is_crypto) else round(trade['qty']/2, 2)
                                     if half_lots > 0:
-                                        qty_to_sell = half_lots * base_lot_size if not (is_mt5_asset or is_crypto) else half_lots
+                                        qty_to_sell = half_lots * lot_size if not (is_mt5_asset or is_crypto) else half_lots
                                         if not is_mock_mode:
                                             exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                             self.place_real_order(trade['symbol'], trade['token'], qty_to_sell, exec_side, trade['exch'])
@@ -3217,7 +3160,7 @@ class SniperBot:
             time.sleep(2)
 
 # ==========================================
-# 10. STREAMLIT UI - LOGIN SCREEN
+# STREAMLIT UI - LOGIN SCREEN
 # ==========================================
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("ui_popups"):
     while st.session_state.bot.state["ui_popups"]:
@@ -3260,13 +3203,13 @@ if not getattr(st.session_state, "bot", None):
                             zerodha_api=creds.get("zerodha_api"), zerodha_secret=creds.get("zerodha_secret"),
                             coindcx_api=creds.get("coindcx_api"), coindcx_secret=creds.get("coindcx_secret"),
                             delta_api=creds.get("delta_api"), delta_secret=creds.get("delta_secret"),
+                            ib_host=creds.get("ib_host", ""), ib_port=creds.get("ib_port", 7497), ib_client_id=creds.get("ib_client_id", 1),
                             is_mock=False
                         )
                         temp_bot.system_user_id = USER_ID
                         with st.spinner("Authenticating via Cloud..."):
                             if temp_bot.login():
                                 st.session_state.bot = temp_bot
-                                # Enable audio automatically after login
                                 st.session_state.audio_enabled = True
                                 unlock_audio()
                                 play_sound_ui("entry")
@@ -3284,6 +3227,7 @@ if not getattr(st.session_state, "bot", None):
                 MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL = "", "", "", ""
                 DCX_API, DCX_SEC = "", ""
                 DELTA_API, DELTA_SEC = "", ""
+                IB_HOST, IB_PORT, IB_CLIENT_ID = "", 7497, 1
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
                     with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
@@ -3327,6 +3271,15 @@ if not getattr(st.session_state, "bot", None):
                         MT5_SERVER = st.text_input("Broker Server", value=creds.get("mt5_server", ""))
                         MT5_API_URL = st.text_input("MT5 Web API URL (Optional)", value=creds.get("mt5_api_url", "https://mt5-web-api.mtapi.io/v1"), 
                                                     help="Use a web API service like mtapi.io or your own MT5 gateway")
+                with st.container(border=True):
+                    col_img, col_t = st.columns([1, 6])
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=interactivebrokers.com&sz=128", width=40)
+                    with col_t: use_ib = st.toggle("Interactive Brokers", value=bool(creds.get("ib_host")))
+                    if use_ib:
+                        col_i1, col_i2 = st.columns(2)
+                        with col_i1: IB_HOST = st.text_input("IB Gateway/TWS Host", value=creds.get("ib_host", "127.0.0.1"))
+                        with col_i2: IB_PORT = st.number_input("Port", value=creds.get("ib_port", 7497), step=1)
+                        IB_CLIENT_ID = st.number_input("Client ID", value=creds.get("ib_client_id", 1), step=1)
                 st.divider()
                 with st.expander("📱 Notifications (Telegram/WhatsApp)"):
                     TG_TOKEN = st.text_input("Telegram Bot Token", value=creds.get("tg_token", ""))
@@ -3349,14 +3302,14 @@ if not getattr(st.session_state, "bot", None):
                             request_token=Z_REQ if use_zerodha else "",
                             coindcx_api=DCX_API if use_coindcx else "", coindcx_secret=DCX_SEC if use_coindcx else "",
                             delta_api=DELTA_API if use_delta else "", delta_secret=DELTA_SEC if use_delta else "",
+                            ib_host=IB_HOST if use_ib else "", ib_port=IB_PORT if use_ib else 7497, ib_client_id=IB_CLIENT_ID if use_ib else 1,
                             is_mock=False
                         )
                         temp_bot.system_user_id = USER_ID
                         with st.spinner("Authenticating Secure Connections..."):
                             if temp_bot.login():
-                                if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC)
+                                if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC, IB_HOST, IB_PORT, IB_CLIENT_ID)
                                 st.session_state.bot = temp_bot
-                                # Enable audio automatically after login
                                 st.session_state.audio_enabled = True
                                 unlock_audio()
                                 play_sound_ui("entry")
@@ -3398,6 +3351,7 @@ else:
         if bot.coindcx_api: connected.append("CoinDCX")
         if bot.delta_api: connected.append("Delta")
         if bot.is_mt5_connected: connected.append("MT5")
+        if bot.is_ib_connected: connected.append("IB")
         if bot.is_mock: connected.append("Paper")
         st.markdown(f"**🔌 Connected:** {', '.join(connected) if connected else 'None'}")
     with head_c3:
@@ -3414,7 +3368,6 @@ else:
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
         
-        # Add Audio Enable button in sidebar
         if not st.session_state.audio_enabled:
             if st.button("🔊 Enable Audio", use_container_width=True):
                 st.session_state.audio_enabled = True
@@ -3425,31 +3378,33 @@ else:
             st.success("🔊 Audio is ON")
         
         st.markdown("**1. Market Setup**")
-        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5"], index=0)
+        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5", "Interactive Brokers"], index=0)
         
         st.divider()
         st.markdown("**📈 High‑Profit Strategies**")
         martingale_mode = st.selectbox("Martingale Mode", ["Off", "Martingale", "Anti‑Martingale"], index=0)
-        scalping_mode = st.toggle("⚡ Scalping Mode", value=False)
-        zero_loss_hedge = st.toggle("🛡️ Zero Loss Hedge (Beta)", value=False, help="Hedging strategy to minimize losses – not guaranteed zero loss.")
+        # Scalper always active – no toggle
         
-        if 'user_lots' not in st.session_state: st.session_state.user_lots = DEFAULT_LOTS.copy()
         CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE").upper().strip()
         st.session_state.custom_stock = CUSTOM_STOCK
-        all_assets = list(st.session_state.user_lots.keys())
+        all_assets = list(LOT_SIZES.keys()) + ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
         if CUSTOM_STOCK and CUSTOM_STOCK not in all_assets:
             all_assets.append(CUSTOM_STOCK)
-            st.session_state.user_lots[CUSTOM_STOCK] = 0.01 if "USD" in CUSTOM_STOCK else 1 
         if BROKER in ["CoinDCX", "Delta Exchange"]:
             valid_assets = [a for a in all_assets if "USD" in a or "USDT" in a]
         elif BROKER in ["Angel One", "Zerodha"]:
-            valid_assets = [a for a in all_assets if a in INDEX_TOKENS or a in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]]
+            valid_assets = [a for a in all_assets if a in INDEX_TOKENS or a in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] or a.isalpha()]
+        elif BROKER == "Interactive Brokers":
+            valid_assets = all_assets
         else:
             valid_assets = [a for a in all_assets if a in ["XAUUSD", "EURUSD", "BTCUSD", "ETHUSD", "SOLUSD"]]
-        if CUSTOM_STOCK and CUSTOM_STOCK not in valid_assets: valid_assets.append(CUSTOM_STOCK)
-        if not valid_assets: valid_assets = ["NIFTY"] if BROKER in ["Angel One", "Zerodha"] else ["BTCUSD"]
+        if CUSTOM_STOCK and CUSTOM_STOCK not in valid_assets:
+            valid_assets.append(CUSTOM_STOCK)
+        if not valid_assets:
+            valid_assets = ["NIFTY"] if BROKER in ["Angel One", "Zerodha"] else ["BTCUSD"]
         st.session_state.asset_options = valid_assets
-        if st.session_state.sb_index_input not in valid_assets: st.session_state.sb_index_input = valid_assets[0]
+        if st.session_state.sb_index_input not in valid_assets:
+            st.session_state.sb_index_input = valid_assets[0]
         
         INDEX = st.selectbox("Watchlist Asset", valid_assets, index=valid_assets.index(st.session_state.sb_index_input), key="sb_index_input")
         STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
@@ -3490,19 +3445,21 @@ else:
 
         st.divider()
         st.markdown("**2. Risk Management**")
-        lot_multiplier = LOT_MULTIPLIERS.get(INDEX, 1)
-        default_lot_val = float(st.session_state.user_lots.get(INDEX, 1.0))
-
+        lot_size = LOT_SIZES.get(INDEX, 1)
+        st.caption(f"1 lot = {lot_size} units for {INDEX}")
+        min_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
+        step_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
         LOTS = st.number_input(
             "Lots",
-            min_value=0.01,
+            min_value=min_val,
             max_value=10000.0,
-            value=default_lot_val,
-            step=0.01,
-            key=f"lot_input_{INDEX}",
-            help=f"1 lot = {lot_multiplier} units"
+            value=1.0,
+            step=step_val,
+            key=f"lots_input_{INDEX}",
+            help="Number of lots to trade"
         )
-        st.caption(f"Quantity: {LOTS * lot_multiplier:.2f} units")
+        actual_qty = LOTS * lot_size
+        st.caption(f"Total quantity: {actual_qty:.2f} units")
         
         col_s1, col_s2 = st.columns(2)
         with col_s1:
@@ -3523,7 +3480,6 @@ else:
         with col_adv1:
             MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
             HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
-            FOMO_ENTRY = st.toggle("🚨 FOMO Momentum Entry", False)
             THREE_FIVE_SEVEN = st.toggle("🔢 3-5-7 Rule (ATR based)", False, help="SL=1.5*ATR, TP=3/5/7*ATR")
         with col_adv2:
             if STRATEGY == "Machine Learning":
@@ -3550,7 +3506,6 @@ else:
             HZ_MAX_HOLD = 60
 
         st.divider()
-        # Add Refresh Balance button
         if st.button("🔄 Refresh Balance", use_container_width=True):
             st.rerun()
         
@@ -3562,16 +3517,17 @@ else:
 
     bot.settings = {
         "primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME, 
-        "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, 
+        "lots": LOTS,
+        "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, 
         "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": bot.is_mock, 
-        "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, "fomo_entry": FOMO_ENTRY, 
+        "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, 
         "three_five_seven": THREE_FIVE_SEVEN,
         "crypto_mode": CRYPTO_MODE, "leverage": LEVERAGE, "show_inr_crypto": SHOW_INR_CRYPTO,
-        "user_lots": st.session_state.user_lots.copy(),
+        "user_lots": LOT_SIZES.copy(),
         "custom_code": CUSTOM_CODE, "tv_passphrase": TV_PASSPHRASE,
-        "martingale_mode": martingale_mode, "scalping_mode": scalping_mode,
-        "zero_loss_hedge": zero_loss_hedge,
-        "use_quantity_mode": st.session_state.use_quantity_mode,
+        "martingale_mode": martingale_mode,
+        "zero_loss_hedge": zero_loss_hedge if 'zero_loss_hedge' in locals() else False,
+        "use_quantity_mode": True,
         "min_signal_strength": MIN_SIGNAL_STRENGTH,
         "ml_prob_threshold": ML_PROB_THRESHOLD,
         "signal_persistence": SIGNAL_PERSISTENCE,
@@ -3599,31 +3555,22 @@ else:
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_ml_strategy(
                             df_preload, INDEX, ML_PROB_THRESHOLD, SIGNAL_PERSISTENCE
                         )
-                    elif STRATEGY == "Indian Options Scalper (Nifty/BankNifty)":
-                        t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_indian_options_scalper(df_preload, INDEX)
-                    elif STRATEGY == "TradingView Webhook": 
-                        t, s, v, e, df_c, atr, fib, strength = "Awaiting TradingView Webhook...", "WAIT", df_preload['close'].iloc[-1], df_preload['close'].iloc[-1], df_preload, 0, {}, 50
                     elif "VIJAY & RFF" in STRATEGY: 
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_vijay_rff_strategy(df_preload, INDEX)
                     elif "Institutional FVG" in STRATEGY: 
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_institutional_fvg_strategy(df_preload, INDEX)
+                    elif "Lux Algo" in STRATEGY:
+                        t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_lux_algo_ict_strategy(df_preload, INDEX)
+                    elif STRATEGY == "TradingView Webhook": 
+                        t, s, v, e, df_c, atr, fib, strength = "Awaiting TradingView Webhook...", "WAIT", df_preload['close'].iloc[-1], df_preload['close'].iloc[-1], df_preload, 0, {}, 50
                     else: 
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
                     
-                    if df_preload is not None and not df_preload.empty:
-                        if 'vwap' not in df_preload.columns:
-                            is_index = INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
-                            if not is_index:
-                                df_preload['vwap'] = (df_preload['close'] * df_preload['volume']).cumsum() / df_preload['volume'].cumsum()
-                            else:
-                                df_preload['vwap'] = df_preload['close']
-                        if 'ema9' not in df_preload.columns:
-                            df_preload['ema9'] = df_preload['close'].ewm(span=9, adjust=False).mean()
-                        if 'ema21' not in df_preload.columns:
-                            df_preload['ema21'] = df_preload['close'].ewm(span=21, adjust=False).mean()
-                        temp_df = bot.analyzer.calculate_indicators(df_preload, INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
-                        if 'avwap' in temp_df.columns:
-                            df_preload['avwap'] = temp_df['avwap']
+                    # Merge all indicator columns
+                    temp_df = bot.analyzer.calculate_indicators(df_preload, INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
+                    for col in temp_df.columns:
+                        if col not in df_preload.columns:
+                            df_preload[col] = temp_df[col]
                     
                     bot.state.update({
                         "current_trend": t, "current_signal": s, 
@@ -3646,14 +3593,12 @@ else:
             kannada_news = ["📰 Loading Kannada news... (first fetch in progress)"]
         if not english_news:
             english_news = ["📰 Loading English news... (first fetch in progress)"]
-        # Live Kannada news (based on selected asset)
 
         kannada_news = fetch_kannada_news(INDEX)
         if kannada_news:
             ticker_text = " 🔹 ".join(kannada_news)
             st.markdown(f'<div class="news-ticker"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
 
-        # Live English news (asset-specific)
         english_news = fetch_english_news(INDEX)
         if english_news:
             ticker_text = " 🔹 ".join(english_news)
@@ -3669,7 +3614,6 @@ else:
         elif exch == "DELTA": term_type = f"🔺 Delta Exchange {CRYPTO_MODE}"
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
         
-        # Header with larger PnL
         st.markdown(f"""
             <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
                 <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
@@ -3717,6 +3661,14 @@ else:
                 bot.state["is_running"] = False
                 if bot.state["active_trade"]: bot.state["manual_exit"] = True
                 st.toast("System Terminated & Trades Closed", icon="☠️")
+
+        st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
+        fomo_signals = fomo_scanner.scan()
+        if fomo_signals:
+            df_fomo = pd.DataFrame(fomo_signals)
+            st.dataframe(df_fomo, use_container_width=True, hide_index=True)
+        else:
+            st.info("No volume spike alerts at the moment.")
 
         if HERO_ZERO and bot.state.get("hz_trades"):
             hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
@@ -3790,7 +3742,6 @@ else:
                 </div>
                 <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Signal Strength</div>
-                    <!-- Progress bar instead of tiny box -->
                     <div style="width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 5px;">
                         <div style="width: {signal_strength}%; height: 10px; background: #0284c7; border-radius: 5px;"></div>
                     </div>
@@ -3859,7 +3810,7 @@ else:
                             <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
                         </div>
                         <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
-                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Lot / Qty</span><br>
+                            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br>
                             <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span>
                         </div>
                         <div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;">
@@ -3929,47 +3880,68 @@ else:
 
     # ========== TAB2 : SCANNERS ==========
     with tab2:
-        tab_a, tab_b, tab_c = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "📈 Breakout"])
+        tab_a, tab_b, tab_c, tab_us = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "📈 Breakout", "🇺🇸 US Stock Scanner"])
         with tab_a:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 if st.button("🔍 Scan 52W High/Low", use_container_width=True):
                     with st.spinner("Scanning..."):
-                        watch_list = ["RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS"]
+                        watch_list = [
+                            "RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS",
+                            "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS", "HINDUNILVR.NS", "KOTAKBANK.NS",
+                            "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "HCLTECH.NS", "ASIANPAINT.NS",
+                            "TITAN.NS", "ULTRACEMCO.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "BPCL.NS",
+                            "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT"
+                        ]
                         results = []
                         for ticker in watch_list:
-                            tk = yf.Ticker(ticker)
-                            hist = tk.history(period="1y")
-                            if hist.empty: continue
-                            ltp = hist['Close'].iloc[-1]
-                            high_52 = hist['High'].max()
-                            low_52 = hist['Low'].min()
-                            atr = (hist['High'] - hist['Low']).rolling(14).mean().iloc[-1]
-                            
-                            midpoint = (high_52 + low_52) / 2
-                            if ltp > midpoint:
-                                direction = "LONG"
-                                entry = ltp
-                                sl = ltp - atr
-                                tp = ltp + atr * 2
-                            else:
-                                direction = "SHORT"
-                                entry = ltp
-                                sl = ltp + atr
-                                tp = ltp - atr * 2
-                            
-                            results.append({
-                                "Stock": ticker.replace(".NS", ""),
-                                "LTP": round(ltp, 2),
-                                "52W High": round(high_52, 2),
-                                "52W Low": round(low_52, 2),
-                                "Direction": direction,
-                                "Entry": round(entry, 2),
-                                "SL": round(sl, 2),
-                                "TP": round(tp, 2)
-                            })
+                            try:
+                                tk = yf.Ticker(ticker)
+                                hist = tk.history(period="1y")
+                                if hist.empty: continue
+                                ltp = hist['Close'].iloc[-1]
+                                high_52 = hist['High'].max()
+                                low_52 = hist['Low'].min()
+                                atr = (hist['High'] - hist['Low']).rolling(14).mean().iloc[-1]
+                                midpoint = (high_52 + low_52) / 2
+                                if ltp > midpoint:
+                                    direction = "LONG"
+                                    entry = ltp
+                                    sl = ltp - atr
+                                    tp = ltp + atr * 2
+                                    signal = "BUY 🟢"
+                                else:
+                                    direction = "SHORT"
+                                    entry = ltp
+                                    sl = ltp + atr
+                                    tp = ltp - atr * 2
+                                    signal = "SELL 🔴"
+                                if ltp > high_52 * 0.95:
+                                    signal = "STRONG BUY 🚀"
+                                elif ltp < low_52 * 1.05:
+                                    signal = "STRONG SELL 🔻"
+                                results.append({
+                                    "Symbol": ticker,
+                                    "LTP": round(ltp, 2),
+                                    "52W High": round(high_52, 2),
+                                    "52W Low": round(low_52, 2),
+                                    "Signal": signal,
+                                    "Entry": round(entry, 2),
+                                    "SL": round(sl, 2),
+                                    "TP": round(tp, 2)
+                                })
+                            except:
+                                continue
                         if results:
-                            st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+                            df_res = pd.DataFrame(results)
+                            def highlight_signal(val):
+                                if "STRONG BUY" in val:
+                                    return 'background-color: #22c55e; color: white'
+                                elif "STRONG SELL" in val:
+                                    return 'background-color: #ef4444; color: white'
+                                return ''
+                            styled = df_res.style.map(highlight_signal, subset=['Signal'])
+                            st.dataframe(styled, use_container_width=True, hide_index=True)
                         else:
                             st.info("No data.")
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -4042,10 +4014,67 @@ else:
                         else:
                             st.info("No breakouts.")
                 st.markdown('</div>', unsafe_allow_html=True)
+        with tab_us:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                st.subheader("🇺🇸 US Stock Scanner")
+                us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT", "JNJ", "PG", "UNH", "HD", "DIS"]
+                if st.button("Scan US Stocks", use_container_width=True):
+                    with st.spinner("Scanning US stocks..."):
+                        results = []
+                        for ticker in us_list:
+                            try:
+                                tk = yf.Ticker(ticker)
+                                hist = tk.history(period="1mo", interval="1d")
+                                if len(hist) < 20: continue
+                                hist['ema9'] = hist['Close'].ewm(span=9).mean()
+                                hist['ema21'] = hist['Close'].ewm(span=21).mean()
+                                hist['volume_ma'] = hist['Volume'].rolling(20).mean()
+                                last = hist.iloc[-1]
+                                prev = hist.iloc[-2]
+                                # Strong buy if price above both EMAs and volume spike
+                                if last['Close'] > last['ema9'] > last['ema21'] and last['Volume'] > last['volume_ma'] * 1.2:
+                                    signal = "STRONG BUY 🚀"
+                                    entry = last['Close']
+                                    sl = last['Close'] - (last['Close'] * 0.02)
+                                    tp = last['Close'] + (last['Close'] * 0.04)
+                                elif last['Close'] < last['ema9'] < last['ema21'] and last['Volume'] > last['volume_ma'] * 1.2:
+                                    signal = "STRONG SELL 🔻"
+                                    entry = last['Close']
+                                    sl = last['Close'] + (last['Close'] * 0.02)
+                                    tp = last['Close'] - (last['Close'] * 0.04)
+                                else:
+                                    signal = "Neutral"
+                                    entry = last['Close']
+                                    sl = last['Close'] * 0.98
+                                    tp = last['Close'] * 1.02
+                                results.append({
+                                    "Symbol": ticker,
+                                    "LTP": round(last['Close'], 2),
+                                    "Signal": signal,
+                                    "Entry": round(entry, 2),
+                                    "SL": round(sl, 2),
+                                    "TP": round(tp, 2)
+                                })
+                            except:
+                                continue
+                        if results:
+                            df_us = pd.DataFrame(results)
+                            def highlight_signal(val):
+                                if "STRONG BUY" in val:
+                                    return 'background-color: #22c55e; color: white'
+                                elif "STRONG SELL" in val:
+                                    return 'background-color: #ef4444; color: white'
+                                return ''
+                            styled_us = df_us.style.map(highlight_signal, subset=['Signal'])
+                            st.dataframe(styled_us, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No signals.")
+                st.markdown('</div>', unsafe_allow_html=True)
 
     # ========== TAB3 : LOGS ==========
     with tab3:
-        tab_log, tab_ledger, tab_debug = st.tabs(["📋 Console", "📊 Ledger", "🔧 Debug Info"])
+        tab_log, tab_ledger = st.tabs(["📋 Console", "📊 Ledger"])
         with tab_log:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -4069,13 +4098,22 @@ else:
         with tab_ledger:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
                 if bot.is_mock:
                     if bot.state.get("paper_history"):
                         df = pd.DataFrame(bot.state["paper_history"])
                         st.dataframe(df.iloc[::-1], use_container_width=True)
+                        if report_period == "Daily":
+                            today = get_ist().strftime('%Y-%m-%d')
+                            df_report = df[df['Date'] == today]
+                        elif report_period == "Weekly":
+                            week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
+                            df_report = df[df['Date'] >= week_ago]
+                        else:
+                            df_report = df
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                            df.to_excel(w, index=False)
+                            df_report.to_excel(w, index=False)
                         st.download_button("📥 Export", data=output.getvalue(), file_name="mock_ledger.xlsx")
                     else:
                         st.info("No paper trades yet.")
@@ -4087,9 +4125,17 @@ else:
                             if res.data:
                                 df = pd.DataFrame(res.data).drop(columns=["id","user_id"], errors="ignore")
                                 st.dataframe(df.iloc[::-1], use_container_width=True)
+                                if report_period == "Daily":
+                                    today = get_ist().strftime('%Y-%m-%d')
+                                    df_report = df[df['trade_date'] == today]
+                                elif report_period == "Weekly":
+                                    week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
+                                    df_report = df[df['trade_date'] >= week_ago]
+                                else:
+                                    df_report = df
                                 output = io.BytesIO()
                                 with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                                    df.to_excel(w, index=False)
+                                    df_report.to_excel(w, index=False)
                                 st.download_button("📥 Export", data=output.getvalue(), file_name="live_ledger.xlsx")
                             else:
                                 st.info("No live trades.")
@@ -4097,19 +4143,6 @@ else:
                             st.error(f"DB error: {e}")
                     else:
                         st.error("DB disconnected.")
-                st.markdown('</div>', unsafe_allow_html=True)
-        with tab_debug:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("🔧 System Debug Info")
-                st.write("**Current Signal:**", bot.state.get("current_signal", "N/A"))
-                st.write("**Signal Strength:**", bot.state.get("signal_strength", 0))
-                st.write("**Latest Candle Time:**", 
-                         bot.state.get("latest_data").index[-1].strftime('%Y-%m-%d %H:%M:%S') 
-                         if bot.state.get("latest_data") is not None else "N/A")
-                st.write("**Data Points:**", len(bot.state.get("latest_data", [])) if bot.state.get("latest_data") is not None else 0)
-                if bot.state.get("latest_data") is not None:
-                    st.write("**Columns:**", list(bot.state["latest_data"].columns))
                 st.markdown('</div>', unsafe_allow_html=True)
 
     # ========== TAB4 : CRYPTO/FX ==========
@@ -4263,7 +4296,7 @@ else:
                 else:
                     st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
                 
-                st.markdown("### Pin Bar Reversals (Indices & Gold)")
+                st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
                 pin_results = bot.scan_pin_bars()
                 if pin_results:
                     pin_df = pd.DataFrame(pin_results)
@@ -4298,7 +4331,7 @@ else:
 
     # ========== Bottom Dock ==========
     def cycle_asset():
-        assets = st.session_state.get('asset_options', list(DEFAULT_LOTS.keys()))
+        assets = st.session_state.get('asset_options', list(LOT_SIZES.keys()))
         if st.session_state.sb_index_input in assets:
             st.session_state.sb_index_input = assets[(assets.index(st.session_state.sb_index_input) + 1) % len(assets)]
         else:
