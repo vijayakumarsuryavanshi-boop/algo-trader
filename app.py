@@ -87,10 +87,12 @@ except ImportError:
 # SOUND FUNCTIONS (UI based, uses components.html)
 # ==========================================
 def play_sound_ui(sound_type="entry"):
-    """Play a sound via HTML5 audio (works in cloud)."""
+    """Play a sound via HTML5 audio (works in cloud). Requires audio enabled."""
+    if not st.session_state.get("audio_enabled", False):
+        return  # Audio not enabled yet
     sound_map = {
         "entry": "https://cdn.freesound.org/previews/320/320655_5260872-lq.mp3",  # short beep
-        "tp": "https://cdn.freesound.org/previews/320/320655_5260872-lq.mp3",     # success sound (replace with better if needed)
+        "tp": "https://cdn.freesound.org/previews/320/320655_5260872-lq.mp3",     # success sound
         "sl": "https://cdn.freesound.org/previews/256/256116_4486188-lq.mp3"      # error buzz
     }
     url = sound_map.get(sound_type, sound_map["entry"])
@@ -100,90 +102,164 @@ def play_sound_ui(sound_type="entry"):
         </audio>
     """, height=0)
 
+def unlock_audio():
+    """Play a silent sound to unlock audio in the browser."""
+    # Use a very short silent MP3 (base64 encoded)
+    silent_mp3 = "data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTG9uZWx5TWVkaWEuY29tIFNvdW5kIEVmZmVjdHMAAAAAAFRBTkNFAAAAQ29udGVudCBUaGF0IFdvcmtzLCBJbmMuIAAAADM2MDAwMDAwTk9STUFMAAAAJVRoYXRzIGEgdGVzdCBzb3VuZC4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    components.html(f"""
+        <audio autoplay>
+            <source src="{silent_mp3}" type="audio/mp3">
+        </audio>
+    """, height=0)
+
 # ==========================================
 # LIVE NEWS FUNCTIONS (Kannada + English)
 # ==========================================
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-@st.cache_data(ttl=300)  # refresh every 5 minutes
-def fetch_kannada_news(asset="NIFTY"):
-    """
-    Fetch live Kannada business news from Google News RSS.
-    Uses the selected asset to tailor the query.
-    Falls back to static news if feedparser fails.
-    """
-    asset_keywords = {
-        "NIFTY": "ನಿಫ್ಟಿ",
-        "BANKNIFTY": "ಬ್ಯಾಂಕ್ ನಿಫ್ಟಿ",
-        "SENSEX": "ಸೆನ್ಸೆಕ್ಸ್",
-        "GOLD": "ಚಿನ್ನ",
-        "SILVER": "ಬೆಳ್ಳಿ",
-        "CRUDEOIL": "ಕಚ್ಚಾ ತೈಲ",
-        "NATURALGAS": "ನೈಸರ್ಗಿಕ ಅನಿಲ",
-        "XAUUSD": "ಚಿನ್ನ",
-        "BTCUSD": "ಬಿಟ್ಕಾಯಿನ್",
-        "ETHUSD": "ಎಥೆರಿಯಂ",
-        "SOLUSD": "ಸೋಲಾನಾ"
-    }
-    keyword = asset_keywords.get(asset, "ಶೇರು ಮಾರುಕಟ್ಟೆ")
-    query = f"ಹಣಕಾಸು {keyword} ಶೇರುಮಾರುಕಟ್ಟೆ"
-    rss_url = f"https://news.google.com/rss/search?q={query}&hl=kn&gl=IN&ceid=IN:kn"
-    news_list = []
-    try:
-        if HAS_FEEDPARSER:
-            feed = feedparser.parse(rss_url, request_headers=HEADERS)
-            for entry in feed.entries[:5]:
-                news_list.append(f"📰 {entry.title}")
+def generate_market_prediction(asset="NIFTY"):
+    """Generate a market movement prediction based on bot's current signal."""
+    if st.session_state.bot is None:
+        return "⚖️ Market prediction unavailable (bot not started)"
+    
+    bot = st.session_state.bot
+    signal = bot.state.get("current_signal", "WAIT")
+    strength = bot.state.get("signal_strength", 0)
+    trend = bot.state.get("current_trend", "Neutral")
+    
+    # Use ML probabilities if available
+    ml_up = bot.state.get("ml_prob_up", 50)
+    ml_down = bot.state.get("ml_prob_down", 50)
+    
+    if signal == "BUY_CE":
+        direction = "🟢 UP"
+        confidence = strength
+    elif signal == "BUY_PE":
+        direction = "🔴 DOWN"
+        confidence = strength
+    else:
+        # If no signal, use ML or neutral
+        if ml_up > ml_down + 10:
+            direction = "🟢 UP (ML)"
+            confidence = ml_up
+        elif ml_down > ml_up + 10:
+            direction = "🔴 DOWN (ML)"
+            confidence = ml_down
         else:
-            # Fallback if feedparser not installed
-            response = requests.get(rss_url, headers=HEADERS, timeout=10)
-            if response.status_code == 200:
-                # Very basic parsing (could use regex but feedparser is better)
-                import re
-                titles = re.findall(r'<title[^>]*>(.*?)</title>', response.text)
-                for title in titles[1:6]:  # skip first which is feed title
-                    news_list.append(f"📰 {title}")
-            else:
-                raise Exception("RSS request failed")
-    except Exception as e:
-        # Fallback static news
-        fallback = [
-            "📰 ಶೇರು ಮಾರುಕಟ್ಟೆ ಇಂದು ಏರಿಕೆ ಕಂಡಿದೆ",
-            "📰 ನಿಫ್ಟಿ ಹೊಸ ದಾಖಲೆ ಸೃಷ್ಟಿಸಿದೆ",
-            "📰 ವಿದೇಶಿ ಹೂಡಿಕೆದಾರರು ಭಾರತೀಯ ಷೇರುಗಳಲ್ಲಿ ಹೂಡಿಕೆ",
-            "📰 ಚಿನ್ನದ ಬೆಲೆ 65,000 ರೂ. ದಾಟಿದೆ",
-            "📰 ಬಿಟ್ಕಾಯಿನ್ 70,000 ಡಾಲರ್ ದಾಟಿ ಹೊಸ ದಾಖಲೆ"
-        ]
-        news_list = fallback
-    return news_list
+            direction = "⚪ SIDEWAYS"
+            confidence = 50
+    
+    return f"📈 Prediction: Market likely to move {direction} in next 30 mins | Confidence: {confidence:.0f}% | {trend}"
 
-@st.cache_data(ttl=300)
+import xml.etree.ElementTree as ET
+
+def fetch_feed(url):
+    """Fetch and parse an RSS feed using requests and ElementTree."""
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        items = []
+        for item in root.findall('.//item'):
+            title = item.find('title').text
+            if title:
+                items.append(title)
+        return items
+    except Exception:
+        return None
+
+@st.cache_data(ttl=3000)
 def fetch_english_news(asset="NIFTY"):
-    """Fetch live English business news from Google News RSS."""
-    rss_url = "https://news.google.com/rss/search?q=business+finance&hl=en-US&gl=US&ceid=US:en"
-    news_list = []
-    try:
-        if HAS_FEEDPARSER:
-            feed = feedparser.parse(rss_url, request_headers=HEADERS)
-            for entry in feed.entries[:8]:
-                source = entry.source.title if hasattr(entry, 'source') else "Google News"
-                news_list.append(f"{entry.title} ({source})")
-        else:
-            response = requests.get(rss_url, headers=HEADERS, timeout=10)
-            if response.status_code == 200:
-                import re
-                titles = re.findall(r'<title[^>]*>(.*?)</title>', response.text)
-                for title in titles[1:9]:
-                    news_list.append(f"📰 {title}")
-            else:
-                raise Exception("RSS request failed")
-    except Exception as e:
-        news_list = ["📰 Live news temporarily unavailable"]
-    return news_list
+    """Live English news from multiple sources; fallback to market prediction."""
+    # Try Google News RSS first
+    asset_terms = {
+        "NIFTY": "Nifty 50",
+        "BANKNIFTY": "Bank Nifty",
+        "SENSEX": "Sensex",
+        "GOLD": "Gold",
+        "SILVER": "Silver",
+        "CRUDEOIL": "Crude Oil",
+        "NATURALGAS": "Natural Gas",
+        "XAUUSD": "Gold",
+        "BTCUSD": "Bitcoin",
+        "ETHUSD": "Ethereum",
+        "SOLUSD": "Solana"
+    }
+    term = asset_terms.get(asset, asset)
+    query = f"{term} stock market"
+    google_url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+    
+    titles = fetch_feed(google_url)
+    if titles and len(titles) >= 3:
+        return [f"📰 {t}" for t in titles[:8]]
+    
+    # Try Reuters Money News as backup
+    reuters_url = "https://feeds.reuters.com/news/wealth"
+    titles = fetch_feed(reuters_url)
+    if titles and len(titles) >= 3:
+        return [f"📰 {t}" for t in titles[:8]]
+    
+    # Try a simple Yahoo Finance RSS (if available)
+    yahoo_url = f"https://finance.yahoo.com/news/rssindex"
+    titles = fetch_feed(yahoo_url)
+    if titles and len(titles) >= 3:
+        return [f"📰 {t}" for t in titles[:8]]
+    
+    # If all live sources fail, return market prediction
+    return [generate_market_prediction(asset)]
 
+@st.cache_data(ttl=3000)
+def fetch_kannada_news(asset="NIFTY"):
+    """Fetch live Kannada news from multiple RSS sources; fallback to market prediction."""
+    
+    # List of working Kannada news RSS feeds (business/finance sections)
+    rss_feeds = [
+        "https://kannada.oneindia.com/rss/news-business-feed.xml",  # OneIndia Kannada – Business
+        "https://www.prajavani.net/rss/ವಾಣಿಜ್ಯ",                    # Prajavani – Business (Kannada in URL)
+        "https://vijaykarnataka.com/rss/business",                  # Vijay Karnataka – Business
+        "https://kannada.asianetnews.com/rss/business"              # Asianet News – Business
+    ]
+    
+    # Try each feed until we get at least 3 headlines
+    for feed_url in rss_feeds:
+        try:
+            titles = fetch_feed(feed_url)  # uses your existing fetch_feed function
+            if titles and len(titles) >= 3:
+                # Return first 5 headlines
+                return [f"📰 {t}" for t in titles[:5]]
+        except Exception as e:
+            # Optional: log the error for debugging (remove in production)
+            # print(f"Kannada feed failed: {feed_url} – {e}")
+            continue
+    
+    # If no live news, return market prediction based on bot's signal
+    return [generate_market_prediction(asset)]
 # ==========================================
 # SESSION STATE INITIALIZATION
 # ==========================================
+import threading
+import time
+
+def news_updater():
+    """Background thread to update news every 2 hours."""
+    while True:
+        # Update Kannada and English news for the current asset
+        asset = st.session_state.get('sb_index_input', 'NIFTY')
+        st.session_state.kannada_news = fetch_kannada_news(asset)
+        st.session_state.english_news = fetch_english_news(asset)
+        # Sleep for 2 hours
+        time.sleep(7200)
+
+# Initialize news in session state
+if 'kannada_news' not in st.session_state:
+    st.session_state.kannada_news = []
+    st.session_state.english_news = []
+    # Start background thread only once
+    if 'news_thread_started' not in st.session_state:
+        thread = threading.Thread(target=news_updater, daemon=True)
+        thread.start()
+        st.session_state.news_thread_started = True
+
 if 'sb_index_input' not in st.session_state:
     st.session_state.sb_index_input = "NIFTY"
 if 'sb_strat_input' not in st.session_state:
@@ -204,6 +280,8 @@ if 'use_quantity_mode' not in st.session_state:
     st.session_state.use_quantity_mode = False
 if 'hz_demo_mode' not in st.session_state:
     st.session_state.hz_demo_mode = False
+if 'audio_enabled' not in st.session_state:
+    st.session_state.audio_enabled = False
 
 # ==========================================
 # 0. DATABASE & GLOBAL HELPERS
@@ -1966,9 +2044,7 @@ class SniperBot:
         self.state["logs"].appendleft(f"[{get_ist().strftime('%H:%M:%S')}] {msg}")
 
     def get_balance(self):
-        if self.is_mock: 
-            cap = self.settings.get("max_capital", 15000.0) if self.settings else 15000.0
-            return f"₹ {cap:,.2f} (Paper)"
+        """Fetch live balance from all connected brokers, no mock fallback."""
         b_str = []
         
         if self.api:
@@ -1977,20 +2053,26 @@ class SniperBot:
                 if rms and rms.get('status') and rms.get('data'):
                     data = rms['data']
                     bal = data.get('availablecash', data.get('net', 0))
-                    try: bal = float(bal)
-                    except: bal = 0.0
-                    b_str.append(f"Angel: ₹ {round(bal, 2)}")
-            except: pass
+                    try:
+                        bal = float(bal)
+                        b_str.append(f"Angel: ₹ {bal:,.2f}")
+                    except:
+                        pass
+            except:
+                pass
             
         if self.kite:
             try:
                 margins = self.kite.margins()
                 eq = margins.get('equity', {})
                 bal = eq.get('available', {}).get('live_balance', eq.get('net', 0))
-                try: bal = float(bal)
-                except: bal = 0.0
-                b_str.append(f"Zerodha: ₹ {round(bal, 2)}")
-            except: pass
+                try:
+                    bal = float(bal)
+                    b_str.append(f"Zerodha: ₹ {bal:,.2f}")
+                except:
+                    pass
+            except:
+                pass
             
         if self.coindcx_api:
             try:
@@ -1998,32 +2080,41 @@ class SniperBot:
                 payload = {"timestamp": ts}
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
                 signature = hmac.new(secret_bytes, json.dumps(payload, separators=(',', ':')).encode('utf-8'), hashlib.sha256).hexdigest()
-                res = requests.post("https://api.coindcx.com/exchange/v1/users/balances", headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature}, json=payload)
+                res = requests.post("https://api.coindcx.com/exchange/v1/users/balances", headers={'X-AUTH-APIKEY': self.coindcx_api, 'X-AUTH-SIGNATURE': signature}, json=payload, timeout=5)
                 if res.status_code == 200:
                     for b in res.json():
-                        if b['currency'] == 'USDT': 
+                        if b['currency'] == 'USDT':
                             bal = float(b['balance'])
-                            if self.settings.get('show_inr_crypto', True): b_str.append(f"DCX: ₹ {round(bal * get_usdt_inr_rate(),2)}")
-                            else: b_str.append(f"DCX: $ {round(bal,2)}")
-            except: pass
+                            if self.settings.get('show_inr_crypto', True):
+                                b_str.append(f"DCX: ₹ {bal * get_usdt_inr_rate():,.2f}")
+                            else:
+                                b_str.append(f"DCX: $ {bal:,.2f}")
+            except:
+                pass
             
         if self.delta_api:
             try:
                 ts, sig = generate_delta_signature('GET', '/v2/wallet/balances', '', self.delta_secret)
                 headers = {'api-key': self.delta_api, 'signature': sig, 'timestamp': ts}
-                res = requests.get("https://api.delta.exchange/v2/wallet/balances", headers=headers)
+                res = requests.get("https://api.delta.exchange/v2/wallet/balances", headers=headers, timeout=5)
                 if res.status_code == 200:
                     for b in res.json().get('result', []):
-                        if b['asset_symbol'] == 'USDT': 
+                        if b['asset_symbol'] == 'USDT':
                             bal = float(b['balance'])
-                            if self.settings.get('show_inr_crypto', True): b_str.append(f"Delta: ₹ {round(bal * get_usdt_inr_rate(),2)}")
-                            else: b_str.append(f"Delta: $ {round(bal,2)}")
-            except: pass
+                            if self.settings.get('show_inr_crypto', True):
+                                b_str.append(f"Delta: ₹ {bal * get_usdt_inr_rate():,.2f}")
+                            else:
+                                b_str.append(f"Delta: $ {bal:,.2f}")
+            except:
+                pass
             
         if self.is_mt5_connected and self.mt5_bridge:
-            acc_info = self.mt5_bridge.get_account_info()
-            if acc_info:
-                b_str.append(f"MT5: $ {round(acc_info.get('balance', 0), 2)}")
+            try:
+                acc_info = self.mt5_bridge.get_account_info()
+                if acc_info:
+                    b_str.append(f"MT5: $ {acc_info.get('balance', 0):,.2f}")
+            except:
+                pass
             
         return " | ".join(b_str) if b_str else "N/A"
 
@@ -3175,6 +3266,10 @@ if not getattr(st.session_state, "bot", None):
                         with st.spinner("Authenticating via Cloud..."):
                             if temp_bot.login():
                                 st.session_state.bot = temp_bot
+                                # Enable audio automatically after login
+                                st.session_state.audio_enabled = True
+                                unlock_audio()
+                                play_sound_ui("entry")
                                 if keep_signed:
                                     st.query_params["user_id"] = USER_ID
                                 st.rerun()
@@ -3261,6 +3356,10 @@ if not getattr(st.session_state, "bot", None):
                             if temp_bot.login():
                                 if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC)
                                 st.session_state.bot = temp_bot
+                                # Enable audio automatically after login
+                                st.session_state.audio_enabled = True
+                                unlock_audio()
+                                play_sound_ui("entry")
                                 if keep_signed:
                                     st.query_params["user_id"] = USER_ID
                                 st.rerun()
@@ -3274,6 +3373,9 @@ if not getattr(st.session_state, "bot", None):
                     temp_bot = SniperBot(is_mock=True)
                     temp_bot.login()
                     st.session_state.bot = temp_bot
+                    st.session_state.audio_enabled = True
+                    unlock_audio()
+                    play_sound_ui("entry")
                     st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -3311,6 +3413,16 @@ else:
 
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
+        
+        # Add Audio Enable button in sidebar
+        if not st.session_state.audio_enabled:
+            if st.button("🔊 Enable Audio", use_container_width=True):
+                st.session_state.audio_enabled = True
+                unlock_audio()
+                st.success("Audio enabled!")
+                st.rerun()
+        else:
+            st.success("🔊 Audio is ON")
         
         st.markdown("**1. Market Setup**")
         BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5"], index=0)
@@ -3438,6 +3550,10 @@ else:
             HZ_MAX_HOLD = 60
 
         st.divider()
+        # Add Refresh Balance button
+        if st.button("🔄 Refresh Balance", use_container_width=True):
+            st.rerun()
+        
         if not bot.is_mock and st.button("🧪 Ping API Connection", use_container_width=True):
             st.toast("Testing exact API parameters...", icon="🧪")
             bot.log(f"🧪 User executed manual Ping API Connection for {BROKER}.")
@@ -3523,13 +3639,21 @@ else:
 
     # ========== TAB1 : DASHBOARD ==========
     with tab1:
+        kannada_news = st.session_state.kannada_news
+        english_news = st.session_state.english_news
+
+        if not kannada_news:
+            kannada_news = ["📰 Loading Kannada news... (first fetch in progress)"]
+        if not english_news:
+            english_news = ["📰 Loading English news... (first fetch in progress)"]
         # Live Kannada news (based on selected asset)
+
         kannada_news = fetch_kannada_news(INDEX)
         if kannada_news:
             ticker_text = " 🔹 ".join(kannada_news)
             st.markdown(f'<div class="news-ticker"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
 
-        # Live English news
+        # Live English news (asset-specific)
         english_news = fetch_english_news(INDEX)
         if english_news:
             ticker_text = " 🔹 ".join(english_news)
@@ -3545,6 +3669,7 @@ else:
         elif exch == "DELTA": term_type = f"🔺 Delta Exchange {CRYPTO_MODE}"
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
         
+        # Header with larger PnL
         st.markdown(f"""
             <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
                 <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
@@ -3557,7 +3682,7 @@ else:
                         </div>
                         <div style="text-align: right;">
                             <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
-                            <span style="font-size: 1.2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
+                            <span style="font-size: 2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
                         </div>
                     </div>
                 </div>
@@ -3665,7 +3790,11 @@ else:
                 </div>
                 <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Signal Strength</div>
-                    <div style="font-size: 0.7rem; color: #64748b; display: inline-block; padding: 0 5px;">{signal_strength}%</div>
+                    <!-- Progress bar instead of tiny box -->
+                    <div style="width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 5px;">
+                        <div style="width: {signal_strength}%; height: 10px; background: #0284c7; border-radius: 5px;"></div>
+                    </div>
+                    <div style="text-align: right; font-size: 0.8rem; color: #64748b; margin-top: 2px;">{signal_strength}%</div>
                 </div>
                 <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800; letter-spacing: 1px;">Live OHLCV</div>
