@@ -163,7 +163,7 @@ def fetch_feed(url):
     except Exception:
         return None
 
-@st.cache_data(ttl=600)
+
 def fetch_english_news(asset="NIFTY"):
     asset_terms = {
         "NIFTY": "Nifty 50",
@@ -194,7 +194,7 @@ def fetch_english_news(asset="NIFTY"):
         return [f"📰 {t}" for t in titles[:8]]
     return [generate_market_prediction(asset)]
 
-@st.cache_data(ttl=600)
+
 def fetch_kannada_news(asset="NIFTY"):
     rss_feeds = [
         "https://kannada.oneindia.com/rss/news-business-feed.xml",
@@ -229,6 +229,7 @@ if 'kannada_news' not in st.session_state:
     st.session_state.english_news = []
     if 'news_thread_started' not in st.session_state:
         thread = threading.Thread(target=news_updater, daemon=True)
+        add_script_run_ctx(thread)
         thread.start()
         st.session_state.news_thread_started = True
 
@@ -1898,6 +1899,20 @@ class SniperBot:
         }
         self.settings = {}
 
+    def load_daily_pnl(self):
+        """Load today's total PnL from database (for real users)."""
+        if self.is_mock or not HAS_DB:
+            return 0.0
+        today = get_ist().strftime('%Y-%m-%d')
+        try:
+            res = supabase.table("trade_logs").select("pnl").eq("user_id", self.system_user_id).eq("trade_date", today).execute()
+            if res.data:
+                total = sum(trade['pnl'] for trade in res.data)
+                return total
+        except Exception as e:
+            self.log(f"⚠️ Could not load daily PnL: {e}")
+        return 0.0
+
     def connect_mt5(self):
         if self.mt5_acc and self.mt5_server:
             self.mt5_bridge = MT5WebBridge(
@@ -2513,38 +2528,46 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-                clean_qty = float(round(float(qty), 4))
-                
-                exact_market_spot = f"{base_coin}USDT"
-                exact_market_futures = f"B-{base_coin}_USDT"
-                
-                try:
-                    ticker_data = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
-                    for coin in ticker_data:
-                        mkt = coin.get('market', '')
-                        if mkt.replace('_', '').upper() == exact_market_spot.upper() or mkt.upper() == exact_market_futures.upper():
-                            if market_type in ["Futures", "Options"] and mkt.startswith("B-"):
-                                exact_market_futures = mkt
-                            elif market_type == "Spot" and not mkt.startswith("B-"):
-                                exact_market_spot = mkt
-                            break
-                except Exception as e:
-                    self.log(f"⚠️ CoinDCX ticker fetch error: {e}")
+                clean_qty = float(round(float(qty), 8))  # allow up to 8 decimals
+
+                # Fetch ticker data to get correct market symbol
+                ticker_data = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
+                market_symbol = None
+                for coin in ticker_data:
+                    mkt = coin.get('market', '')
+                    # Spot format: baseUSDT (e.g., BTCUSDT)
+                    if mkt.upper() == f"{base_coin}USDT".upper():
+                        market_symbol = mkt
+                        break
+                    # Futures format: B-base_USDT (e.g., B-BTC_USDT)
+                    if market_type in ["Futures", "Options"] and mkt.upper() == f"B-{base_coin}_USDT".upper():
+                        market_symbol = mkt
+                        break
+
+                if not market_symbol:
+                    # Fallback: construct based on market type
+                    if market_type in ["Futures", "Options"]:
+                        market_symbol = f"B-{base_coin}_USDT"
+                    else:
+                        market_symbol = f"{base_coin}USDT"
+                    self.log(f"⚠️ CoinDCX market symbol not found, using constructed: {market_symbol}")
 
                 if market_type in ["Futures", "Options"]:
+                    # Futures order
                     payload = {
                         "side": side.lower(),
-                        "order_type": "market",
-                        "pair": exact_market_futures,
+                        "order_type": "market_order",
+                        "pair": market_symbol,
                         "total_quantity": clean_qty,
                         "timestamp": ts
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 else:
+                    # Spot order
                     payload = {
                         "side": side.lower(),
                         "order_type": "market_order",
-                        "market": exact_market_spot,
+                        "market": market_symbol,
                         "total_quantity": clean_qty,
                         "timestamp": ts
                     }
@@ -2553,33 +2576,19 @@ class SniperBot:
                 payload_str = json.dumps(payload, separators=(',', ':'))
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
                 signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
-                
+
                 headers = {
                     'X-AUTH-APIKEY': self.coindcx_api,
                     'X-AUTH-SIGNATURE': signature,
                     'Content-Type': 'application/json'
                 }
-                
+
                 self.log(f"📡 CoinDCX payload: {payload_str}")
                 res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
-                
-                if res.status_code == 404 and market_type in ["Futures", "Options"]:
-                    self.log(f"⚠️ Futures 404 on {exact_market_futures}. Falling back to Margin API...")
-                    payload = {
-                        "side": side.lower(),
-                        "order_type": "market_order",
-                        "market": exact_market_spot,
-                        "total_quantity": clean_qty,
-                        "timestamp": ts
-                    }
-                    endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
-                    payload_str = json.dumps(payload, separators=(',', ':'))
-                    signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
-                    headers['X-AUTH-SIGNATURE'] = signature
-                    res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
 
-                if res.status_code == 200: 
+                if res.status_code == 200:
                     response_data = res.json()
+                    # Response can be a list (for spot) or dict (for futures)
                     if isinstance(response_data, list) and len(response_data) > 0:
                         order_id = response_data[0].get('id', 'DCX_ORDER_OK')
                     elif isinstance(response_data, dict):
@@ -2588,10 +2597,28 @@ class SniperBot:
                         order_id = 'DCX_ORDER_OK'
                     self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
                     return order_id
-                else: 
+                else:
                     self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {res.text}")
+                    # Try fallback to margin endpoint if spot fails (for certain pairs)
+                    if market_type == "Spot" and "margin" not in endpoint:
+                        self.log("⚠️ Spot order failed, trying Margin API...")
+                        margin_endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
+                        margin_payload = payload.copy()
+                        margin_payload['market'] = market_symbol  # same format
+                        margin_payload_str = json.dumps(margin_payload, separators=(',', ':'))
+                        signature_margin = hmac.new(secret_bytes, margin_payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+                        headers_margin = headers.copy()
+                        headers_margin['X-AUTH-SIGNATURE'] = signature_margin
+                        res_margin = requests.post(margin_endpoint, headers=headers_margin, data=margin_payload_str, timeout=10)
+                        if res_margin.status_code == 200:
+                            response_data = res_margin.json()
+                            order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
+                            self.log(f"✅ CoinDCX Margin Order Success! ID: {order_id}")
+                            return order_id
+                        else:
+                            self.log(f"❌ CoinDCX Margin API Rejected [{res_margin.status_code}]: {res_margin.text}")
                     return None
-            except Exception as e: 
+            except Exception as e:
                 self.log(f"❌ CoinDCX Exception: {e}")
                 return None
 
@@ -3209,6 +3236,7 @@ if not getattr(st.session_state, "bot", None):
                         temp_bot.system_user_id = USER_ID
                         with st.spinner("Authenticating via Cloud..."):
                             if temp_bot.login():
+                                temp_bot.state["daily_pnl"] = temp_bot.load_daily_pnl()
                                 st.session_state.bot = temp_bot
                                 st.session_state.audio_enabled = True
                                 unlock_audio()
@@ -3310,6 +3338,7 @@ if not getattr(st.session_state, "bot", None):
                         temp_bot.system_user_id = USER_ID
                         with st.spinner("Authenticating Secure Connections..."):
                             if temp_bot.login():
+                                temp_bot.state["daily_pnl"] = temp_bot.load_daily_pnl()
                                 if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC, IB_HOST, IB_PORT, IB_CLIENT_ID)
                                 st.session_state.bot = temp_bot
                                 st.session_state.audio_enabled = True
@@ -3329,6 +3358,8 @@ if not getattr(st.session_state, "bot", None):
                 if st.button("START PAPER SESSION 📝", type="primary", use_container_width=True):
                     temp_bot = SniperBot(is_mock=True)
                     temp_bot.login()
+                    temp_bot.system_user_id = "paper_user"
+                    temp_bot.state["daily_pnl"] = temp_bot.load_daily_pnl()
                     st.session_state.bot = temp_bot
                     st.session_state.audio_enabled = True
                     unlock_audio()
