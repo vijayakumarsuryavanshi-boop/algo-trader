@@ -3215,7 +3215,9 @@ if not getattr(st.session_state, "bot", None):
                                 play_sound_ui("entry")
                                 if keep_signed:
                                     st.query_params["user_id"] = USER_ID
-                                st.rerun()
+                                    play_sound_ui("entry")
+                                    st.rerun()
+                                # No explicit rerun – natural rerun after button click
                             else: st.error("❌ Login Failed! Check API details or TOTP.")
                     else: st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
             elif auth_mode == "🕉️ Real Trading":
@@ -3315,7 +3317,9 @@ if not getattr(st.session_state, "bot", None):
                                 play_sound_ui("entry")
                                 if keep_signed:
                                     st.query_params["user_id"] = USER_ID
-                                st.rerun()
+                                    play_sound_ui("entry")
+                                    st.rerun()
+                                # No explicit rerun
                             else:
                                 err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
                                 st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
@@ -3329,7 +3333,9 @@ if not getattr(st.session_state, "bot", None):
                     st.session_state.audio_enabled = True
                     unlock_audio()
                     play_sound_ui("entry")
+                    play_sound_ui("entry")
                     st.rerun()
+                    # No explicit rerun
             st.markdown("</div>", unsafe_allow_html=True)
 
 # --- MAIN TERMINAL ---
@@ -4026,23 +4032,22 @@ else:
                             try:
                                 tk = yf.Ticker(ticker)
                                 hist = tk.history(period="1mo", interval="1d")
-                                if len(hist) < 20: continue
+                                if len(hist) < 20:
+                                    continue
                                 hist['ema9'] = hist['Close'].ewm(span=9).mean()
                                 hist['ema21'] = hist['Close'].ewm(span=21).mean()
                                 hist['volume_ma'] = hist['Volume'].rolling(20).mean()
                                 last = hist.iloc[-1]
-                                prev = hist.iloc[-2]
-                                # Strong buy if price above both EMAs and volume spike
-                                if last['Close'] > last['ema9'] > last['ema21'] and last['Volume'] > last['volume_ma'] * 1.2:
-                                    signal = "STRONG BUY 🚀"
+                                if (last['Close'] > last['ema9'] and last['ema9'] > last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
+                                    signal = "BUY 🟢"
                                     entry = last['Close']
-                                    sl = last['Close'] - (last['Close'] * 0.02)
-                                    tp = last['Close'] + (last['Close'] * 0.04)
-                                elif last['Close'] < last['ema9'] < last['ema21'] and last['Volume'] > last['volume_ma'] * 1.2:
-                                    signal = "STRONG SELL 🔻"
+                                    sl = last['Close'] * 0.98
+                                    tp = last['Close'] * 1.04
+                                elif (last['Close'] < last['ema9'] and last['ema9'] < last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
+                                    signal = "SELL 🔴"
                                     entry = last['Close']
-                                    sl = last['Close'] + (last['Close'] * 0.02)
-                                    tp = last['Close'] - (last['Close'] * 0.04)
+                                    sl = last['Close'] * 1.02
+                                    tp = last['Close'] * 0.96
                                 else:
                                     signal = "Neutral"
                                     entry = last['Close']
@@ -4061,15 +4066,15 @@ else:
                         if results:
                             df_us = pd.DataFrame(results)
                             def highlight_signal(val):
-                                if "STRONG BUY" in val:
+                                if "BUY" in val:
                                     return 'background-color: #22c55e; color: white'
-                                elif "STRONG SELL" in val:
+                                elif "SELL" in val:
                                     return 'background-color: #ef4444; color: white'
                                 return ''
                             styled_us = df_us.style.map(highlight_signal, subset=['Signal'])
                             st.dataframe(styled_us, use_container_width=True, hide_index=True)
                         else:
-                            st.info("No signals.")
+                            st.info("No signals found.")
                 st.markdown('</div>', unsafe_allow_html=True)
 
     # ========== TAB3 : LOGS ==========
