@@ -27,9 +27,10 @@ from threading import Event
 
 # ---------- ML / News / Extra Imports ----------
 try:
-    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.ensemble import RandomForestClassifier, VotingClassifier
     from sklearn.neural_network import MLPClassifier
     from sklearn.preprocessing import StandardScaler
+    from sklearn.model_selection import train_test_split
     HAS_SKLEARN = True
 except ImportError:
     HAS_SKLEARN = False
@@ -98,6 +99,7 @@ def play_sound_ui(sound_type="entry"):
     """Play a sound via HTML5 audio."""
     if not st.session_state.get("audio_enabled", False):
         return
+    # Use a reliable beep URL
     beep_url = "https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3"
     components.html(f"""
         <audio autoplay>
@@ -148,25 +150,19 @@ def generate_market_prediction(asset="NIFTY"):
 import xml.etree.ElementTree as ET
 
 def fetch_feed(url):
-    """Fetch RSS feed and return list of titles."""
-    titles = []
     try:
-        if HAS_FEEDPARSER:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:10]:
-                if hasattr(entry, 'title'):
-                    titles.append(entry.title)
-        else:
-            resp = requests.get(url, headers=HEADERS, timeout=10)
-            resp.raise_for_status()
-            root = ET.fromstring(resp.content)
-            for item in root.findall('.//item'):
-                title = item.find('title').text
-                if title:
-                    titles.append(title)
+        resp = requests.get(url, headers=HEADERS, timeout=10)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        items = []
+        for item in root.findall('.//item'):
+            title = item.find('title').text
+            if title:
+                items.append(title)
+        return items
     except Exception:
         return None
-    return titles if titles else None
+
 
 def fetch_english_news(asset="NIFTY"):
     asset_terms = {
@@ -198,21 +194,21 @@ def fetch_english_news(asset="NIFTY"):
         return [f"📰 {t}" for t in titles[:8]]
     return [generate_market_prediction(asset)]
 
+
 def fetch_kannada_news(asset="NIFTY"):
     rss_feeds = [
         "https://kannada.oneindia.com/rss/news-business-feed.xml",
-        "https://www.prajavani.net/rss/ವಾಣಿಜ్య",
+        "https://www.prajavani.net/rss/ವಾಣಿಜ್ಯ",
         "https://vijaykarnataka.com/rss/business",
-        "https://kannada.asianetnews.com/rss/business",
-        "https://kannada.news18.com/rss/business/",
-        "https://www.tv9kannada.com/rss/business",
-        "https://kannada.hindustantimes.com/rss/business",
-        "https://kannada.goodreturns.in/rss/business/"
+        "https://kannada.asianetnews.com/rss/business"
     ]
     for feed_url in rss_feeds:
-        titles = fetch_feed(feed_url)
-        if titles and len(titles) >= 3:
-            return [f"📰 {t}" for t in titles[:5]]
+        try:
+            titles = fetch_feed(feed_url)
+            if titles and len(titles) >= 3:
+                return [f"📰 {t}" for t in titles[:5]]
+        except Exception:
+            continue
     return [generate_market_prediction(asset)]
 
 # ==========================================
@@ -226,7 +222,7 @@ def news_updater():
         asset = st.session_state.get('sb_index_input', 'NIFTY')
         st.session_state.kannada_news = fetch_kannada_news(asset)
         st.session_state.english_news = fetch_english_news(asset)
-        time.sleep(300)  # update every 5 minutes
+        time.sleep(600)
 
 if 'kannada_news' not in st.session_state:
     st.session_state.kannada_news = []
@@ -255,6 +251,8 @@ if 'asset_options' not in st.session_state:
     st.session_state.asset_options = ["NIFTY", "BANKNIFTY", "SENSEX", "CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "XAUUSD", "BTCUSD", "ETHUSD", "SOLUSD"]
 if 'use_quantity_mode' not in st.session_state:
     st.session_state.use_quantity_mode = False
+if 'hz_demo_mode' not in st.session_state:
+    st.session_state.hz_demo_mode = False
 if 'audio_enabled' not in st.session_state:
     st.session_state.audio_enabled = False
 
@@ -501,6 +499,7 @@ st.markdown("""
     
     .hero-badge { background: #22c55e; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
     .zero-badge { background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+    .hz-stats { background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 8px; margin: 10px 0; }
     
     .modern-card {
         background: white;
@@ -719,7 +718,6 @@ class MT5WebBridge:
         return None
     
     def place_order(self, symbol, volume, order_type, sl=None, tp=None):
-        self.log(f"MT5 place_order: symbol={symbol}, volume={volume}, type={order_type}")
         if self.use_direct_mt5 and mt5.initialize():
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -1888,15 +1886,16 @@ class SniperBot:
             "scalp_signals": deque(maxlen=20),
             "arbitrage_opps": [],
             "premium_opps": [],
+            "hz_trades": deque(maxlen=100),
+            "hz_pnl": 0.0,
+            "hz_wins": 0,
+            "hz_losses": 0,
+            "hz_last_signal_time": None,
             "news_cache": [],
             "signal_history": deque(maxlen=5),
             "mock_price": None,
             "sound_queue": deque(maxlen=10),
-            "fomo_signals": deque(maxlen=20),
-            "hz_trades": deque(maxlen=100),
-            "hz_pnl": 0.0,
-            "hz_wins": 0,
-            "hz_losses": 0
+            "fomo_signals": deque(maxlen=20)
         }
         self.settings = {}
 
@@ -2270,6 +2269,228 @@ class SniperBot:
         df.index = df['timestamp']
         return df
 
+    def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
+        if not is_hero_zero or df is None or len(df) < 20:
+            return True, ""
+        
+        last = df.iloc[-1]
+        atr = self.analyzer.get_atr(df).iloc[-1]
+        body = abs(last['close'] - last['open'])
+        vol_sma = df['volume'].rolling(20).mean().iloc[-1]
+        
+        is_hero = signal == "BUY_CE" and last['close'] > last['open'] * 1.02
+        is_zero = signal == "BUY_PE" and last['close'] < last['open'] * 0.98
+        
+        volume_confirm = last['volume'] > vol_sma * 1.5
+        price_action_confirm = (
+            (is_hero and last['close'] > last['high'] * 0.95) or
+            (is_zero and last['close'] < last['low'] * 1.05)
+        )
+        volatility_ok = body > atr * 0.5
+        
+        now_ist = get_ist()
+        if 11 <= now_ist.hour <= 13:
+            return False, "⚠️ Avoid Hero/Zero during lunch hours"
+        
+        if self.state.get("hz_last_signal_time"):
+            time_diff = (get_ist() - self.state["hz_last_signal_time"]).seconds / 60
+            if time_diff < 15:
+                return False, f"⏳ Cooldown: {15 - time_diff:.0f} mins remaining"
+        
+        if is_hero and volume_confirm and price_action_confirm and volatility_ok:
+            self.state["hz_last_signal_time"] = get_ist()
+            return True, "🔥 HERO DETECTED: Strong buying pressure with volume"
+        
+        if is_zero and volume_confirm and price_action_confirm and volatility_ok:
+            self.state["hz_last_signal_time"] = get_ist()
+            return True, "🩸 ZERO DETECTED: Strong selling pressure with volume"
+        
+        return False, "⚠️ No Hero/Zero: Insufficient momentum"
+
+    def calculate_hero_zero_position(self, signal_strength, atr, spot, capital):
+        base_size = capital * 0.02
+        
+        if signal_strength >= 90:
+            strength_mult = 1.5
+        elif signal_strength >= 75:
+            strength_mult = 1.2
+        elif signal_strength >= 60:
+            strength_mult = 1.0
+        else:
+            strength_mult = 0.5
+        
+        volatility_mult = min(1.5, 30 / atr) if atr > 0 else 1.0
+        
+        now_ist = get_ist()
+        hour = now_ist.hour
+        
+        if hour in [9, 10, 14, 15]:
+            time_mult = 1.3
+        elif hour in [11, 12, 13]:
+            time_mult = 0.7
+        else:
+            time_mult = 0.5
+        
+        position_value = base_size * strength_mult * volatility_mult * time_mult
+        
+        if spot > 0:
+            quantity = position_value / spot
+        else:
+            quantity = 0
+        
+        return round(quantity, 2), {
+            "base": base_size,
+            "strength": strength_mult,
+            "volatility": volatility_mult,
+            "time": time_mult,
+            "final": position_value
+        }
+
+    def scan_hero_zero_indian_stocks(self, nifty_stocks=None):
+        if st.session_state.get('hz_demo_mode', False):
+            mock_results = []
+            stocks = nifty_stocks if nifty_stocks else ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"]
+            for stock in stocks:
+                mock_results.append({
+                    "Stock": stock,
+                    "Direction": "HERO (BUY)" if np.random.rand() > 0.5 else "ZERO (SELL)",
+                    "Price": round(np.random.uniform(100, 2000), 2),
+                    "Volume Spike": f"{np.random.uniform(1.5, 3.0):.1f}x",
+                    "ATR": round(np.random.uniform(5, 20), 2),
+                    "Entry": round(np.random.uniform(100, 2000), 2),
+                    "SL": round(np.random.uniform(90, 1900), 2),
+                    "Target 1": round(np.random.uniform(110, 2100), 2),
+                    "Target 2": round(np.random.uniform(120, 2200), 2),
+                    "Risk/Reward": "1:2"
+                })
+            return pd.DataFrame(mock_results)
+        
+        if nifty_stocks is None:
+            nifty_stocks = [
+                "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY",
+                "HINDUNILVR", "ITC", "SBIN", "BHARTIARTL", "KOTAKBANK",
+                "BAJFINANCE", "LT", "WIPRO", "AXISBANK", "TITAN",
+                "ASIANPAINT", "MARUTI", "SUNPHARMA", "HCLTECH", "ULTRACEMCO"
+            ]
+        
+        results = []
+        
+        for stock in nifty_stocks:
+            try:
+                ticker = f"{stock}.NS"
+                df = yf.Ticker(ticker).history(period="1d", interval="5m")
+                
+                if df.empty or len(df) < 20:
+                    continue
+                
+                df['ema9'] = df['Close'].ewm(span=9).mean()
+                df['ema21'] = df['Close'].ewm(span=21).mean()
+                df['volume_ma'] = df['Volume'].rolling(20).mean()
+                
+                high_low = df['High'] - df['Low']
+                high_close = abs(df['High'] - df['Close'].shift())
+                low_close = abs(df['Low'] - df['Close'].shift())
+                ranges = pd.concat([high_low, high_close, low_close], axis=1)
+                true_range = ranges.max(axis=1)
+                atr = true_range.rolling(14).mean().iloc[-1]
+                
+                last = df.iloc[-1]
+                prev = df.iloc[-2]
+                
+                is_hero = (
+                    last['Close'] > last['ema9'] and
+                    last['ema9'] > last['ema21'] and
+                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and
+                    last['Close'] > prev['High'] * 0.99 and
+                    (last['Close'] - last['Low']) > (last['High'] - last['Close']) * 1.5 and
+                    (last['High'] - last['Low']) > atr * 0.4
+                )
+                
+                is_zero = (
+                    last['Close'] < last['ema9'] and
+                    last['ema9'] < last['ema21'] and
+                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and
+                    last['Close'] < prev['Low'] * 1.01 and
+                    (last['High'] - last['Close']) > (last['Close'] - last['Low']) * 1.5 and
+                    (last['High'] - last['Low']) > atr * 0.4
+                )
+                
+                if is_hero or is_zero:
+                    direction = "HERO (BUY)" if is_hero else "ZERO (SELL)"
+                    
+                    if is_hero:
+                        entry = last['Close']
+                        sl = last['Close'] - atr * 1.5
+                        tp1 = last['Close'] + atr * 3
+                        tp2 = last['Close'] + atr * 5
+                    else:
+                        entry = last['Close']
+                        sl = last['Close'] + atr * 1.5
+                        tp1 = last['Close'] - atr * 3
+                        tp2 = last['Close'] - atr * 5
+                    
+                    results.append({
+                        "Stock": stock,
+                        "Direction": direction,
+                        "Price": round(entry, 2),
+                        "Volume Spike": f"{last['Volume'] / df['volume_ma'].iloc[-1]:.1f}x",
+                        "ATR": round(atr, 2),
+                        "Entry": round(entry, 2),
+                        "SL": round(sl, 2),
+                        "Target 1": round(tp1, 2),
+                        "Target 2": round(tp2, 2),
+                        "Risk/Reward": "1:2"
+                    })
+            except Exception as e:
+                continue
+        
+        return pd.DataFrame(results)
+
+    def scan_penny_stocks(self):
+        penny_list = [
+            "IDEA", "YESBANK", "SAIL", "PNB", "IOC", "BHEL", "SUZLON", "JPASSOCIAT",
+            "GMRINFRA", "NHPC", "NTPC", "PFC", "RECLTD", "VEDL", "TATAMOTORS"
+        ]
+        return self.scan_hero_zero_indian_stocks(penny_list)
+
+    def scan_pin_bars(self):
+        if st.session_state.get('hz_demo_mode', False):
+            mock_pins = []
+            symbols = ["NIFTY", "SENSEX", "BANKNIFTY", "GOLD"]
+            for sym in symbols:
+                mock_pins.append({
+                    "Symbol": sym,
+                    "Time": "09:35",
+                    "Direction": "🟢 BUY" if np.random.rand() > 0.5 else "🔴 SELL",
+                    "Entry": round(np.random.uniform(100, 2000), 2),
+                    "Stop": round(np.random.uniform(90, 1900), 2),
+                    "Target": round(np.random.uniform(110, 2100), 2),
+                    "Risk/Reward": "1:2",
+                    "Confidence": "High"
+                })
+            return mock_pins
+        
+        symbols = {
+            "NIFTY": "^NSEI",
+            "SENSEX": "^BSESN",
+            "BANKNIFTY": "^NSEBANK",
+            "GOLD": "GC=F"
+        }
+        results = []
+        for name, ticker in symbols.items():
+            try:
+                df = yf.Ticker(ticker).history(period="1d", interval="5m")
+                if df.empty or len(df) < 20:
+                    continue
+                df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
+                pins = pin_bar_scanner(df, lookback=10)
+                for pin in pins:
+                    pin["Symbol"] = name
+                    results.append(pin)
+            except:
+                continue
+        return results
+
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
         if self.is_mock: return "MOCK_" + uuid.uuid4().hex[:6].upper()
         broker = self.settings.get("primary_broker", "Angel One")
@@ -2307,18 +2528,18 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-                clean_qty = float(round(float(qty), 8))
+                clean_qty = float(round(float(qty), 8))  # allow up to 8 decimals
 
-                # Determine correct market symbol by checking actual ticker data
+                # Fetch ticker data to get correct market symbol
                 ticker_data = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
                 market_symbol = None
                 for coin in ticker_data:
                     mkt = coin.get('market', '')
-                    # Spot format: BTCUSDT, etc.
+                    # Spot format: baseUSDT (e.g., BTCUSDT)
                     if mkt.upper() == f"{base_coin}USDT".upper():
                         market_symbol = mkt
                         break
-                    # Futures format: B-BTC_USDT, etc.
+                    # Futures format: B-base_USDT (e.g., B-BTC_USDT)
                     if market_type in ["Futures", "Options"] and mkt.upper() == f"B-{base_coin}_USDT".upper():
                         market_symbol = mkt
                         break
@@ -2331,8 +2552,8 @@ class SniperBot:
                         market_symbol = f"{base_coin}USDT"
                     self.log(f"⚠️ CoinDCX market symbol not found, using constructed: {market_symbol}")
 
-                # Choose endpoint based on market type
                 if market_type in ["Futures", "Options"]:
+                    # Futures order
                     payload = {
                         "side": side.lower(),
                         "order_type": "market_order",
@@ -2342,6 +2563,7 @@ class SniperBot:
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 else:
+                    # Spot order
                     payload = {
                         "side": side.lower(),
                         "order_type": "market_order",
@@ -2366,6 +2588,7 @@ class SniperBot:
 
                 if res.status_code == 200:
                     response_data = res.json()
+                    # Response can be a list (for spot) or dict (for futures)
                     if isinstance(response_data, list) and len(response_data) > 0:
                         order_id = response_data[0].get('id', 'DCX_ORDER_OK')
                     elif isinstance(response_data, dict):
@@ -2376,6 +2599,24 @@ class SniperBot:
                     return order_id
                 else:
                     self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {res.text}")
+                    # Try fallback to margin endpoint if spot fails (for certain pairs)
+                    if market_type == "Spot" and "margin" not in endpoint:
+                        self.log("⚠️ Spot order failed, trying Margin API...")
+                        margin_endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
+                        margin_payload = payload.copy()
+                        margin_payload['market'] = market_symbol  # same format
+                        margin_payload_str = json.dumps(margin_payload, separators=(',', ':'))
+                        signature_margin = hmac.new(secret_bytes, margin_payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+                        headers_margin = headers.copy()
+                        headers_margin['X-AUTH-SIGNATURE'] = signature_margin
+                        res_margin = requests.post(margin_endpoint, headers=headers_margin, data=margin_payload_str, timeout=10)
+                        if res_margin.status_code == 200:
+                            response_data = res_margin.json()
+                            order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
+                            self.log(f"✅ CoinDCX Margin Order Success! ID: {order_id}")
+                            return order_id
+                        else:
+                            self.log(f"❌ CoinDCX Margin API Rejected [{res_margin.status_code}]: {res_margin.text}")
                     return None
             except Exception as e:
                 self.log(f"❌ CoinDCX Exception: {e}")
@@ -2501,7 +2742,13 @@ class SniperBot:
         subset = subset[subset['expiry'] == closest_expiry]
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
         
-        candidates = subset.sort_values('dist_to_spot', ascending=True).head(10)
+        if self.settings.get("hero_zero"):
+            otm_margin = spot * 0.003 
+            if opt_type == "CE": candidates = subset[subset['strike'] > (spot + otm_margin)]
+            else: candidates = subset[subset['strike'] < (spot - otm_margin)]
+            candidates = candidates.sort_values('dist_to_spot', ascending=True).head(15)
+        else: 
+            candidates = subset.sort_values('dist_to_spot', ascending=True).head(10)
             
         for _, row in candidates.iterrows():
             ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
@@ -2512,112 +2759,6 @@ class SniperBot:
 
         if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
         return None, None, None, 0.0
-
-    # Hero/Zero Scanner Methods (stocks only)
-    def scan_hero_zero_indian_stocks(self, nifty_stocks=None):
-        if nifty_stocks is None:
-            nifty_stocks = [
-                "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY",
-                "HINDUNILVR", "ITC", "SBIN", "BHARTIARTL", "KOTAKBANK",
-                "BAJFINANCE", "LT", "WIPRO", "AXISBANK", "TITAN",
-                "ASIANPAINT", "MARUTI", "SUNPHARMA", "HCLTECH", "ULTRACEMCO"
-            ]
-        results = []
-        for stock in nifty_stocks:
-            try:
-                ticker = f"{stock}.NS"
-                df = yf.Ticker(ticker).history(period="1d", interval="5m")
-                if df.empty or len(df) < 20:
-                    continue
-                df['ema9'] = df['Close'].ewm(span=9).mean()
-                df['ema21'] = df['Close'].ewm(span=21).mean()
-                df['volume_ma'] = df['Volume'].rolling(20).mean()
-                
-                high_low = df['High'] - df['Low']
-                high_close = abs(df['High'] - df['Close'].shift())
-                low_close = abs(df['Low'] - df['Close'].shift())
-                ranges = pd.concat([high_low, high_close, low_close], axis=1)
-                true_range = ranges.max(axis=1)
-                atr = true_range.rolling(14).mean().iloc[-1]
-                
-                last = df.iloc[-1]
-                prev = df.iloc[-2]
-                
-                is_hero = (
-                    last['Close'] > last['ema9'] and
-                    last['ema9'] > last['ema21'] and
-                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and
-                    last['Close'] > prev['High'] * 0.99 and
-                    (last['Close'] - last['Low']) > (last['High'] - last['Close']) * 1.5 and
-                    (last['High'] - last['Low']) > atr * 0.4
-                )
-                
-                is_zero = (
-                    last['Close'] < last['ema9'] and
-                    last['ema9'] < last['ema21'] and
-                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and
-                    last['Close'] < prev['Low'] * 1.01 and
-                    (last['High'] - last['Close']) > (last['Close'] - last['Low']) * 1.5 and
-                    (last['High'] - last['Low']) > atr * 0.4
-                )
-                
-                if is_hero or is_zero:
-                    direction = "HERO (BUY)" if is_hero else "ZERO (SELL)"
-                    if is_hero:
-                        entry = last['Close']
-                        sl = last['Close'] - atr * 1.5
-                        tp1 = last['Close'] + atr * 3
-                        tp2 = last['Close'] + atr * 5
-                    else:
-                        entry = last['Close']
-                        sl = last['Close'] + atr * 1.5
-                        tp1 = last['Close'] - atr * 3
-                        tp2 = last['Close'] - atr * 5
-                    
-                    results.append({
-                        "Stock": stock,
-                        "Direction": direction,
-                        "Price": round(entry, 2),
-                        "Volume Spike": f"{last['Volume'] / df['volume_ma'].iloc[-1]:.1f}x",
-                        "ATR": round(atr, 2),
-                        "Entry": round(entry, 2),
-                        "SL": round(sl, 2),
-                        "Target 1": round(tp1, 2),
-                        "Target 2": round(tp2, 2),
-                        "Risk/Reward": "1:2"
-                    })
-            except Exception as e:
-                continue
-        return pd.DataFrame(results)
-
-    def scan_penny_stocks(self):
-        penny_list = [
-            "IDEA", "YESBANK", "SAIL", "PNB", "IOC", "BHEL", "SUZLON", "JPASSOCIAT",
-            "GMRINFRA", "NHPC", "NTPC", "PFC", "RECLTD", "VEDL", "TATAMOTORS"
-        ]
-        return self.scan_hero_zero_indian_stocks(penny_list)
-
-    def scan_pin_bars(self):
-        symbols = {
-            "NIFTY": "^NSEI",
-            "SENSEX": "^BSESN",
-            "BANKNIFTY": "^NSEBANK",
-            "GOLD": "GC=F"
-        }
-        results = []
-        for name, ticker in symbols.items():
-            try:
-                df = yf.Ticker(ticker).history(period="1d", interval="5m")
-                if df.empty or len(df) < 20:
-                    continue
-                df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
-                pins = pin_bar_scanner(df, lookback=10)
-                for pin in pins:
-                    pin["Symbol"] = name
-                    results.append(pin)
-            except:
-                continue
-        return results
 
     def trading_loop(self):
         self.log("▶️ Engine thread started.")
@@ -2748,9 +2889,28 @@ class SniperBot:
                                 trend = "MTF Blocked: 15m Bullish"
                                 signal_strength = 0
 
+                    is_hz = s.get("hero_zero")
+                    if is_hz and signal != "WAIT" and strategy != "TradingView Webhook":
+                        if not self.is_mock and not (is_mt5_asset or is_crypto):
+                            live_oi, live_vol = self.get_market_data_oi(exch, token)
+                            if live_vol < 50000: 
+                                signal = "WAIT"
+                                trend = "Hero/Zero Blocked: Low Volume/OI"
+                                signal_strength = 0
+                        
+                        greek_pass, greek_msg = self.analyze_oi_and_greeks(df_candles, is_hz, signal)
+                        if not greek_pass: 
+                            signal = "WAIT"
+                            trend = greek_msg
+                            signal_strength = 0
+                        else: 
+                            trend += f" | {greek_msg}"
+                            signal_strength += 10
+
                 else:
                     trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = "Waiting for Market Data", "WAIT", 0, 0, df_candles, 0, {}, 0
 
+                # Merge all indicator columns into df_chart for later rendering
                 if df_chart is not None and hasattr(df_chart, 'columns'):
                     temp_df = self.analyzer.calculate_indicators(df_chart, index in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
                     for col in temp_df.columns:
@@ -2770,7 +2930,11 @@ class SniperBot:
 
                 if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time and signal_strength >= s.get('min_signal_strength', 50):
                     
-                    qty = actual_qty
+                    if is_hz:
+                        qty, sizing_info = self.calculate_hero_zero_position(signal_strength, current_atr, spot, s['max_capital'])
+                        self.log(f"📊 Hero/Zero Position Sizing: {sizing_info}")
+                    else:
+                        qty = actual_qty
                     
                     if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
                         strike_sym = index
@@ -2815,7 +2979,7 @@ class SniperBot:
                             "type": trade_type, "entry": entry_ltp, 
                             "highest_price": entry_ltp, "lowest_price": entry_ltp, "qty": qty, "sl": dynamic_sl, 
                             "tp1": tp1, "tp2": tp2, "tp3": tp3, "tgt": tp3,
-                            "scaled_out": False,
+                            "scaled_out": False, "is_hz": is_hz,
                             "booked_50": False, "booked_80": False
                         }
 
@@ -2828,6 +2992,14 @@ class SniperBot:
                         self.state["active_trade"] = new_trade
                         self.state["trades_today"] += 1
                         self.state["ghost_memory"][f"{index}_{signal}"] = get_ist()
+                        
+                        if is_hz:
+                            self.state["hz_trades"].append({
+                                "time": time_str,
+                                "symbol": strike_sym,
+                                "entry": entry_ltp,
+                                "signal_strength": signal_strength
+                            })
                     
                     elif not is_mock_mode:
                         self.log(f"⚠️ Trade Blocked: Failed to fetch valid Strike/Premium for {index}.")
@@ -2857,31 +3029,80 @@ class SniperBot:
                         
                         # Minimum profit threshold for trailing stop (0.5% of entry)
                         min_profit = trade['entry'] * 0.005
+                        profit = pnl if trade['type'] in ["CE", "BUY"] else -pnl  # profit in trade direction
                         
-                        if trade['type'] == "SELL":
-                            lowest = trade.get('lowest_price', trade['entry'])
-                            if ltp < lowest:
-                                trade['lowest_price'] = ltp
-                                if (trade['entry'] - ltp) > min_profit:
-                                    tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
-                                    new_sl = ltp + tsl_buffer
-                                    if new_sl < trade['sl']: trade['sl'] = new_sl
+                        if trade.get('is_hz'):
+                            profit_pct = (ltp - trade['entry']) / trade['entry'] * 100 if trade['type'] in ["CE", "BUY"] else (trade['entry'] - ltp) / trade['entry'] * 100
                             
-                            hit_tp = False if ("Trend Rider" in strategy) else (ltp <= trade['tgt'])
-                            hit_sl = ltp >= trade['sl']
+                            if profit_pct >= 5:
+                                if not trade.get('booked_50'):
+                                    qty_to_book = trade['qty'] * 0.5
+                                    if not self.is_mock:
+                                        exec_side = "SELL" if trade['type'] in ["CE", "BUY"] else "BUY"
+                                        self.place_real_order(trade['symbol'], trade['token'], qty_to_book, exec_side, trade['exch'])
+                                    trade['qty'] *= 0.5
+                                    trade['booked_50'] = True
+                                    self.log(f"💰 Booked 50% at {profit_pct:.1f}% profit")
+                                    trade['sl'] = trade['entry']
+                                    
+                            elif profit_pct >= 10:
+                                if not trade.get('booked_80'):
+                                    qty_to_book = trade['qty'] * 0.6
+                                    if not self.is_mock:
+                                        exec_side = "SELL" if trade['type'] in ["CE", "BUY"] else "BUY"
+                                        self.place_real_order(trade['symbol'], trade['token'], qty_to_book, exec_side, trade['exch'])
+                                    trade['qty'] *= 0.4
+                                    trade['booked_80'] = True
+                                    self.log(f"💰 Booked 80% total at {profit_pct:.1f}% profit")
+                                    if trade['type'] in ["CE", "BUY"]:
+                                        trade['sl'] = max(trade['sl'], ltp * 0.97)
+                                    else:
+                                        trade['sl'] = min(trade['sl'], ltp * 1.03)
+                            
+                            if self.state.get("atr", 0) > 0:
+                                if trade['type'] in ["CE", "BUY"]:
+                                    new_sl = ltp - (self.state["atr"] * 0.5)
+                                    if new_sl > trade['sl']:
+                                        trade['sl'] = new_sl
+                                else:
+                                    new_sl = ltp + (self.state["atr"] * 0.5)
+                                    if new_sl < trade['sl']:
+                                        trade['sl'] = new_sl
+                        
                         else:
-                            highest = trade.get('highest_price', trade['entry'])
-                            if ltp > highest:
-                                trade['highest_price'] = ltp
-                                if (ltp - trade['entry']) > min_profit:
-                                    tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
-                                    new_sl = ltp - tsl_buffer
-                                    if new_sl > trade['sl']: trade['sl'] = new_sl
+                            if trade['type'] == "SELL":
+                                lowest = trade.get('lowest_price', trade['entry'])
+                                if ltp < lowest:
+                                    trade['lowest_price'] = ltp
+                                    # Only trail if profit exceeds min_profit
+                                    if profit > min_profit:
+                                        tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                        new_sl = ltp + tsl_buffer
+                                        if new_sl < trade['sl']: trade['sl'] = new_sl
                                 
-                            hit_tp = False if ("Trend Rider" in strategy) else (ltp >= trade['tgt'])
-                            hit_sl = ltp <= trade['sl']
+                                hit_tp = False if ("Trend Rider" in strategy) else (ltp <= trade['tgt'])
+                                hit_sl = ltp >= trade['sl']
+                            else:
+                                highest = trade.get('highest_price', trade['entry'])
+                                if ltp > highest:
+                                    trade['highest_price'] = ltp
+                                    
+                                    if profit > min_profit:
+                                        if trade.get('is_hz'):
+                                            if ltp >= trade['entry'] * 3.0:    new_sl = ltp * 0.85 
+                                            elif ltp >= trade['entry'] * 2.0:  new_sl = ltp * 0.80 
+                                            elif ltp >= trade['entry'] * 1.5:  new_sl = trade['entry'] * 1.10 
+                                            else:                              new_sl = trade['sl']
+                                            if new_sl > trade['sl']: trade['sl'] = new_sl
+                                        else:
+                                            tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                            new_sl = ltp - tsl_buffer
+                                            if new_sl > trade['sl']: trade['sl'] = new_sl
+                                        
+                                hit_tp = False if ("Trend Rider" in strategy and not trade.get('is_hz')) else (ltp >= trade['tgt'])
+                                hit_sl = ltp <= trade['sl']
 
-                        if not trade['scaled_out']:
+                        if not trade['scaled_out'] and not trade.get('is_hz'):
                             reach_tp1 = (ltp <= trade['tp1']) if trade['type'] == "SELL" else (ltp >= trade['tp1'])
                             if reach_tp1:
                                 if index in ["NIFTY", "SENSEX", "XAUUSD"] or is_crypto:
@@ -2950,6 +3171,13 @@ class SniperBot:
                                     "Result": win_text
                                 })
                             
+                            if trade.get('is_hz'):
+                                self.state["hz_pnl"] += pnl
+                                if pnl > 0:
+                                    self.state["hz_wins"] += 1
+                                else:
+                                    self.state["hz_losses"] += 1
+                            
                             self.state["last_trade"] = trade.copy()
                             self.state["last_trade"].update({"exit_price": ltp, "final_pnl": pnl, "win_text": win_text})
                             self.state["daily_pnl"] += pnl
@@ -3017,6 +3245,7 @@ if not getattr(st.session_state, "bot", None):
                                     st.query_params["user_id"] = USER_ID
                                     play_sound_ui("entry")
                                     st.rerun()
+                                # No explicit rerun – natural rerun after button click
                             else: st.error("❌ Login Failed! Check API details or TOTP.")
                     else: st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
             elif auth_mode == "🕉️ Real Trading":
@@ -3119,6 +3348,7 @@ if not getattr(st.session_state, "bot", None):
                                     st.query_params["user_id"] = USER_ID
                                     play_sound_ui("entry")
                                     st.rerun()
+                                # No explicit rerun
                             else:
                                 err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
                                 st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
@@ -3136,6 +3366,7 @@ if not getattr(st.session_state, "bot", None):
                     play_sound_ui("entry")
                     play_sound_ui("entry")
                     st.rerun()
+                    # No explicit rerun
             st.markdown("</div>", unsafe_allow_html=True)
 
 # --- MAIN TERMINAL ---
@@ -3162,6 +3393,7 @@ else:
         st.markdown(f"**🔌 Connected:** {', '.join(connected) if connected else 'None'}")
     with head_c3:
         if st.button("🚪 LOGOUT", use_container_width=True):
+            BACKGROUND_BOT.stop_background_bot()
             STOP_EVENT.set()
             bot.state["is_running"] = False
             st.session_state.clear()
@@ -3284,6 +3516,7 @@ else:
         col_adv1, col_adv2 = st.columns(2)
         with col_adv1:
             MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
+            HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
             THREE_FIVE_SEVEN = st.toggle("🔢 3-5-7 Rule (ATR based)", False, help="SL=1.5*ATR, TP=3/5/7*ATR")
         with col_adv2:
             if STRATEGY == "Machine Learning":
@@ -3292,6 +3525,22 @@ else:
             else:
                 ML_PROB_THRESHOLD = 0.30
                 SIGNAL_PERSISTENCE = 1
+
+        if HERO_ZERO:
+            st.divider()
+            st.markdown("**🎯 Hero/Zero Specific Settings**")
+            hz_col1, hz_col2 = st.columns(2)
+            with hz_col1:
+                HZ_MAX_RISK = st.number_input("Max Risk per HZ Trade (%)", 0.5, 5.0, 2.0, 0.5) / 100
+                HZ_MIN_PROFIT = st.number_input("Min Profit to Book (%)", 1.0, 10.0, 5.0, 0.5)
+            with hz_col2:
+                HZ_TRAIL_ATR = st.slider("Trail Stop (ATR multiple)", 0.3, 2.0, 0.5, 0.1)
+                HZ_MAX_HOLD = st.number_input("Max Hold Time (minutes)", 15, 120, 60, 15)
+        else:
+            HZ_MAX_RISK = 0.02
+            HZ_MIN_PROFIT = 5.0
+            HZ_TRAIL_ATR = 0.5
+            HZ_MAX_HOLD = 60
 
         st.divider()
         if st.button("🔄 Refresh Balance", use_container_width=True):
@@ -3308,16 +3557,21 @@ else:
         "lots": LOTS,
         "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT, 
         "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": bot.is_mock, 
-        "mtf_confirm": MTF_CONFIRM, 
+        "mtf_confirm": MTF_CONFIRM, "hero_zero": HERO_ZERO, 
         "three_five_seven": THREE_FIVE_SEVEN,
         "crypto_mode": CRYPTO_MODE, "leverage": LEVERAGE, "show_inr_crypto": SHOW_INR_CRYPTO,
         "user_lots": LOT_SIZES.copy(),
         "custom_code": CUSTOM_CODE, "tv_passphrase": TV_PASSPHRASE,
         "martingale_mode": martingale_mode,
+        "zero_loss_hedge": zero_loss_hedge if 'zero_loss_hedge' in locals() else False,
         "use_quantity_mode": True,
         "min_signal_strength": MIN_SIGNAL_STRENGTH,
         "ml_prob_threshold": ML_PROB_THRESHOLD,
         "signal_persistence": SIGNAL_PERSISTENCE,
+        "hz_max_risk": HZ_MAX_RISK,
+        "hz_min_profit": HZ_MIN_PROFIT,
+        "hz_trail_atr": HZ_TRAIL_ATR,
+        "hz_max_hold": HZ_MAX_HOLD
     }
 
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
@@ -3349,6 +3603,7 @@ else:
                     else: 
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
                     
+                    # Merge all indicator columns
                     temp_df = bot.analyzer.calculate_indicators(df_preload, INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
                     for col in temp_df.columns:
                         if col not in df_preload.columns:
@@ -3364,7 +3619,7 @@ else:
     if not is_mkt_open: 
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 STOCK SCANNER"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 HERO/ZERO SCANNER"])
 
     # ========== TAB1 : DASHBOARD ==========
     with tab1:
@@ -3443,20 +3698,28 @@ else:
                 bot.state["is_running"] = False
                 if bot.state["active_trade"]: bot.state["manual_exit"] = True
                 st.toast("System Terminated & Trades Closed", icon="☠️")
-                st.rerun()
 
         st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
         fomo_signals = fomo_scanner.scan()
         if fomo_signals:
             df_fomo = pd.DataFrame(fomo_signals)
             st.dataframe(df_fomo, use_container_width=True, hide_index=True)
-            if bot.state.get("fomo_signals"):
-                st.markdown("**FOMO Signals from current session:**")
-                fomo_list = list(bot.state["fomo_signals"])[-5:]
-                if fomo_list:
-                    st.dataframe(pd.DataFrame(fomo_list), use_container_width=True, hide_index=True)
         else:
             st.info("No volume spike alerts at the moment.")
+
+        if HERO_ZERO and bot.state.get("hz_trades"):
+            hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
+            st.markdown(f"""
+            <div class="hz-stats">
+                <h4 style="color: white; margin:0 0 10px 0;">🎯 Hero/Zero Performance</h4>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+                    <div>Total Trades: {len(bot.state['hz_trades'])}</div>
+                    <div>Win Rate: {hz_win_rate:.1f}%</div>
+                    <div>Total P&L: {'🟢' if bot.state['hz_pnl'] > 0 else '🔴'} ₹{bot.state['hz_pnl']:.2f}</div>
+                    <div>Wins: {bot.state['hz_wins']} | Losses: {bot.state['hz_losses']}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
         ltp_val = round(bot.state['spot'], 4)
         trend_val = bot.state['current_trend']
@@ -4029,50 +4292,39 @@ else:
                 compounding_calculator()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== TAB5 : STOCK SCANNER (Hero/Zero & Pin Bar) ==========
+    # ========== TAB5 : HERO/ZERO SCANNER ==========
     with tab5:
-        st.subheader("🎯 Hero/Zero & Pin Bar Scanner (Stocks only)")
+        st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
         
-        col_hz1, col_hz2 = st.columns(2)
+        col_hz1, col_hz2, col_hz3 = st.columns(3)
         with col_hz1:
-            scan_button = st.button("🔍 Scan Hero/Zero Now", use_container_width=True, type="primary")
+            min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
         with col_hz2:
+            scan_button = st.button("🔍 Scan Hero/Zero Now", use_container_width=True, type="primary")
+        with col_hz3:
             st.session_state.hz_demo_mode = st.checkbox("Use Demo Data", value=False, help="Generate sample signals even in real mode")
         
         if scan_button:
             with st.spinner("Scanning for Hero/Zero patterns..."):
                 st.markdown("### Nifty 50 Stocks")
-                if st.session_state.hz_demo_mode:
-                    nifty_results = bot.scan_hero_zero_indian_stocks()  # will return empty in demo? We'll handle demo inside method
-                    # For demo, we'll generate mock data if empty
-                    if nifty_results.empty:
-                        nifty_results = pd.DataFrame([
-                            {"Stock": "RELIANCE", "Direction": "HERO (BUY)", "Price": 2450.50, "Volume Spike": "2.3x", "ATR": 12.5, "Entry": 2450.50, "SL": 2438.00, "Target 1": 2475.50, "Target 2": 2500.50, "Risk/Reward": "1:2"},
-                            {"Stock": "TCS", "Direction": "ZERO (SELL)", "Price": 3450.20, "Volume Spike": "1.8x", "ATR": 15.0, "Entry": 3450.20, "SL": 3465.20, "Target 1": 3420.20, "Target 2": 3390.20, "Risk/Reward": "1:2"},
-                        ])
-                else:
-                    nifty_results = bot.scan_hero_zero_indian_stocks()
+                nifty_results = bot.scan_hero_zero_indian_stocks()
                 if not nifty_results.empty:
                     st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
+                    
                     def color_direction(val):
                         if "HERO" in val:
                             return 'background-color: #22c55e; color: white'
                         elif "ZERO" in val:
                             return 'background-color: #ef4444; color: white'
                         return ''
+                    
                     styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
                     st.dataframe(styled_results, use_container_width=True, hide_index=True)
                 else:
                     st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
                 
                 st.markdown("### Penny Stocks")
-                if st.session_state.hz_demo_mode:
-                    penny_results = pd.DataFrame([
-                        {"Stock": "IDEA", "Direction": "HERO (BUY)", "Price": 8.75, "Volume Spike": "3.1x", "ATR": 0.35, "Entry": 8.75, "SL": 8.40, "Target 1": 9.80, "Target 2": 10.85, "Risk/Reward": "1:2"},
-                        {"Stock": "YESBANK", "Direction": "ZERO (SELL)", "Price": 18.20, "Volume Spike": "2.2x", "ATR": 0.80, "Entry": 18.20, "SL": 19.00, "Target 1": 16.60, "Target 2": 15.00, "Risk/Reward": "1:2"},
-                    ])
-                else:
-                    penny_results = bot.scan_penny_stocks()
+                penny_results = bot.scan_penny_stocks()
                 if not penny_results.empty:
                     st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
                     penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
@@ -4103,6 +4355,14 @@ else:
                 - **Target 1:** 3x ATR below entry (Book 50%)
                 - **Target 2:** 5x ATR below entry (Book remaining)
                 - **Risk/Reward:** 1:2
+                """)
+                
+                st.markdown("### ⏰ Best Trading Times (IST)")
+                st.markdown("""
+                - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
+                - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
+                - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
+                - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                 """)
 
     # ========== Bottom Dock ==========
