@@ -19,6 +19,8 @@ flask
 scikit-learn
 logzero
 websocket
+fyers_apiv3
+
 
 
 
