@@ -24,6 +24,9 @@ import signal
 import sys
 import subprocess
 from threading import Event
+import queue
+import math
+from scipy.stats import norm
 
 # ---------- ML / News / Extra Imports ----------
 try:
@@ -83,23 +86,27 @@ try:
 except ImportError:
     HAS_FEEDPARSER = False
 
-# ==========================================
-# Interactive Brokers (requires ib_insync)
-# ==========================================
+# ---------- Telegram Bot for Control ----------
 try:
-    from ib_insync import *
-    HAS_IB = True
+    from telegram import Update, Bot
+    from telegram.ext import Application, CommandHandler, ContextTypes
+    HAS_TELEGRAM_BOT = True
 except ImportError:
-    HAS_IB = False
+    HAS_TELEGRAM_BOT = False
+
+# ---------- Fyers ----------
+try:
+    from fyers_apiv3 import fyersModel
+    HAS_FYERS = True
+except ImportError:
+    HAS_FYERS = False
 
 # ==========================================
-# SOUND FUNCTIONS (fixed – reliable beep)
+# SOUND FUNCTIONS
 # ==========================================
 def play_sound_ui(sound_type="entry"):
-    """Play a sound via HTML5 audio."""
     if not st.session_state.get("audio_enabled", False):
         return
-    # Use a reliable beep URL
     beep_url = "https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3"
     components.html(f"""
         <audio autoplay>
@@ -108,10 +115,9 @@ def play_sound_ui(sound_type="entry"):
     """, height=0)
 
 def unlock_audio():
-    """Silent sound to unlock audio in browser."""
     components.html("""
         <audio autoplay>
-            <source src="data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTG9uZWx5TWVkaWEuY29tIFNvdW5kIEVmZmVjdHMAAAAAAFRBTkNFAAAAQ29udGVudCBUaGF0IFdvcmtzLCBJbmMuIAAAADM2MDAwMDAwTk9STUFMAAAAJVRoYXRzIGEgdGVzdCBzb3VuZC4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" type="audio/mp3">
+            <source src="data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTG9uZWx5TWVkaWEuY29tIFNvdW5kIEVmZmVjdHMAAAAAAFRBTkNFAAAAQ29udGVudCBUaGF0IFdvcmtzLCBJbmMuAAAAMzYwMDAwMDBOT1JNQUwAAAAjVGhhdHMgYSB0ZXN0IHNvdW5kLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" type="audio/mp3">
         </audio>
     """, height=0)
 
@@ -163,7 +169,6 @@ def fetch_feed(url):
     except Exception:
         return None
 
-
 def fetch_english_news(asset="NIFTY"):
     asset_terms = {
         "NIFTY": "Nifty 50",
@@ -194,13 +199,15 @@ def fetch_english_news(asset="NIFTY"):
         return [f"📰 {t}" for t in titles[:8]]
     return [generate_market_prediction(asset)]
 
-
 def fetch_kannada_news(asset="NIFTY"):
     rss_feeds = [
         "https://kannada.oneindia.com/rss/news-business-feed.xml",
         "https://www.prajavani.net/rss/ವಾಣಿಜ್ಯ",
         "https://vijaykarnataka.com/rss/business",
-        "https://kannada.asianetnews.com/rss/business"
+        "https://kannada.asianetnews.com/rss/business",
+        "https://feeds.feedburner.com/Republickannada?format=xml",
+        "https://kannada.timesnownews.com/rss/business",
+        "https://www.newsonair.gov.in/bulletins/kannada/?feed=rss2"
     ]
     for feed_url in rss_feeds:
         try:
@@ -214,15 +221,12 @@ def fetch_kannada_news(asset="NIFTY"):
 # ==========================================
 # SESSION STATE INITIALIZATION
 # ==========================================
-import threading
-import time
-
 def news_updater():
     while True:
         asset = st.session_state.get('sb_index_input', 'NIFTY')
         st.session_state.kannada_news = fetch_kannada_news(asset)
         st.session_state.english_news = fetch_english_news(asset)
-        time.sleep(600)
+        time.sleep(120)
 
 if 'kannada_news' not in st.session_state:
     st.session_state.kannada_news = []
@@ -255,6 +259,14 @@ if 'hz_demo_mode' not in st.session_state:
     st.session_state.hz_demo_mode = False
 if 'audio_enabled' not in st.session_state:
     st.session_state.audio_enabled = False
+if 'win_streak' not in st.session_state:
+    st.session_state.win_streak = 0
+if 'loss_streak' not in st.session_state:
+    st.session_state.loss_streak = 0
+if 'fomo_mode' not in st.session_state:
+    st.session_state.fomo_mode = False
+if 'fomo_indices' not in st.session_state:
+    st.session_state.fomo_indices = ["NIFTY", "BANKNIFTY", "SENSEX"]
 
 # ==========================================
 # DATABASE & GLOBAL HELPERS
@@ -374,10 +386,11 @@ def load_creds(user_id):
         "tg_token": "", "tg_chat": "", "wa_phone": "", "wa_api": "", 
         "mt5_acc": "", "mt5_pass": "", "mt5_server": "", "mt5_api_url": "",
         "zerodha_api": "", "zerodha_secret": "", "coindcx_api": "", "coindcx_secret": "",
-        "delta_api": "", "delta_secret": "", "ib_host": "", "ib_port": 7497, "ib_client_id": 1
+        "delta_api": "", "delta_secret": "", "tg_bot_token": "", "tg_allowed_users": "",
+        "fyers_client_id": "", "fyers_secret": "", "fyers_token": ""
     }
 
-def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_chat, wa_phone, wa_api, mt5_acc, mt5_pass, mt5_server, mt5_api_url, zerodha_api, zerodha_secret, coindcx_api, coindcx_secret, delta_api, delta_secret, ib_host, ib_port, ib_client_id):
+def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_chat, wa_phone, wa_api, mt5_acc, mt5_pass, mt5_server, mt5_api_url, zerodha_api, zerodha_secret, coindcx_api, coindcx_secret, delta_api, delta_secret, tg_bot_token, tg_allowed_users, fyers_client_id, fyers_secret, fyers_token):
     if HAS_DB:
         data = {
             "user_id": user_id, "angel_api": angel_api, "client_id": client_id, "pwd": pwd, 
@@ -387,7 +400,8 @@ def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_cha
             "zerodha_api": zerodha_api, "zerodha_secret": zerodha_secret,
             "coindcx_api": coindcx_api, "coindcx_secret": coindcx_secret,
             "delta_api": delta_api, "delta_secret": delta_secret,
-            "ib_host": ib_host, "ib_port": ib_port, "ib_client_id": ib_client_id
+            "tg_bot_token": tg_bot_token, "tg_allowed_users": tg_allowed_users,
+            "fyers_client_id": fyers_client_id, "fyers_secret": fyers_secret, "fyers_token": fyers_token
         }
         try: supabase.table("user_credentials").upsert(data).execute()
         except: pass
@@ -536,7 +550,8 @@ st.markdown("""
         color: white;
     }
     
-    .news-ticker {
+    /* News tickers with different speeds */
+    .news-ticker-kannada {
         background: #1e293b;
         color: white;
         padding: 8px 0;
@@ -545,37 +560,71 @@ st.markdown("""
         border-radius: 8px;
         margin-bottom: 15px;
         font-size: 1rem;
+        position: relative;
     }
-    .news-ticker span {
+    .news-ticker-kannada span {
         display: inline-block;
         padding-left: 100%;
-        animation: ticker 60s linear infinite;
+        animation: ticker-kannada 120s linear infinite;
     }
-    @keyframes ticker {
+    @keyframes ticker-kannada {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-100%); }
+    }
+    
+    .news-ticker-english {
+        background: #0f172a;
+        color: white;
+        padding: 8px 0;
+        overflow: hidden;
+        white-space: nowrap;
+        border-radius: 8px;
+        margin-bottom: 15px;
+        font-size: 1rem;
+        position: relative;
+    }
+    .news-ticker-english span {
+        display: inline-block;
+        padding-left: 100%;
+        animation: ticker-english 180s linear infinite; /* slower speed */
+    }
+    @keyframes ticker-english {
         0% { transform: translateX(0); }
         100% { transform: translateX(-100%); }
     }
 
+    /* Instagram-like bottom dock using Streamlit buttons */
     .bottom-dock {
         position: fixed;
-        bottom: 10px;
-        left: 0;
-        right: 0;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
         display: flex;
-        justify-content: center;
-        gap: 1rem;
+        gap: 20px;
+        background: rgba(255, 255, 255, 0.8);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border-radius: 40px;
+        padding: 12px 24px;
+        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.3);
         z-index: 999;
     }
-    .bottom-dock button {
-        background: #0284c7;
-        color: white;
+    .bottom-dock .stButton button {
+        background: transparent;
         border: none;
-        border-radius: 50px;
-        padding: 8px 20px;
-        font-size: 1rem;
-        font-weight: bold;
-        cursor: pointer;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        font-size: 24px;
+        color: #262626;
+        box-shadow: none;
+        padding: 0;
+        margin: 0;
+        min-width: unset;
+        transition: transform 0.2s;
+    }
+    .bottom-dock .stButton button:hover {
+        transform: scale(1.2);
+        color: #0284c7;
+        background: transparent;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -641,7 +690,109 @@ def get_angel_scrip_master():
     except Exception: return pd.DataFrame()
 
 # ==========================================
-# BROKER BRIDGES (MT5, IB)
+# FYERS BRIDGE
+# ==========================================
+class FyersBridge:
+    def __init__(self, client_id, secret, token):
+        self.client_id = client_id
+        self.secret = secret
+        self.token = token
+        self.fyers = None
+        self.connected = False
+
+    def connect(self):
+        if not HAS_FYERS:
+            return False, "Fyers library not installed"
+        try:
+            self.fyers = fyersModel.FyersModel(client_id=self.client_id, token=self.token, log_path="")
+            # Test connection by fetching profile
+            profile = self.fyers.get_profile()
+            if profile and profile.get('code') == 200:
+                self.connected = True
+                return True, "Connected to Fyers"
+            else:
+                return False, "Fyers connection failed"
+        except Exception as e:
+            return False, f"Fyers error: {e}"
+
+    def get_live_price(self, symbol):
+        if not self.connected:
+            return None
+        try:
+            # symbol format: "NSE:SBIN-EQ" for equities, "MCX:GOLD" for commodities
+            data = {"symbols": symbol}
+            quote = self.fyers.quotes(data)
+            if quote and quote.get('code') == 200 and quote.get('d'):
+                return float(quote['d'][0]['v']['lp'])
+        except:
+            pass
+        return None
+
+    def place_order(self, symbol, qty, side, order_type="MARKET", product_type="INTRADAY"):
+        if not self.connected:
+            return None, "Not connected"
+        try:
+            side_enum = 1 if side.upper() == "BUY" else -1
+            order_data = {
+                "symbol": symbol,
+                "qty": int(qty),
+                "type": 2 if order_type.upper() == "MARKET" else 1,  # 2 = MARKET, 1 = LIMIT
+                "side": side_enum,
+                "productType": product_type.upper(),
+                "limitPrice": 0,
+                "stopPrice": 0,
+                "validity": "DAY",
+                "disclosedQty": 0,
+                "offlineOrder": False
+            }
+            order = self.fyers.place_order(order_data)
+            if order and order.get('code') == 200:
+                return order.get('id'), "Order placed"
+            return None, f"Order failed: {order}"
+        except Exception as e:
+            return None, str(e)
+
+    def get_historical_data(self, symbol, interval="5m", days=10):
+        if not self.connected:
+            return None
+        try:
+            to_date = get_ist()
+            from_date = to_date - dt.timedelta(days=days)
+            range_data = {
+                "symbol": symbol,
+                "resolution": interval,
+                "date_format": "1",
+                "range_from": from_date.strftime("%Y-%m-%d"),
+                "range_to": to_date.strftime("%Y-%m-%d"),
+                "cont_flag": "1"
+            }
+            hist = self.fyers.history(range_data)
+            if hist and hist.get('code') == 200 and hist.get('candles'):
+                candles = hist['candles']
+                df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+                df.set_index('timestamp', inplace=True)
+                return df
+        except:
+            pass
+        return None
+
+    def get_account_info(self):
+        if not self.connected:
+            return None
+        try:
+            funds = self.fyers.funds()
+            if funds and funds.get('code') == 200:
+                return {
+                    'balance': funds.get('fund_limit', [{}])[0].get('balance', 0),
+                    'equity': funds.get('fund_limit', [{}])[0].get('equity', 0)
+                }
+        except:
+            pass
+        return None
+
+# ==========================================
+# MT5 BRIDGE (unchanged, but keep)
 # ==========================================
 class MT5WebBridge:
     def __init__(self, account=None, password=None, server=None, api_url=None):
@@ -833,51 +984,44 @@ class MT5WebBridge:
         self.connected = False
         self.token = None
 
-class IBBridge:
-    def __init__(self, host='127.0.0.1', port=7497, client_id=1):
-        self.host = host
-        self.port = port
-        self.client_id = client_id
-        self.ib = None
-        self.connected = False
-
-    def connect(self):
-        if not HAS_IB:
-            return False, "ib_insync not installed"
-        self.ib = IB()
-        try:
-            self.ib.connect(self.host, self.port, clientId=self.client_id)
-            self.connected = True
-            return True, "Connected to Interactive Brokers"
-        except Exception as e:
-            return False, f"IB connection failed: {e}"
-
-    def get_live_price(self, symbol, exchange='SMART', currency='USD'):
-        if not self.connected:
-            return None
-        contract = Stock(symbol, exchange, currency)
-        self.ib.reqMktData(contract, '', False, False)
-        time.sleep(1)
-        ticker = self.ib.ticker(contract)
-        return (ticker.bid + ticker.ask) / 2 if ticker.bid and ticker.ask else ticker.last
-
-    def place_order(self, symbol, qty, order_type, exchange='SMART', currency='USD'):
-        if not self.connected:
-            return None, "Not connected"
-        contract = Stock(symbol, exchange, currency)
-        action = 'BUY' if order_type.upper() == 'BUY' else 'SELL'
-        order = MarketOrder(action, qty)
-        trade = self.ib.placeOrder(contract, order)
-        self.ib.sleep(1)
-        if trade.orderStatus.status == 'Filled':
-            return trade.order.orderId, f"Order filled at {trade.orderStatus.avgFillPrice}"
-        return trade.order.orderId, f"Order submitted: {trade.orderStatus.status}"
-
-    def disconnect(self):
-        if self.ib:
-            self.ib.disconnect()
-        self.connected = False
-
+# ==========================================
+# OPTION GREEKS CALCULATOR (Black-Scholes)
+# ==========================================
+class OptionGreeks:
+    @staticmethod
+    def black_scholes(S, K, T, r, sigma, option_type='call'):
+        """
+        Calculate option price and Greeks.
+        S: spot price
+        K: strike price
+        T: time to expiry in years
+        r: risk-free rate
+        sigma: implied volatility
+        option_type: 'call' or 'put'
+        """
+        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+        
+        if option_type == 'call':
+            price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+            delta = norm.cdf(d1)
+            gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
+            theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) - r * K * np.exp(-r * T) * norm.cdf(d2)) / 365
+            vega = S * norm.pdf(d1) * np.sqrt(T) / 100  # per 1% change in IV
+        else:
+            price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+            delta = -norm.cdf(-d1)
+            gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
+            theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) + r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
+            vega = S * norm.pdf(d1) * np.sqrt(T) / 100
+        
+        return {
+            'price': price,
+            'delta': delta,
+            'gamma': gamma,
+            'theta': theta,
+            'vega': vega
+        }
 # ==========================================
 # FOMO SCANNER (includes indices & commodities)
 # ==========================================
@@ -952,17 +1096,53 @@ class ScalpingModule:
         df['lower_wick'] = df[['close', 'open']].min(axis=1) - df['low']
         df['tick_ratio'] = df['volume'] / df['volume'].rolling(5).mean()
         
+        # RSI
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        # MACD
+        exp12 = df['close'].ewm(span=12, adjust=False).mean()
+        exp26 = df['close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = exp12 - exp26
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_hist'] = df['macd'] - df['macd_signal']
+        df['macd_hist_prev'] = df['macd_hist'].shift(1)
+        
+        # Volume Rate of Change
+        df['volume_roc'] = df['volume'].pct_change(5) * 100
+        
         last = df.iloc[-1]
         prev = df.iloc[-2]
         
+        # Enhanced signals
         if last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'] and last['tick_ratio'] > 1.2:
             return "SCALP_BUY"
         if last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'] and last['tick_ratio'] > 1.2:
             return "SCALP_SELL"
         
+        if last['macd_hist'] > last['macd_hist_prev'] and last['macd_hist'] < 0 and last['tick_ratio'] > 1.2:
+            if last['close'] > prev['close']:
+                return "SCALP_BUY"
+        if last['macd_hist'] < last['macd_hist_prev'] and last['macd_hist'] > 0 and last['tick_ratio'] > 1.2:
+            if last['close'] < prev['close']:
+                return "SCALP_SELL"
+        
+        if last['rsi'] > 50 and prev['rsi'] <= 50 and last['macd'] > last['macd_signal'] and last['tick_ratio'] > 1.0:
+            return "SCALP_BUY"
+        if last['rsi'] < 50 and prev['rsi'] >= 50 and last['macd'] < last['macd_signal'] and last['tick_ratio'] > 1.0:
+            return "SCALP_SELL"
+        
         if (last['lower_wick'] > last['body'] * 1.5 and last['tick_ratio'] > 1.2 and last['close'] > last['open']):
             return "SCALP_BUY"
         if (last['upper_wick'] > last['body'] * 1.5 and last['tick_ratio'] > 1.2 and last['close'] < last['open']):
+            return "SCALP_SELL"
+        
+        if last['volume_roc'] > 20 and last['close'] > last['open'] and last['close'] > prev['close'] * 1.001:
+            return "SCALP_BUY"
+        if last['volume_roc'] > 20 and last['close'] < last['open'] and last['close'] < prev['close'] * 0.999:
             return "SCALP_SELL"
             
         return "WAIT"
@@ -995,7 +1175,7 @@ class ScalpingModule:
         return None
 
 # ==========================================
-# TECHNICAL ANALYZER (full definition)
+# TECHNICAL ANALYZER (full definition with Liquidity Sweep / ORB / Trap)
 # ==========================================
 class TechnicalAnalyzer:
     def get_atr(self, df, period=14):
@@ -1009,42 +1189,86 @@ class TechnicalAnalyzer:
     def calculate_indicators(self, df, is_index=False):
         try:
             df = df.copy()
+            if 'timestamp' not in df.columns:
+                if hasattr(df.index, 'to_pydatetime'):
+                    df['timestamp'] = df.index
+                else:
+                    df['timestamp'] = pd.NaT
+
             df['vol_sma'] = df['volume'].rolling(20).mean()
             if is_index: 
                 df['vol_spike'] = True
             else: 
                 df['vol_spike'] = df['volume'] >= (df['vol_sma'] * 0.8)
-            
+
             delta = df['close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             df['rsi'] = 100 - (100 / (1 + (gain / loss)))
-            
+
             df['tr0'] = abs(df['high'] - df['low'])
             df['tr1'] = abs(df['high'] - df['close'].shift())
             df['tr2'] = abs(df['low'] - df['close'].shift())
             df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
             df['atr'] = df['tr'].rolling(14).mean()
-            
+
             df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
             df['is_sideways'] = (df['rsi'].between(45, 55)) & (abs(df['close'] - df['ema21']) < (df['atr'] * 0.4))
             df['inside_bar'] = (df['high'] <= df['high'].shift(1)) & (df['low'] >= df['low'].shift(1))
-            
+
+            # VWAP
             try:
-                df['date'] = df.index.date
+                df['date'] = df['timestamp'].dt.date
                 if 'volume' in df.columns and df['volume'].sum() > 0:
                     df['vol_price'] = df['close'] * df['volume']
-                    df['avwap'] = df.groupby('date')['vol_price'].cumsum() / df.groupby('date')['volume'].cumsum()
+                    df['vwap'] = df.groupby('date')['vol_price'].cumsum() / df.groupby('date')['volume'].cumsum()
                 else: 
-                    df['avwap'] = df.groupby('date')['close'].transform(lambda x: x.expanding().mean())
+                    df['vwap'] = df.groupby('date')['close'].transform(lambda x: x.expanding().mean())
             except: 
-                df['avwap'] = df['close']
-            
+                df['vwap'] = df['close']
+
+            # ICT Anchored VWAP (using last 3 days as anchor)
+            if 'date' in df.columns:
+                last_3_dates = df['date'].unique()[-3:]
+                anchor_mask = df['date'].isin(last_3_dates)
+                if anchor_mask.sum() > 0:
+                    df_anchor = df[anchor_mask].copy()
+                    df_anchor['vol_price'] = df_anchor['close'] * df_anchor['volume']
+                    anchor_vwap = (df_anchor['vol_price'].sum() / df_anchor['volume'].sum()) if df_anchor['volume'].sum() != 0 else df_anchor['close'].mean()
+                    df['anchored_vwap'] = anchor_vwap
+                else:
+                    df['anchored_vwap'] = df['vwap']
+            else:
+                df['anchored_vwap'] = df['vwap']
+
+            # EMA
             if 'ema9' not in df.columns:
                 df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
             if 'ema21' not in df.columns:
                 df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
-            
+
+            # Supertrend
+            if HAS_PTA:
+                st = ta.supertrend(df['high'], df['low'], df['close'], length=10, multiplier=3)
+                if st is not None:
+                    df['supertrend'] = st['SUPERT_10_3.0']
+                    df['supertrend_direction'] = st['SUPERTd_10_3.0']
+            else:
+                df['supertrend'] = df['close']
+                df['supertrend_direction'] = 1
+
+            # Bollinger Bands
+            if HAS_PTA:
+                bb = ta.bbands(df['close'], length=20, std=2)
+                if bb is not None:
+                    df['bb_upper'] = bb['BBU_20_2.0']
+                    df['bb_middle'] = bb['BBM_20_2.0']
+                    df['bb_lower'] = bb['BBL_20_2.0']
+            else:
+                df['bb_upper'] = df['close'] * 1.02
+                df['bb_middle'] = df['close']
+                df['bb_lower'] = df['close'] * 0.98
+
             df['returns_1'] = df['close'].pct_change(1)
             df['returns_3'] = df['close'].pct_change(3)
             df['returns_5'] = df['close'].pct_change(5)
@@ -1052,14 +1276,67 @@ class TechnicalAnalyzer:
             df['high_low_ratio'] = df['high'] / df['low']
             df['close_open_ratio'] = df['close'] / df['open']
             df['volatility_10'] = df['returns_1'].rolling(10).std()
-            
+
+            # Early signal indicators: MACD histogram momentum, volume ROC
+            exp12 = df['close'].ewm(span=12, adjust=False).mean()
+            exp26 = df['close'].ewm(span=26, adjust=False).mean()
+            df['macd'] = exp12 - exp26
+            df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+            df['macd_hist'] = df['macd'] - df['macd_signal']
+            df['macd_hist_prev'] = df['macd_hist'].shift(1)
+            df['volume_roc'] = df['volume'].pct_change(5) * 100
+
+            # --- Liquidity Sweep, ORB, Trap Detection ---
+            df['swing_high'] = (df['high'] > df['high'].shift(1)) & (df['high'] > df['high'].shift(-1))
+            df['swing_low'] = (df['low'] < df['low'].shift(1)) & (df['low'] < df['low'].shift(-1))
+
+            df['liquidity_sweep_up'] = (df['high'] > df['high'].rolling(10).max().shift(1)) & (df['close'] < df['open'])
+            df['liquidity_sweep_down'] = (df['low'] < df['low'].rolling(10).min().shift(1)) & (df['close'] > df['open'])
+
+            df['trap_up'] = (df['high'] > df['high'].rolling(20).max().shift(1)) & (df['close'] < df['high'].rolling(20).max().shift(1) * 0.99)
+            df['trap_down'] = (df['low'] < df['low'].rolling(20).min().shift(1)) & (df['close'] > df['low'].rolling(20).min().shift(1) * 1.01)
+
+            try:
+                if 'date' in df.columns and not df['timestamp'].isna().all():
+                    df['first_candle_time'] = df.groupby('date')['timestamp'].transform('min')
+                    df['is_first_candle'] = df['timestamp'] == df['first_candle_time']
+                    def orb_range(group):
+                        first_3 = group.head(3)
+                        return pd.Series({'orb_high': first_3['high'].max(), 'orb_low': first_3['low'].min()})
+                    orb = df.groupby('date').apply(orb_range).reset_index()
+                    df = df.merge(orb, on='date', how='left')
+                    df['orb_breakout_up'] = (df['close'] > df['orb_high']) & (df['volume'] > df['vol_sma'])
+                    df['orb_breakout_down'] = (df['close'] < df['orb_low']) & (df['volume'] > df['vol_sma'])
+                else:
+                    df['orb_breakout_up'] = False
+                    df['orb_breakout_down'] = False
+            except:
+                df['orb_breakout_up'] = False
+                df['orb_breakout_down'] = False
+
+            # Ensure all new columns exist (fallback to False if not set)
+            for col in ['liquidity_sweep_up', 'liquidity_sweep_down', 'trap_up', 'trap_down', 
+                        'orb_breakout_up', 'orb_breakout_down']:
+                if col not in df.columns:
+                    df[col] = False
+
             return df
         except Exception as e:
             print(f"❌ Error in calculate_indicators: {e}")
             import traceback
             traceback.print_exc()
+            # Return a DataFrame with at least the basic columns to avoid crashes
+            required_cols = ['open','high','low','close','volume','timestamp','vwap','ema9','ema21','atr','rsi']
+            for col in required_cols:
+                if col not in df.columns:
+                    if col == 'vwap':
+                        df['vwap'] = df['close']
+                    elif col in ['ema9','ema21','atr','rsi']:
+                        df[col] = 0
+            # Add liquidity columns with False
+            for col in ['liquidity_sweep_up','liquidity_sweep_down','trap_up','trap_down','orb_breakout_up','orb_breakout_down']:
+                df[col] = False
             return df
-
     def calculate_fib_zones(self, df, lookback=100):
         if df is None or len(df) < 10:
             return 0, 0, 0, 0
@@ -1106,6 +1383,38 @@ class TechnicalAnalyzer:
             return "Bearish Pin 📌"
         return "None"
 
+    def analyze_open_interest(self, price_change, oi_change):
+        """
+        Analyze OI and price action to determine market sentiment.
+        Returns a string describing the action.
+        """
+        if price_change > 0.1 and oi_change > 5:
+            return "Long Buildup 🟢"
+        elif price_change < -0.1 and oi_change > 5:
+            return "Short Buildup 🔴"
+        elif price_change > 0.1 and oi_change < -5:
+            return "Short Covering 🟢"
+        elif price_change < -0.1 and oi_change < -5:
+            return "Long Unwinding 🔴"
+        elif price_change > 0.1 and abs(oi_change) <= 5:
+            return "Mild Buying 🟡"
+        elif price_change < -0.1 and abs(oi_change) <= 5:
+            return "Mild Selling 🟡"
+        else:
+            return "Neutral OI ⚪"
+
+    def filter_option_by_greeks(self, spot, strike, time_to_expiry, iv, option_type, r=0.05):
+        """
+        Check if the option meets the greeks criteria.
+        Returns True if delta > 0.3, gamma > 0.0012, IV < 15%.
+        """
+        if iv >= 15:
+            return False
+        greeks = OptionGreeks.black_scholes(spot, strike, time_to_expiry, r, iv/100, option_type)
+        if greeks['delta'] > 0.3 and greeks['gamma'] > 0.0012:
+            return True
+        return False
+
     def apply_institutional_fvg_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -1127,6 +1436,14 @@ class TechnicalAnalyzer:
         trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
         signal_strength = 50
 
+        # OI analysis (if available)
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
+        trend += f" | {oi_signal}"
+
         latest_bull_fvg = df[df['fvg_bull']].iloc[-1] if any(df['fvg_bull']) else None
         latest_bear_fvg = df[df['fvg_bear']].iloc[-1] if any(df['fvg_bear']) else None
 
@@ -1144,6 +1461,38 @@ class TechnicalAnalyzer:
                 trend = "BEAR FVG REVERSAL CONFIRMED 🔴"
                 signal_strength = 75
 
+        # Incorporate liquidity sweep and trap for early signals
+        if last['liquidity_sweep_up']:
+            trend += " | Liquidity Sweep UP"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 80)
+        if last['liquidity_sweep_down']:
+            trend += " | Liquidity Sweep DOWN"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 80)
+        if last['trap_up']:
+            trend += " | Trap UP (Bearish)"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 70)
+        if last['trap_down']:
+            trend += " | Trap DOWN (Bullish)"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 70)
+        if last['orb_breakout_up']:
+            trend += " | ORB Breakout UP"
+            if signal == "WAIT":
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 85)
+        if last['orb_breakout_down']:
+            trend += " | ORB Breakout DOWN"
+            if signal == "WAIT":
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 85)
+
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
 
     def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
@@ -1155,6 +1504,13 @@ class TechnicalAnalyzer:
         mh, ml, f_low, f_high = self.calculate_fib_zones(df)
         smc_blocks = self.detect_order_blocks(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
+        
+        # OI analysis
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (df['close'].iloc[-1] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
         
         if not HAS_PTA:
             return "WAIT (pandas_ta required)", "WAIT", df['close'].iloc[-1], df['close'].iloc[-1], df, atr, fib_data, 0
@@ -1186,17 +1542,49 @@ class TechnicalAnalyzer:
         last = df_ta.iloc[-1]
         
         signal = "WAIT"
-        trend = "RANGING 🟡 (VIJAY_RFF)"
+        trend = f"RANGING {oi_signal} (VIJAY_RFF)"
         signal_strength = 50
         
         if last['Buy_Signal']:
             signal = "BUY_CE"
-            trend = "VIJAY_RFF UPTREND CROSSOVER 🟢"
+            trend = f"VIJAY_RFF UPTREND CROSSOVER {oi_signal} 🟢"
             signal_strength = 80
         elif last['Sell_Signal']:
             signal = "BUY_PE"
-            trend = "VIJAY_RFF DOWNTREND CROSSOVER 🔴"
+            trend = f"VIJAY_RFF DOWNTREND CROSSOVER {oi_signal} 🔴"
             signal_strength = 80
+
+        # Add liquidity signals
+        if df['liquidity_sweep_up'].iloc[-1]:
+            trend += " | Liquidity Sweep UP"
+            if signal == "WAIT" and last['Close'] > last['Open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 80)
+        if df['liquidity_sweep_down'].iloc[-1]:
+            trend += " | Liquidity Sweep DOWN"
+            if signal == "WAIT" and last['Close'] < last['Open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 80)
+        if df['trap_up'].iloc[-1]:
+            trend += " | Trap UP (Bearish)"
+            if signal == "WAIT" and last['Close'] < last['Open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 70)
+        if df['trap_down'].iloc[-1]:
+            trend += " | Trap DOWN (Bullish)"
+            if signal == "WAIT" and last['Close'] > last['Open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 70)
+        if df['orb_breakout_up'].iloc[-1]:
+            trend += " | ORB Breakout UP"
+            if signal == "WAIT":
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 85)
+        if df['orb_breakout_down'].iloc[-1]:
+            trend += " | ORB Breakout DOWN"
+            if signal == "WAIT":
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 85)
             
         return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data, signal_strength
 
@@ -1226,18 +1614,57 @@ class TechnicalAnalyzer:
         smc_blocks = self.detect_order_blocks(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
         
+        # OI analysis
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
+        
         signal = "WAIT"
-        trend = "ICT Neutral"
+        trend = f"ICT Neutral {oi_signal}"
         signal_strength = 50
         
         if last['fvg_bull'] and last['close'] > last['vwap'] and last['bos_up']:
             signal = "BUY_CE"
-            trend = "LUX ICT BULLISH: FVG + OB + BOS 🟢"
+            trend = f"LUX ICT BULLISH: FVG + OB + BOS {oi_signal} 🟢"
             signal_strength = 85
         elif last['fvg_bear'] and last['close'] < last['vwap'] and last['bos_down']:
             signal = "BUY_PE"
-            trend = "LUX ICT BEARISH: FVG + OB + BOS 🔴"
+            trend = f"LUX ICT BEARISH: FVG + OB + BOS {oi_signal} 🔴"
             signal_strength = 85
+
+        # Add liquidity signals
+        if last['liquidity_sweep_up']:
+            trend += " | Liquidity Sweep UP"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 80)
+        if last['liquidity_sweep_down']:
+            trend += " | Liquidity Sweep DOWN"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 80)
+        if last['trap_up']:
+            trend += " | Trap UP (Bearish)"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 70)
+        if last['trap_down']:
+            trend += " | Trap DOWN (Bullish)"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 70)
+        if last['orb_breakout_up']:
+            trend += " | ORB Breakout UP"
+            if signal == "WAIT":
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 85)
+        if last['orb_breakout_down']:
+            trend += " | ORB Breakout DOWN"
+            if signal == "WAIT":
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 85)
         
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
 
@@ -1254,14 +1681,55 @@ class TechnicalAnalyzer:
         last = df.iloc[-1]
         signal, trend = "WAIT", "FLAT"
         signal_strength = 50
+
+        # OI analysis
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
         
         benchmark = last['ema_long'] if is_index else last['vwap']
         if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark):
-            trend, signal = "BULLISH MOMENTUM 🟢", "BUY_CE"
+            trend, signal = f"BULLISH MOMENTUM {oi_signal} 🟢", "BUY_CE"
             signal_strength = 70
         elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark):
-            trend, signal = "BEARISH MOMENTUM 🔴", "BUY_PE"
+            trend, signal = f"BEARISH MOMENTUM {oi_signal} 🔴", "BUY_PE"
             signal_strength = 70
+        else:
+            trend = f"RANGING {oi_signal}"
+
+        # Add liquidity signals
+        if last['liquidity_sweep_up']:
+            trend += " | Liquidity Sweep UP"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 80)
+        if last['liquidity_sweep_down']:
+            trend += " | Liquidity Sweep DOWN"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 80)
+        if last['trap_up']:
+            trend += " | Trap UP (Bearish)"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 70)
+        if last['trap_down']:
+            trend += " | Trap DOWN (Bullish)"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 70)
+        if last['orb_breakout_up']:
+            trend += " | ORB Breakout UP"
+            if signal == "WAIT":
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 85)
+        if last['orb_breakout_down']:
+            trend += " | ORB Breakout DOWN"
+            if signal == "WAIT":
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 85)
             
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data, signal_strength
 
@@ -1271,6 +1739,13 @@ class TechnicalAnalyzer:
         
         last = df.iloc[-1]
         prev = df.iloc[-2]
+
+        # OI analysis
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
 
         buy_conds, sell_conds = [], []
         keys = keywords.split(',') if keywords else []
@@ -1309,13 +1784,27 @@ class TechnicalAnalyzer:
             buy_conds.append(last['close'] > last['vwap'])
             sell_conds.append(last['close'] < last['vwap'])
 
-        signal, trend = "WAIT", "Awaiting Keyword Match 🟡"
+        # Add liquidity signals as conditions
+        if last['liquidity_sweep_up']:
+            buy_conds.append(True)
+        if last['liquidity_sweep_down']:
+            sell_conds.append(True)
+        if last['trap_up']:
+            sell_conds.append(True)
+        if last['trap_down']:
+            buy_conds.append(True)
+        if last['orb_breakout_up']:
+            buy_conds.append(True)
+        if last['orb_breakout_down']:
+            sell_conds.append(True)
+
+        signal, trend = "WAIT", f"Awaiting Keyword Match {oi_signal} 🟡"
 
         if buy_conds and all(buy_conds):
-            signal, trend = "BUY_CE", "Keyword Setup Met: BULLISH 🟢"
+            signal, trend = "BUY_CE", f"Keyword Setup Met: BULLISH {oi_signal} 🟢"
             signal_strength = 70 + (len(buy_conds) * 5)
         elif sell_conds and all(sell_conds):
-            signal, trend = "BUY_PE", "Keyword Setup Met: BEARISH 🔴"
+            signal, trend = "BUY_PE", f"Keyword Setup Met: BEARISH {oi_signal} 🔴"
             signal_strength = 70 + (len(sell_conds) * 5)
 
         signal_strength = min(100, signal_strength)
@@ -1329,6 +1818,13 @@ class TechnicalAnalyzer:
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
         df = self.calculate_indicators(df, is_index)
         
+        # OI analysis
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (df['close'].iloc[-1] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
+        
         if not ml_predictor.is_trained:
             ml_predictor.train(df)
         prob_up, prob_down = ml_predictor.predict(df)
@@ -1339,7 +1835,7 @@ class TechnicalAnalyzer:
         up_thresh = prob_threshold
         down_thresh = prob_threshold
         
-        trend = f"ML Ensemble: Up {prob_up:.2f} / Down {prob_down:.2f}"
+        trend = f"ML Ensemble: Up {prob_up:.2f} / Down {prob_down:.2f} {oi_signal}"
         signal = "WAIT"
         strength = int(max(prob_up, prob_down) * 100)
         if prob_up > up_thresh:
@@ -1347,12 +1843,26 @@ class TechnicalAnalyzer:
         elif prob_down > down_thresh:
             signal = "BUY_PE"
         
+        # Add liquidity signals to trend
+        if last['liquidity_sweep_up']:
+            trend += " | Liq Sweep UP"
+        if last['liquidity_sweep_down']:
+            trend += " | Liq Sweep DOWN"
+        if last['trap_up']:
+            trend += " | Trap UP"
+        if last['trap_down']:
+            trend += " | Trap DOWN"
+        if last['orb_breakout_up']:
+            trend += " | ORB UP"
+        if last['orb_breakout_down']:
+            trend += " | ORB DOWN"
+        
         mh, ml, f_low, f_high = self.calculate_fib_zones(df)
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
         return trend, signal, last['close'], last['close'], df, atr, fib_data, strength
 
 # ==========================================
-# MACHINE LEARNING ENSEMBLE
+# MACHINE LEARNING ENSEMBLE (with async training)
 # ==========================================
 class MLPredictor:
     def __init__(self):
@@ -1364,6 +1874,36 @@ class MLPredictor:
         self.last_train_index = 0
         self.feature_cols = None
         self.signal_history = deque(maxlen=10)
+        self.train_queue = queue.Queue()
+        self.train_thread = threading.Thread(target=self._background_train, daemon=True)
+        self.train_thread.start()
+
+    def _background_train(self):
+        while True:
+            try:
+                df = self.train_queue.get(timeout=1)
+                if df is not None:
+                    self._do_train(df)
+            except queue.Empty:
+                continue
+
+    def _do_train(self, df):
+        train_df = df.iloc[-500:].copy()
+        X, y = self.prepare_features(train_df)
+        if len(X) < 30:
+            return
+        X_scaled = self.scaler.fit_transform(X)
+        self.rf_model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+        self.rf_model.fit(X_scaled, y)
+        if HAS_XGB:
+            self.xgb_model = xgb.XGBClassifier(n_estimators=100, max_depth=5, learning_rate=0.1,
+                                               subsample=0.8, colsample_bytree=0.8, reg_lambda=1.5,
+                                               random_state=42, use_label_encoder=False, eval_metric='mlogloss')
+            self.xgb_model.fit(X_scaled, y)
+        self.mlp_model = MLPClassifier(hidden_layer_sizes=(50, 25), max_iter=500, random_state=42)
+        self.mlp_model.fit(X_scaled, y)
+        self.is_trained = True
+        self.last_train_index = len(df) - 1
 
     def prepare_features(self, df):
         df = df.copy()
@@ -1415,31 +1955,10 @@ class MLPredictor:
         y = df['target']
         return X, y
 
-    def train(self, df, force=False):
+    def train(self, df):
         if len(df) < 50:
-            return False
-        train_df = df.iloc[-500:].copy()
-        X, y = self.prepare_features(train_df)
-        if len(X) < 30:
-            return False
-        X_scaled = self.scaler.fit_transform(X)
-        
-        self.rf_model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
-        self.rf_model.fit(X_scaled, y)
-        
-        if HAS_XGB:
-            self.xgb_model = xgb.XGBClassifier(n_estimators=100, max_depth=5, learning_rate=0.1,
-                                               subsample=0.8, colsample_bytree=0.8, reg_lambda=1.5,
-                                               random_state=42, use_label_encoder=False, eval_metric='mlogloss')
-            self.xgb_model.fit(X_scaled, y)
-        
-        self.mlp_model = MLPClassifier(hidden_layer_sizes=(50, 25), max_iter=500, random_state=42)
-        self.mlp_model.fit(X_scaled, y)
-        
-        self.is_trained = True
-        self.last_train_index = len(df) - 1
-        print(f"✅ ML Ensemble trained on {len(X)} samples")
-        return True
+            return
+        self.train_queue.put(df.copy())
 
     def predict(self, df):
         if not self.is_trained:
@@ -1775,11 +2294,29 @@ def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
         df['vol_ma'] = df['Volume'].rolling(20).mean()
         df['vol_spike'] = df['Volume'] > df['vol_ma'] * 1.2
         
+        # MACD
+        exp12 = df['Close'].ewm(span=12, adjust=False).mean()
+        exp26 = df['Close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = exp12 - exp26
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_hist'] = df['macd'] - df['macd_signal']
+        
+        # Volume ROC
+        df['volume_roc'] = df['Volume'].pct_change(5) * 100
+        
         last = df.iloc[-1]
         prev = df.iloc[-2]
         
-        buy_signal = (last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'] and last['vol_spike'])
-        sell_signal = (last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'] and last['vol_spike'])
+        # Enhanced signals
+        buy_signal = (last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'] and last['vol_spike']) or \
+                     (last['rsi'] > 50 and prev['rsi'] <= 50 and last['macd'] > last['macd_signal'] and last['vol_spike']) or \
+                     (last['macd_hist'] > 0 and prev['macd_hist'] <= 0 and last['vol_spike']) or \
+                     (last['volume_roc'] > 20 and last['Close'] > prev['Close'] and last['vol_spike'])
+        
+        sell_signal = (last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'] and last['vol_spike']) or \
+                      (last['rsi'] < 50 and prev['rsi'] >= 50 and last['macd'] < last['macd_signal'] and last['vol_spike']) or \
+                      (last['macd_hist'] < 0 and prev['macd_hist'] >= 0 and last['vol_spike']) or \
+                      (last['volume_roc'] > 20 and last['Close'] < prev['Close'] and last['vol_spike'])
         
         current_atr = last['atr']
         if "XAU" in symbol or "GOLD" in symbol:
@@ -1848,23 +2385,326 @@ def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
         st.error(f"Error in scalper: {e}")
 
 # ==========================================
-# CORE BOT ENGINE (with FOMO integration & trailing stop with min profit)
+# SAFE INVESTMENT SUGGESTIONS (Enhanced)
+# ==========================================
+def safe_investment_suggestions():
+    st.subheader("💰 Safe Investment Options – Suggestions & Guidance")
+    
+    with st.expander("📈 Stocks (Equity)", expanded=True):
+        st.markdown("""
+        **Recommended Stocks (Large Cap, fundamentally strong):**
+        - Reliance Industries
+        - Tata Consultancy Services (TCS)
+        - HDFC Bank
+        - Infosys
+        - ITC
+        - Hindustan Unilever
+        - ICICI Bank
+        - State Bank of India
+        
+        **Index Funds/ETFs (Diversified, low cost):**
+        - Nippon India ETF Nifty50
+        - HDFC Index Fund - Nifty50
+        - UTI Nifty Index Fund
+        
+        *Tip: Consider long-term holding (5+ years) and SIP for rupee cost averaging.*
+        """)
+    
+    with st.expander("🏦 Stock Brokers (India)", expanded=True):
+        st.markdown("""
+        **Popular Discount Brokers:**
+        - **Zerodha** – Low brokerage, user-friendly, large user base.
+        - **Angel One** – Good for research and advisory, integrated with this system.
+        - **Groww** – Simple interface, good for beginners.
+        - **Upstox** – Competitive pricing, advanced trading tools.
+        - **ICICI Direct** – Full-service broker, research reports, but higher brokerage.
+        - **Fyers** – Excellent charting, low brokerage, now integrated.
+        
+        *Tip: Choose based on your trading style – discount brokers for active trading, full-service for research.*
+        """)
+    
+    with st.expander("🏠 Real Estate – Promising Locations", expanded=True):
+        st.markdown("""
+        **Residential Real Estate (Capital appreciation + rental yield):**
+        - **Bengaluru** – Whitefield, Electronic City, Sarjapur Road (IT hubs)
+        - **Hyderabad** – Gachibowli, HITEC City, Kokapet (growing IT corridor)
+        - **Pune** – Hinjewadi, Kharadi, Baner (IT and manufacturing)
+        - **Chennai** – OMR, Guindy, Tambaram (IT and industrial)
+        - **NCR** – Gurugram, Noida (commercial hubs, but research micro-markets)
+        - **Mumbai Metropolitan Region** – Navi Mumbai, Thane (affordable compared to South Mumbai)
+        
+        **Commercial Real Estate:**
+        - REITs (Real Estate Investment Trusts) – e.g., Embassy REIT, Mindspace Business Parks REIT – invest in commercial properties with low ticket size.
+        
+        *Tip: Research infrastructure projects, job growth, and legal clearances before investing.*
+        """)
+    
+    with st.expander("🥇 Gold & Precious Metals", expanded=True):
+        st.markdown("""
+        **Ways to Invest in Gold:**
+        - **Sovereign Gold Bonds (SGB)** – Issued by RBI, interest 2.5% p.a. + capital appreciation, tax-free on maturity.
+        - **Gold ETFs** – e.g., Nippon India Gold ETF, HDFC Gold ETF – trade on exchange, low expense ratio.
+        - **Digital Gold** – Buy small quantities online (e.g., MMTC-PAMP).
+        - **Physical Gold** – Coins, bars, jewellery (storage and purity concerns).
+        
+        *Tip: SGBs are the most tax‑efficient; avoid jewellery for investment due to making charges.*
+        """)
+    
+    with st.expander("🛡️ Life Insurance", expanded=True):
+        st.markdown("""
+        **Types of Life Insurance:**
+        - **Term Insurance** – Pure protection, low premium, high cover. (Recommended for financial dependents)
+        - **Endowment Plans** – Insurance + savings, but lower returns and higher premium.
+        - **ULIPs** – Market‑linked, but have higher charges; compare with mutual funds.
+        
+        **Top Term Insurance Providers:**
+        - **SBI Life - eShield** – Affordable term plan with multiple options.
+        - **HDFC Life Click2Protect** – Flexible cover, optional critical illness.
+        - **ICICI Prudential iProtect** – Comprehensive coverage.
+        - **Max Life Smart Secure Plus** – High claim settlement ratio.
+        - **LIC Tech Term** – Pure term plan with low premiums.
+        
+        *Tip: Buy term insurance for cover at least 10‑15 times your annual income.*
+        """)
+    
+    with st.expander("📊 Mutual Funds – Categories & Suggestions (Expanded)", expanded=True):
+        st.markdown("""
+        **Equity Mutual Funds (High risk, high return):**
+        - **Large Cap** – SBI Bluechip Fund, ICICI Prudential Bluechip, HDFC Top 100 Fund, Kotak Bluechip
+        - **Mid Cap** – Kotak Emerging Equity, HDFC Mid‑Cap Opportunities, DSP Midcap Fund, Nippon India Growth Fund
+        - **Small Cap** – SBI Small Cap, Nippon India Small Cap, HDFC Small Cap Fund, Kotak Small Cap
+        - **Multi Cap** – ICICI Prudential Multicap, Kotak Standard Multicap, HDFC Equity Fund
+        - **ELSS (Tax Saving)** – Axis Long Term Equity, Mirae Asset Tax Saver, SBI Long Term Equity
+        
+        **Hybrid Funds (Moderate risk):**
+        - **Aggressive Hybrid** – HDFC Balanced Advantage Fund, ICICI Prudential Balanced Advantage, SBI Equity Hybrid
+        - **Conservative Hybrid** – ICICI Prudential Regular Savings Fund, Kotak Debt Hybrid
+        - **Arbitrage Funds** – Kotak Arbitrage Fund, ICICI Prudential Arbitrage – low risk, tax efficient
+        
+        **Debt Funds (Low risk):**
+        - **Liquid Funds** – For short‑term parking (e.g., overnight funds) – SBI Liquid Fund, HDFC Liquid Fund
+        - **Corporate Bond Funds** – SBI Corporate Bond Fund, ICICI Prudential Corporate Bond
+        - **Gilt Funds** – Invest in government securities (e.g., SBI Magnum Gilt, ICICI Prudential Gilt)
+        - **Dynamic Bond Funds** – ICICI Prudential All Seasons Bond Fund
+        
+        **Index Funds/ETFs (Passive, low cost):**
+        - UTI Nifty Index Fund
+        - Motilal Oswal S&P500 Index Fund
+        - Navi US Total Stock Market Index Fund
+        - Bharat 22 ETF, Nippon India ETF Nifty50
+        
+        *Tip: Use SIP for disciplined investing and rupee cost averaging. Consult a financial advisor for personalized advice.*
+        """)
+    
+    with st.expander("🏦 Government Schemes & Small Savings", expanded=True):
+        st.markdown("""
+        - **PPF** – 7.1% p.a. (current), tax-free, lock-in 15 years.
+        - **Sukanya Samriddhi Yojana** – For girl child, high interest, tax benefits.
+        - **National Savings Certificate (NSC)** – Fixed income, tax saving under 80C.
+        - **Senior Citizens' Savings Scheme** – 8.2% p.a., for ages 60+.
+        - **Atal Pension Yojana (APY)** – Guaranteed pension for unorganised sector, co-contribution by govt.
+        - **Pradhan Mantri Jeevan Jyoti Bima Yojana (PMJJBY)** – Term insurance of ₹2 lakh at ₹330/year.
+        - **Pradhan Mantri Suraksha Bima Yojana (PMSBY)** – Accidental cover of ₹2 lakh at ₹20/year.
+        
+        *Tip: These are government-backed, virtually risk-free, and offer decent returns/safety.*
+        """)
+    
+    st.info("⚠️ This information is for educational purposes only. Please consult your financial advisor before investing.")
+
+# ==========================================
+# FIA ASSISTANT (Chart & OI Analysis)
+# ==========================================
+def fia_assistant(df, index_name):
+    if df is None or len(df) < 20:
+        st.warning("Not enough data for analysis.")
+        return
+    
+    last = df.iloc[-1]
+    prev = df.iloc[-5] if len(df) >=5 else df.iloc[0]
+    
+    # Price action
+    price_change_1 = (last['close'] / df['close'].iloc[-2] - 1) * 100
+    price_change_5 = (last['close'] / prev['close'] - 1) * 100
+    
+    # Volume
+    vol_avg = df['volume'].tail(20).mean()
+    vol_ratio = last['volume'] / vol_avg if vol_avg != 0 else 1
+    
+    # RSI
+    rsi = last['rsi'] if 'rsi' in df.columns else 50
+    
+    # Supertrend
+    st_dir = last['supertrend_direction'] if 'supertrend_direction' in df.columns else 1
+    
+    # VWAP
+    vwap = last['vwap'] if 'vwap' in df.columns else last['close']
+    dist_from_vwap = (last['close'] - vwap) / vwap * 100
+    
+    # Bollinger
+    bb_upper = last['bb_upper'] if 'bb_upper' in df.columns else last['close'] * 1.02
+    bb_lower = last['bb_lower'] if 'bb_lower' in df.columns else last['close'] * 0.98
+    bb_width = (bb_upper - bb_lower) / last['close'] * 100
+    
+    # Liquidity signals
+    liq_up = last['liquidity_sweep_up'] if 'liquidity_sweep_up' in df.columns else False
+    liq_down = last['liquidity_sweep_down'] if 'liquidity_sweep_down' in df.columns else False
+    orb_up = last['orb_breakout_up'] if 'orb_breakout_up' in df.columns else False
+    orb_down = last['orb_breakout_down'] if 'orb_breakout_down' in df.columns else False
+    
+    # OI analysis (if available)
+    oi_analysis = ""
+    if 'oi' in df.columns:
+        oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        oi_analysis = f"OI Change: {oi_change:.2f}% | "
+        if price_change_5 > 0.1 and oi_change > 5:
+            oi_analysis += "Long Buildup 🟢"
+        elif price_change_5 < -0.1 and oi_change > 5:
+            oi_analysis += "Short Buildup 🔴"
+        elif price_change_5 > 0.1 and oi_change < -5:
+            oi_analysis += "Short Covering 🟢"
+        elif price_change_5 < -0.1 and oi_change < -5:
+            oi_analysis += "Long Unwinding 🔴"
+        else:
+            oi_analysis += "OI Neutral"
+    
+    # Compose report
+    st.markdown(f"### 📊 FIA Market Analysis for {index_name}")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Price", f"{last['close']:.2f}", f"{price_change_1:.2f}% (1 bar)")
+        st.metric("Volume vs Avg", f"{vol_ratio:.2f}x", delta="High" if vol_ratio > 1.2 else "Normal" if vol_ratio > 0.8 else "Low")
+        st.metric("RSI (14)", f"{rsi:.1f}", "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral")
+    with col2:
+        st.metric("Distance from VWAP", f"{dist_from_vwap:.2f}%")
+        st.metric("BB Width", f"{bb_width:.2f}%")
+        st.metric("Supertrend", "🟢 Up" if st_dir == 1 else "🔴 Down")
+    
+    st.markdown("### 🔍 Signal Detection")
+    if liq_up:
+        st.success("✅ Liquidity Sweep UP detected – potential reversal up")
+    if liq_down:
+        st.error("🔻 Liquidity Sweep DOWN detected – potential reversal down")
+    if orb_up:
+        st.success("🚀 ORB Breakout UP – strong bullish momentum")
+    if orb_down:
+        st.error("📉 ORB Breakout DOWN – strong bearish momentum")
+    
+    st.markdown(f"### 📈 {oi_analysis}")
+    
+    # Recommendation
+    st.markdown("### 💡 Recommendation")
+    if price_change_5 > 0.5 and vol_ratio > 1.5 and rsi < 70:
+        st.success("Strong Bullish Momentum – Consider LONG")
+    elif price_change_5 < -0.5 and vol_ratio > 1.5 and rsi > 30:
+        st.error("Strong Bearish Momentum – Consider SHORT")
+    elif rsi < 30 and price_change_5 > -1:
+        st.info("Oversold – Watch for reversal up")
+    elif rsi > 70 and price_change_5 < 1:
+        st.info("Overbought – Watch for reversal down")
+    else:
+        st.info("Market Neutral – Wait for clearer signals")
+
+# ==========================================
+# TELEGRAM CONTROL BOT (unchanged)
+# ==========================================
+class TelegramController:
+    def __init__(self, token, allowed_users):
+        self.token = token
+        self.allowed_users = [int(u.strip()) for u in allowed_users.split(',')] if allowed_users else []
+        self.app = None
+        self.bot = None
+        self.running = False
+
+    async def start(self, bot_instance):
+        if not HAS_TELEGRAM_BOT or not self.token:
+            return
+        self.bot_instance = bot_instance
+        self.app = Application.builder().token(self.token).build()
+        self.app.add_handler(CommandHandler("status", self.status))
+        self.app.add_handler(CommandHandler("stop", self.stop))
+        self.app.add_handler(CommandHandler("start", self.start_engine))
+        self.app.add_handler(CommandHandler("pnl", self.pnl))
+        self.app.add_handler(CommandHandler("balance", self.balance))
+        self.app.add_handler(CommandHandler("help", self.help))
+        threading.Thread(target=self._run_polling, daemon=True).start()
+
+    def _run_polling(self):
+        self.running = True
+        self.app.run_polling()
+
+    async def _check_user(self, update):
+        user_id = update.effective_user.id
+        if self.allowed_users and user_id not in self.allowed_users:
+            await update.message.reply_text("⛔ Unauthorized.")
+            return False
+        return True
+
+    async def status(self, update, context):
+        if not await self._check_user(update):
+            return
+        bot = self.bot_instance
+        status = "🟢 Running" if bot.state["is_running"] else "🔴 Stopped"
+        active = f"Active Trade: {bot.state['active_trade']['symbol']} PnL: {bot.state['active_trade']['floating_pnl']:.2f}" if bot.state["active_trade"] else "No active trade"
+        await update.message.reply_text(f"*Bot Status*\n{status}\n{active}\nTrades Today: {bot.state['trades_today']}\nDaily PnL: {bot.state['daily_pnl']:.2f}", parse_mode='Markdown')
+
+    async def stop(self, update, context):
+        if not await self._check_user(update):
+            return
+        bot = self.bot_instance
+        bot.state["is_running"] = False
+        await update.message.reply_text("🛑 Engine stopped.")
+
+    async def start_engine(self, update, context):
+        if not await self._check_user(update):
+            return
+        bot = self.bot_instance
+        if not bot.state["is_running"]:
+            bot.state["is_running"] = True
+            t = threading.Thread(target=bot.trading_loop, daemon=True)
+            add_script_run_ctx(t)
+            t.start()
+            await update.message.reply_text("▶️ Engine started.")
+        else:
+            await update.message.reply_text("Engine already running.")
+
+    async def pnl(self, update, context):
+        if not await self._check_user(update):
+            return
+        bot = self.bot_instance
+        await update.message.reply_text(f"Today's PnL: ₹{bot.state['daily_pnl']:.2f}")
+
+    async def balance(self, update, context):
+        if not await self._check_user(update):
+            return
+        bot = self.bot_instance
+        await update.message.reply_text(f"Balance: {bot.get_balance()}")
+
+    async def help(self, update, context):
+        await update.message.reply_text("Commands:\n/status\n/stop\n/start\n/pnl\n/balance")
+
+# ==========================================
+# CORE BOT ENGINE (with all enhancements)
 # ==========================================
 class SniperBot:
-    def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", mt5_api_url="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", ib_host="", ib_port=7497, ib_client_id=1, is_mock=False):
+    def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", mt5_api_url="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", is_mock=False, tg_bot_token="", tg_allowed_users="", fyers_client_id="", fyers_secret="", fyers_token=""):
         self.api_key, self.client_id, self.pwd, self.totp_secret = api_key, client_id, pwd, totp_secret
         self.tg_token, self.tg_chat, self.wa_phone, self.wa_api = tg_token, tg_chat, wa_phone, wa_api
         self.mt5_acc, self.mt5_pass, self.mt5_server, self.mt5_api_url = mt5_acc, mt5_pass, mt5_server, mt5_api_url
         self.zerodha_api, self.zerodha_secret, self.request_token = zerodha_api, zerodha_secret, request_token
         self.coindcx_api, self.coindcx_secret = coindcx_api, coindcx_secret
         self.delta_api, self.delta_secret = delta_api, delta_secret
-        self.ib_host, self.ib_port, self.ib_client_id = ib_host, ib_port, ib_client_id
+        self.tg_bot_token = tg_bot_token
+        self.tg_allowed_users = tg_allowed_users
+        self.fyers_client_id = fyers_client_id
+        self.fyers_secret = fyers_secret
+        self.fyers_token = fyers_token
         
         self.api, self.kite, self.token_map, self.is_mock = None, None, None, is_mock
         self.mt5_bridge = None
-        self.ib_bridge = None
+        self.fyers_bridge = None
         self.is_mt5_connected = False
-        self.is_ib_connected = False
+        self.is_fyers_connected = False
         self.client_name = "Offline User"
         self.client_ip = get_client_ip()
         self.user_hash = get_user_hash(self.api_key)
@@ -1873,6 +2713,7 @@ class SniperBot:
         self.arbitrage = ArbitrageModule()
         self.option_seller = OptionSellingModule(self)
         self.multi_leg = MultiLegStrategies()
+        self.telegram_controller = TelegramController(tg_bot_token, tg_allowed_users) if tg_bot_token else None
         
         self.state = {
             "is_running": False, "order_in_flight": False, "active_trade": None, "last_trade": None,
@@ -1900,7 +2741,6 @@ class SniperBot:
         self.settings = {}
 
     def load_daily_pnl(self):
-        """Load today's total PnL from database (for real users)."""
         if self.is_mock or not HAS_DB:
             return 0.0
         today = get_ist().strftime('%Y-%m-%d')
@@ -1930,16 +2770,16 @@ class SniperBot:
                 self.log(f"❌ MT5 Bridge failed: {msg}")
         return False
 
-    def connect_ib(self):
-        if self.ib_host:
-            self.ib_bridge = IBBridge(self.ib_host, self.ib_port, self.ib_client_id)
-            success, msg = self.ib_bridge.connect()
+    def connect_fyers(self):
+        if self.fyers_client_id and self.fyers_secret and self.fyers_token:
+            self.fyers_bridge = FyersBridge(self.fyers_client_id, self.fyers_secret, self.fyers_token)
+            success, msg = self.fyers_bridge.connect()
             if success:
-                self.is_ib_connected = True
-                self.log(f"✅ Interactive Brokers Connected: {msg}")
+                self.is_fyers_connected = True
+                self.log(f"✅ Fyers Connected: {msg}")
                 return True
             else:
-                self.log(f"❌ IB Connection failed: {msg}")
+                self.log(f"❌ Fyers connection failed: {msg}")
         return False
 
     def push_notify(self, title, message):
@@ -1955,11 +2795,11 @@ class SniperBot:
             except: pass
 
     def log(self, msg):
-        self.state["logs"].appendleft(f"[{get_ist().strftime('%H:%M:%S')}] {msg}")
+        timestamp = get_ist().strftime('%H:%M:%S')
+        self.state["logs"].appendleft(f"[{timestamp}] {msg}")
 
     def get_balance(self):
         b_str = []
-        
         if self.api:
             try:
                 rms = self.api.rms()
@@ -1973,7 +2813,6 @@ class SniperBot:
                         pass
             except:
                 pass
-            
         if self.kite:
             try:
                 margins = self.kite.margins()
@@ -1986,7 +2825,6 @@ class SniperBot:
                     pass
             except:
                 pass
-            
         if self.coindcx_api:
             try:
                 ts = int(round(time.time() * 1000))
@@ -2004,7 +2842,6 @@ class SniperBot:
                                 b_str.append(f"DCX: $ {bal:,.2f}")
             except:
                 pass
-            
         if self.delta_api:
             try:
                 ts, sig = generate_delta_signature('GET', '/v2/wallet/balances', '', self.delta_secret)
@@ -2020,7 +2857,6 @@ class SniperBot:
                                 b_str.append(f"Delta: $ {bal:,.2f}")
             except:
                 pass
-            
         if self.is_mt5_connected and self.mt5_bridge:
             try:
                 acc_info = self.mt5_bridge.get_account_info()
@@ -2028,10 +2864,13 @@ class SniperBot:
                     b_str.append(f"MT5: $ {acc_info.get('balance', 0):,.2f}")
             except:
                 pass
-
-        if self.is_ib_connected and self.ib_bridge:
-            b_str.append("IB: connected")
-            
+        if self.is_fyers_connected and self.fyers_bridge:
+            try:
+                info = self.fyers_bridge.get_account_info()
+                if info:
+                    b_str.append(f"Fyers: ₹ {info.get('balance', 0):,.2f}")
+            except:
+                pass
         return " | ".join(b_str) if b_str else "N/A"
 
     def login(self):
@@ -2040,6 +2879,8 @@ class SniperBot:
             self.user_hash = get_user_hash(self.api_key)
             self.push_notify("🟢 Session Started", f"Paper Trading active.")
             self.start_webhook_listener()
+            if self.tg_bot_token:
+                self.telegram_controller.start(self)
             return True
         
         success = False
@@ -2069,10 +2910,6 @@ class SniperBot:
             if self.connect_mt5():
                 success = True
 
-        if self.ib_host:
-            if self.connect_ib():
-                success = True
-
         if self.coindcx_api and self.coindcx_secret:
             self.log(f"✅ CoinDCX Credentials Loaded")
             success = True
@@ -2080,10 +2917,16 @@ class SniperBot:
         if self.delta_api and self.delta_secret:
             self.log(f"✅ Delta Exchange Credentials Loaded")
             success = True
+
+        if self.fyers_client_id and self.fyers_secret and self.fyers_token:
+            if self.connect_fyers():
+                success = True
                 
         if success:
             self.push_notify("🟢 Gateway Active", f"Connections established.")
             self.start_webhook_listener()
+            if self.tg_bot_token:
+                self.telegram_controller.start(self)
             return True
         return False
 
@@ -2123,6 +2966,14 @@ class SniperBot:
             return "DELTA", index_name
         if self.settings.get("primary_broker") == "CoinDCX" or "USDT" in index_name or "INR" in index_name:
             return "COINDCX", index_name
+        if self.settings.get("primary_broker") == "Fyers":
+            # Fyers symbol format: NSE:SBIN-EQ or MCX:GOLD
+            if index_name in INDEX_TOKENS:
+                # For indices, Fyers may need special handling – fallback to NSE symbol
+                return "FYERS", index_name
+            else:
+                # Assume equity: add .NS if needed? Fyers uses NSE:SYMBOL-EQ
+                return "FYERS", f"NSE:{index_name}-EQ" if not index_name.startswith("NSE:") else index_name
             
         if index_name in INDEX_TOKENS: return INDEX_TOKENS[index_name]
         df_map = self.get_master()
@@ -2137,7 +2988,7 @@ class SniperBot:
         return "NSE", "12345"
 
     def get_market_data_oi(self, exchange, token):
-        if self.is_mock or exchange in ["MT5", "COINDCX", "DELTA"]: return np.random.randint(50000, 150000), np.random.randint(1000, 10000)
+        if self.is_mock or exchange in ["MT5", "COINDCX", "DELTA", "FYERS"]: return np.random.randint(50000, 150000), np.random.randint(1000, 10000)
         if not self.api: return 0, 0
         try:
             res = self.api.marketData({"mode": "FULL", "exchangeTokens": { exchange: [str(token)] }})
@@ -2198,17 +3049,19 @@ class SniperBot:
                 if res and res.get('status'): return float(res['data']['ltp'])
             except: pass
 
-        if self.is_ib_connected and self.ib_bridge:
-            try:
-                return self.ib_bridge.get_live_price(symbol)
-            except:
-                pass
+        if exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
+            return self.fyers_bridge.get_live_price(symbol)
+
         return None
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
         if self.is_mock and token == "12345": return self._fallback_yfinance(symbol, interval)
         if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
             return self.mt5_bridge.get_historical_data(symbol, interval)
+        if exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
+            # Convert interval to fyers format (1, 5, 15, 60, D)
+            fyers_int = interval.replace("m", "").replace("h", "").replace("d", "D")
+            return self.fyers_bridge.get_historical_data(symbol, fyers_int, days=10)
             
         if not self.api and not self.kite: return self._fallback_yfinance(symbol, interval)
         
@@ -2528,24 +3381,23 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-                clean_qty = float(round(float(qty), 8))  # allow up to 8 decimals
+                clean_qty = float(round(float(qty), 8))
 
-                # Fetch ticker data to get correct market symbol
                 ticker_data = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
                 market_symbol = None
                 for coin in ticker_data:
                     mkt = coin.get('market', '')
-                    # Spot format: baseUSDT (e.g., BTCUSDT)
                     if mkt.upper() == f"{base_coin}USDT".upper():
                         market_symbol = mkt
                         break
-                    # Futures format: B-base_USDT (e.g., B-BTC_USDT)
                     if market_type in ["Futures", "Options"] and mkt.upper() == f"B-{base_coin}_USDT".upper():
+                        market_symbol = mkt
+                        break
+                    if mkt.upper() == f"{base_coin}INR".upper():
                         market_symbol = mkt
                         break
 
                 if not market_symbol:
-                    # Fallback: construct based on market type
                     if market_type in ["Futures", "Options"]:
                         market_symbol = f"B-{base_coin}_USDT"
                     else:
@@ -2553,7 +3405,6 @@ class SniperBot:
                     self.log(f"⚠️ CoinDCX market symbol not found, using constructed: {market_symbol}")
 
                 if market_type in ["Futures", "Options"]:
-                    # Futures order
                     payload = {
                         "side": side.lower(),
                         "order_type": "market_order",
@@ -2563,7 +3414,6 @@ class SniperBot:
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 else:
-                    # Spot order
                     payload = {
                         "side": side.lower(),
                         "order_type": "market_order",
@@ -2588,7 +3438,6 @@ class SniperBot:
 
                 if res.status_code == 200:
                     response_data = res.json()
-                    # Response can be a list (for spot) or dict (for futures)
                     if isinstance(response_data, list) and len(response_data) > 0:
                         order_id = response_data[0].get('id', 'DCX_ORDER_OK')
                     elif isinstance(response_data, dict):
@@ -2599,12 +3448,11 @@ class SniperBot:
                     return order_id
                 else:
                     self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {res.text}")
-                    # Try fallback to margin endpoint if spot fails (for certain pairs)
                     if market_type == "Spot" and "margin" not in endpoint:
                         self.log("⚠️ Spot order failed, trying Margin API...")
                         margin_endpoint = "https://api.coindcx.com/exchange/v1/margin/create"
                         margin_payload = payload.copy()
-                        margin_payload['market'] = market_symbol  # same format
+                        margin_payload['market'] = market_symbol
                         margin_payload_str = json.dumps(margin_payload, separators=(',', ':'))
                         signature_margin = hmac.new(secret_bytes, margin_payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
                         headers_margin = headers.copy()
@@ -2630,13 +3478,13 @@ class SniperBot:
                 return order_id
             except Exception as e: self.log(f"❌ Zerodha Order Error: {str(e)}"); return None
 
-        if self.is_ib_connected and self.ib_bridge:
-            order_id, msg = self.ib_bridge.place_order(symbol, int(qty), side)
+        if exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
+            order_id, msg = self.fyers_bridge.place_order(symbol, qty, side)
             if order_id:
-                self.log(f"✅ IB Order: {msg}")
+                self.log(f"✅ Fyers Order Success! ID: {order_id}")
                 return order_id
             else:
-                self.log(f"❌ IB Order Failed: {msg}")
+                self.log(f"❌ Fyers Order Failed: {msg}")
                 return None
 
         try: 
@@ -2742,14 +3590,19 @@ class SniperBot:
         subset = subset[subset['expiry'] == closest_expiry]
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
         
-        if self.settings.get("hero_zero"):
-            otm_margin = spot * 0.003 
-            if opt_type == "CE": candidates = subset[subset['strike'] > (spot + otm_margin)]
-            else: candidates = subset[subset['strike'] < (spot - otm_margin)]
-            candidates = candidates.sort_values('dist_to_spot', ascending=True).head(15)
-        else: 
-            candidates = subset.sort_values('dist_to_spot', ascending=True).head(10)
-            
+        # Greeks filtering
+        time_to_expiry = (subset['expiry'].iloc[0] - today).days / 365.0
+        iv = 12  # Assume IV = 12% for Angel (you can fetch from API if available)
+        
+        candidates = subset.copy()
+        candidates['greeks_pass'] = candidates['strike'].apply(
+            lambda x: self.analyzer.filter_option_by_greeks(spot, x, time_to_expiry, iv, opt_type.lower())
+        )
+        candidates = candidates[candidates['greeks_pass']].sort_values('dist_to_spot', ascending=True)
+        
+        if candidates.empty and self.is_mock:
+            return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
+        
         for _, row in candidates.iterrows():
             ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
             if ltp is None and self.is_mock:
@@ -2760,6 +3613,25 @@ class SniperBot:
         if self.is_mock: return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
         return None, None, None, 0.0
 
+    def get_dynamic_lot_multiplier(self):
+        win_streak = st.session_state.win_streak
+        loss_streak = st.session_state.loss_streak
+        if win_streak >= 3:
+            return 1.2
+        elif loss_streak >= 2:
+            return 0.5
+        else:
+            return 1.0
+
+    def apply_slippage(self, price, side):
+        if self.is_mock:
+            slippage = price * 0.0005
+            if side in ["BUY", "BUY_CE"]:
+                return price + slippage
+            else:
+                return price - slippage
+        return price
+
     def trading_loop(self):
         self.log("▶️ Engine thread started.")
         while self.state["is_running"]:
@@ -2769,13 +3641,43 @@ class SniperBot:
                 today_date = get_ist().strftime('%Y-%m-%d')
                 time_str = get_ist().strftime('%H:%M:%S')
                 self.state["loop_count"] = self.state.get("loop_count", 0) + 1
-                
-                if self.state["trades_today"] >= s['max_trades'] or self.state.get("daily_pnl", 0.0) <= -s.get("capital_protect", 999999):
+
+                # Safely get settings with defaults
+                index = s.get('index', 'NIFTY')
+                timeframe = s.get('timeframe', '5m')
+                is_mock_mode = s.get('paper_mode', True)
+                strategy = s.get('strategy', 'Momentum Breakout + S&R')
+                max_trades = s.get('max_trades', 5)
+                capital_protect = s.get('capital_protect', 999999)
+                ml_prob_threshold = s.get('ml_prob_threshold', 0.30)
+                signal_persistence = s.get('signal_persistence', 1)
+                mtf_confirm = s.get('mtf_confirm', False)
+                hero_zero = s.get('hero_zero', False)
+                three_five_seven = s.get('three_five_seven', False)
+                crypto_mode = s.get('crypto_mode', 'Spot')
+                leverage = s.get('leverage', 1)
+                show_inr_crypto = s.get('show_inr_crypto', True)
+                custom_code = s.get('custom_code', '')
+                tv_passphrase = s.get('tv_passphrase', 'SHREE123')
+                min_signal_strength = s.get('min_signal_strength', 30)
+                sl_pts = s.get('sl_pts', 20)
+                tsl_pts = s.get('tsl_pts', 15)
+                tgt_pts = s.get('tgt_pts', 15)
+                max_capital = s.get('max_capital', 15000)
+                lots = s.get('lots', 1)
+
+                if self.state["trades_today"] >= max_trades or self.state.get("daily_pnl", 0.0) <= -capital_protect:
                     self.state["is_running"] = False
                     break
 
-                index, timeframe, is_mock_mode, strategy = s['index'], s['timeframe'], s['paper_mode'], s['strategy']
-                
+                # Determine which indices to trade (FOMO mode placeholder – can be expanded later)
+                indices_to_trade = [index]
+
+                for current_index in indices_to_trade:
+                    # For simplicity, we'll process only the primary index
+                    pass
+
+                # Use the primary index
                 is_open, mkt_msg = get_market_status(index)
                 if not is_open:
                     time.sleep(10)
@@ -2784,6 +3686,7 @@ class SniperBot:
                 exch, token = self.get_token_info(index)
                 is_mt5_asset = (exch == "MT5")
                 is_crypto = (exch in ["COINDCX", "DELTA"])
+                is_fyers = (exch == "FYERS")
 
                 if index in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]:
                     cutoff_time = dt.time(15, 15)
@@ -2798,7 +3701,8 @@ class SniperBot:
                 df_candles = self.get_historical_data(exch, token, symbol=index, interval=timeframe) if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval=timeframe)
                 
                 lot_size = LOT_SIZES.get(index, 1)
-                actual_qty = s['lots'] * lot_size
+                dynamic_mult = self.get_dynamic_lot_multiplier()
+                actual_qty = lots * lot_size * dynamic_mult
                 
                 if df_candles is not None and not df_candles.empty:
                     scalp_signal = self.scalper.scalp_signal(df_candles)
@@ -2842,12 +3746,12 @@ class SniperBot:
                     self.state["latest_candle"] = last_candle.to_dict()
                     
                     if strategy == "Keyword Rule Builder":
-                        trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_keyword_strategy(df_candles, s.get('custom_code', ''), index)
+                        trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_keyword_strategy(df_candles, custom_code, index)
                     elif strategy == "Machine Learning":
                         if ml_predictor.should_retrain(df_candles):
                             ml_predictor.train(df_candles)
-                        prob_threshold = s.get('ml_prob_threshold', 0.30)
-                        persistence = s.get('signal_persistence', 1)
+                        prob_threshold = ml_prob_threshold
+                        persistence = signal_persistence
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_ml_strategy(
                             df_candles, index, prob_threshold, persistence
                         )
@@ -2861,9 +3765,9 @@ class SniperBot:
                     else:  # Momentum Breakout + S&R
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
 
-                    if strategy == "Machine Learning" and signal != "WAIT" and s.get('signal_persistence', 1) > 1:
+                    if strategy == "Machine Learning" and signal != "WAIT" and signal_persistence > 1:
                         self.state["signal_history"].append(signal)
-                        persistence = s.get('signal_persistence', 1)
+                        persistence = signal_persistence
                         if len(self.state["signal_history"]) >= persistence:
                             recent = list(self.state["signal_history"])[-persistence:]
                             if all(x == signal for x in recent):
@@ -2875,7 +3779,7 @@ class SniperBot:
                     else:
                         self.state["signal_history"].clear()
 
-                    if s.get("mtf_confirm") and signal != "WAIT" and strategy != "TradingView Webhook":
+                    if mtf_confirm and signal != "WAIT" and strategy != "TradingView Webhook":
                         df_htf = self.get_historical_data(exch, token, symbol=index, interval="15m") if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval="15m")
                         if df_htf is not None and len(df_htf) > 5:
                             htf_ema = df_htf['close'].ewm(span=9).mean().iloc[-1]
@@ -2889,9 +3793,9 @@ class SniperBot:
                                 trend = "MTF Blocked: 15m Bullish"
                                 signal_strength = 0
 
-                    is_hz = s.get("hero_zero")
+                    is_hz = hero_zero
                     if is_hz and signal != "WAIT" and strategy != "TradingView Webhook":
-                        if not self.is_mock and not (is_mt5_asset or is_crypto):
+                        if not self.is_mock and not (is_mt5_asset or is_crypto or is_fyers):
                             live_oi, live_vol = self.get_market_data_oi(exch, token)
                             if live_vol < 50000: 
                                 signal = "WAIT"
@@ -2910,7 +3814,6 @@ class SniperBot:
                 else:
                     trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = "Waiting for Market Data", "WAIT", 0, 0, df_candles, 0, {}, 0
 
-                # Merge all indicator columns into df_chart for later rendering
                 if df_chart is not None and hasattr(df_chart, 'columns'):
                     temp_df = self.analyzer.calculate_indicators(df_chart, index in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
                     for col in temp_df.columns:
@@ -2928,30 +3831,33 @@ class SniperBot:
                     "latest_data": df_chart
                 })
 
-                if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time and signal_strength >= s.get('min_signal_strength', 50):
+                if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time and signal_strength >= min_signal_strength:
                     
                     if is_hz:
-                        qty, sizing_info = self.calculate_hero_zero_position(signal_strength, current_atr, spot, s['max_capital'])
+                        qty, sizing_info = self.calculate_hero_zero_position(signal_strength, current_atr, spot, max_capital)
                         self.log(f"📊 Hero/Zero Position Sizing: {sizing_info}")
                     else:
                         qty = actual_qty
                     
-                    if is_mt5_asset or (is_crypto and s.get('crypto_mode') != "Options"):
+                    if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers:
                         strike_sym = index
-                        if is_crypto and s.get('crypto_mode') == "Futures":
+                        if is_crypto and crypto_mode == "Futures":
                             if exch == "DELTA" and not strike_sym.endswith("USD"):
                                 strike_sym = f"{strike_sym}USD" 
                         strike_token, strike_exch = strike_sym, exch
                         entry_ltp = spot
                     else:
-                        max_prem = s['max_capital'] / qty if qty > 0 else 0
+                        max_prem = max_capital / qty if qty > 0 else 0
                         strike_sym, strike_token, strike_exch, entry_ltp = self.get_strike(index, spot, signal, max_prem)
                     
                     if strike_sym and entry_ltp:
-                        trade_type = "CE" if signal == "BUY_CE" else "PE"
-                        if is_mt5_asset or is_crypto: trade_type = "BUY" if signal == "BUY_CE" else "SELL"
+                        if is_mock_mode:
+                            entry_ltp = self.apply_slippage(entry_ltp, signal)
 
-                        if s.get('three_five_seven', False) and current_atr > 0:
+                        trade_type = "CE" if signal == "BUY_CE" else "PE"
+                        if is_mt5_asset or is_crypto or is_fyers: trade_type = "BUY" if signal == "BUY_CE" else "SELL"
+
+                        if three_five_seven and current_atr > 0:
                             if trade_type in ["CE", "BUY"]:
                                 dynamic_sl = entry_ltp - current_atr * 1.5
                                 tp1 = entry_ltp + current_atr * 3
@@ -2964,15 +3870,15 @@ class SniperBot:
                                 tp3 = entry_ltp - current_atr * 7
                         else:
                             if trade_type == "SELL":
-                                dynamic_sl = entry_ltp + s['sl_pts']
-                                tp1 = entry_ltp - s['tgt_pts']
-                                tp2 = entry_ltp - (s['tgt_pts'] * 2)
-                                tp3 = entry_ltp - (s['tgt_pts'] * 3)
+                                dynamic_sl = entry_ltp + sl_pts
+                                tp1 = entry_ltp - tgt_pts
+                                tp2 = entry_ltp - (tgt_pts * 2)
+                                tp3 = entry_ltp - (tgt_pts * 3)
                             else:
-                                dynamic_sl = entry_ltp - s['sl_pts'] 
-                                tp1 = entry_ltp + s['tgt_pts']
-                                tp2 = entry_ltp + (s['tgt_pts'] * 2)
-                                tp3 = entry_ltp + (s['tgt_pts'] * 3)
+                                dynamic_sl = entry_ltp - sl_pts 
+                                tp1 = entry_ltp + tgt_pts
+                                tp2 = entry_ltp + (tgt_pts * 2)
+                                tp3 = entry_ltp + (tgt_pts * 3)
 
                         new_trade = {
                             "symbol": strike_sym, "token": strike_token, "exch": strike_exch, 
@@ -3012,9 +3918,11 @@ class SniperBot:
                         if ltp is None and self.is_mock:
                             delta = (spot - self.state["spot"]) * (0.5 if trade['type'] in ["CE", "BUY"] else -0.5)
                             ltp = trade['entry'] + delta + np.random.uniform(-1, 2)
+                            ltp = self.apply_slippage(ltp, trade['type'])
                     else:
                         delta = (spot - self.state["spot"]) * (0.5 if trade['type'] in ["CE", "BUY"] else -0.5) 
                         ltp = trade['entry'] + delta + np.random.uniform(-1, 2)
+                        ltp = self.apply_slippage(ltp, trade['type'])
                         
                     if ltp:
                         if trade['type'] == "SELL":
@@ -3027,9 +3935,8 @@ class SniperBot:
                         self.state["active_trade"]["current_ltp"] = ltp
                         self.state["active_trade"]["floating_pnl"] = pnl
                         
-                        # Minimum profit threshold for trailing stop (0.5% of entry)
                         min_profit = trade['entry'] * 0.005
-                        profit = pnl if trade['type'] in ["CE", "BUY"] else -pnl  # profit in trade direction
+                        profit = pnl if trade['type'] in ["CE", "BUY"] else -pnl
                         
                         if trade.get('is_hz'):
                             profit_pct = (ltp - trade['entry']) / trade['entry'] * 100 if trade['type'] in ["CE", "BUY"] else (trade['entry'] - ltp) / trade['entry'] * 100
@@ -3074,9 +3981,8 @@ class SniperBot:
                                 lowest = trade.get('lowest_price', trade['entry'])
                                 if ltp < lowest:
                                     trade['lowest_price'] = ltp
-                                    # Only trail if profit exceeds min_profit
                                     if profit > min_profit:
-                                        tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                        tsl_buffer = tsl_pts * 1.5 if "Trend Rider" in strategy else tsl_pts
                                         new_sl = ltp + tsl_buffer
                                         if new_sl < trade['sl']: trade['sl'] = new_sl
                                 
@@ -3095,7 +4001,7 @@ class SniperBot:
                                             else:                              new_sl = trade['sl']
                                             if new_sl > trade['sl']: trade['sl'] = new_sl
                                         else:
-                                            tsl_buffer = s['tsl_pts'] * 1.5 if "Trend Rider" in strategy else s['tsl_pts']
+                                            tsl_buffer = tsl_pts * 1.5 if "Trend Rider" in strategy else tsl_pts
                                             new_sl = ltp - tsl_buffer
                                             if new_sl > trade['sl']: trade['sl'] = new_sl
                                         
@@ -3107,9 +4013,9 @@ class SniperBot:
                             if reach_tp1:
                                 if index in ["NIFTY", "SENSEX", "XAUUSD"] or is_crypto:
                                     lots_held = trade['qty'] / lot_size
-                                    half_lots = int(lots_held / 2) if not (is_mt5_asset or is_crypto) else round(trade['qty']/2, 2)
+                                    half_lots = int(lots_held / 2) if not (is_mt5_asset or is_crypto or is_fyers) else round(trade['qty']/2, 2)
                                     if half_lots > 0:
-                                        qty_to_sell = half_lots * lot_size if not (is_mt5_asset or is_crypto) else half_lots
+                                        qty_to_sell = half_lots * lot_size if not (is_mt5_asset or is_crypto or is_fyers) else half_lots
                                         if not is_mock_mode:
                                             exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                             self.place_real_order(trade['symbol'], trade['token'], qty_to_sell, exec_side, trade['exch'])
@@ -3132,8 +4038,12 @@ class SniperBot:
                             
                             if hit_tp:
                                 self.state["sound_queue"].append("tp")
+                                st.session_state.win_streak += 1
+                                st.session_state.loss_streak = 0
                             elif hit_sl:
                                 self.state["sound_queue"].append("sl")
+                                st.session_state.loss_streak += 1
+                                st.session_state.win_streak = 0
                             
                             win_text = "profit👍" if pnl > 0 else "sl hit 🛑"
                             if trade['type'] == "SELL":
@@ -3184,7 +4094,7 @@ class SniperBot:
                             self.state["active_trade"] = None
             except Exception as e:
                 self.log(f"⚠️ Loop Error: {str(e)}")
-            time.sleep(2)
+            time.sleep(5)
 
 # ==========================================
 # STREAMLIT UI - LOGIN SCREEN
@@ -3194,7 +4104,6 @@ if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("ui
         alert = st.session_state.bot.state["ui_popups"].popleft()
         st.toast(alert.get("message", ""), icon="🔔")
 
-# Play sounds from queue
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("sound_queue"):
     while st.session_state.bot.state["sound_queue"]:
         sound_type = st.session_state.bot.state["sound_queue"].popleft()
@@ -3222,7 +4131,7 @@ if not getattr(st.session_state, "bot", None):
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("👆 Authenticate & Connect", type="primary", use_container_width=True):
                     creds = load_creds(USER_ID)
-                    if creds and (creds.get("client_id") or creds.get("zerodha_api") or creds.get("coindcx_api") or creds.get("delta_api")):
+                    if creds and (creds.get("client_id") or creds.get("zerodha_api") or creds.get("coindcx_api") or creds.get("delta_api") or creds.get("fyers_client_id")):
                         temp_bot = SniperBot(
                             api_key=creds.get("angel_api", ""), client_id=creds.get("client_id"), pwd=creds.get("pwd"), 
                             totp_secret=creds.get("totp_secret"), mt5_acc=creds.get("mt5_acc"), 
@@ -3230,8 +4139,9 @@ if not getattr(st.session_state, "bot", None):
                             zerodha_api=creds.get("zerodha_api"), zerodha_secret=creds.get("zerodha_secret"),
                             coindcx_api=creds.get("coindcx_api"), coindcx_secret=creds.get("coindcx_secret"),
                             delta_api=creds.get("delta_api"), delta_secret=creds.get("delta_secret"),
-                            ib_host=creds.get("ib_host", ""), ib_port=creds.get("ib_port", 7497), ib_client_id=creds.get("ib_client_id", 1),
-                            is_mock=False
+                            is_mock=False,
+                            tg_bot_token=creds.get("tg_bot_token", ""), tg_allowed_users=creds.get("tg_allowed_users", ""),
+                            fyers_client_id=creds.get("fyers_client_id", ""), fyers_secret=creds.get("fyers_secret", ""), fyers_token=creds.get("fyers_token", "")
                         )
                         temp_bot.system_user_id = USER_ID
                         with st.spinner("Authenticating via Cloud..."):
@@ -3243,9 +4153,7 @@ if not getattr(st.session_state, "bot", None):
                                 play_sound_ui("entry")
                                 if keep_signed:
                                     st.query_params["user_id"] = USER_ID
-                                    play_sound_ui("entry")
-                                    st.rerun()
-                                # No explicit rerun – natural rerun after button click
+                                st.rerun()
                             else: st.error("❌ Login Failed! Check API details or TOTP.")
                     else: st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
             elif auth_mode == "🕉️ Real Trading":
@@ -3257,7 +4165,9 @@ if not getattr(st.session_state, "bot", None):
                 MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL = "", "", "", ""
                 DCX_API, DCX_SEC = "", ""
                 DELTA_API, DELTA_SEC = "", ""
-                IB_HOST, IB_PORT, IB_CLIENT_ID = "", 7497, 1
+                FYERS_CLIENT_ID, FYERS_SECRET, FYERS_TOKEN = "", "", ""
+                TG_BOT_TOKEN = ""
+                TG_ALLOWED_USERS = ""
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
                     with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
@@ -3303,19 +4213,20 @@ if not getattr(st.session_state, "bot", None):
                                                     help="Use a web API service like mtapi.io or your own MT5 gateway")
                 with st.container(border=True):
                     col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=interactivebrokers.com&sz=128", width=40)
-                    with col_t: use_ib = st.toggle("Interactive Brokers", value=bool(creds.get("ib_host")))
-                    if use_ib:
-                        col_i1, col_i2 = st.columns(2)
-                        with col_i1: IB_HOST = st.text_input("IB Gateway/TWS Host", value=creds.get("ib_host", "127.0.0.1"))
-                        with col_i2: IB_PORT = st.number_input("Port", value=creds.get("ib_port", 7497), step=1)
-                        IB_CLIENT_ID = st.number_input("Client ID", value=creds.get("ib_client_id", 1), step=1)
+                    with col_img: st.image("https://www.google.com/s2/favicons?domain=fyers.in&sz=128", width=40)
+                    with col_t: use_fyers = st.toggle("Fyers", value=bool(creds.get("fyers_client_id")))
+                    if use_fyers:
+                        FYERS_CLIENT_ID = st.text_input("Fyers Client ID", value=creds.get("fyers_client_id", ""))
+                        FYERS_SECRET = st.text_input("Fyers Secret Key", type="password", value=creds.get("fyers_secret", ""))
+                        FYERS_TOKEN = st.text_input("Fyers Access Token", type="password", value=creds.get("fyers_token", ""))
                 st.divider()
-                with st.expander("📱 Notifications (Telegram/WhatsApp)"):
-                    TG_TOKEN = st.text_input("Telegram Bot Token", value=creds.get("tg_token", ""))
-                    TG_CHAT = st.text_input("Telegram Chat ID", value=creds.get("tg_chat", ""))
+                with st.expander("📱 Notifications & Control (Telegram/WhatsApp)"):
+                    TG_TOKEN = st.text_input("Telegram Bot Token (for alerts)", value=creds.get("tg_token", ""))
+                    TG_CHAT = st.text_input("Telegram Chat ID (for alerts)", value=creds.get("tg_chat", ""))
                     WA_PHONE = st.text_input("WhatsApp Phone", value=creds.get("wa_phone", ""))
                     WA_API = st.text_input("WhatsApp API Key", value=creds.get("wa_api", ""))
+                    TG_BOT_TOKEN = st.text_input("Telegram Control Bot Token", value=creds.get("tg_bot_token", ""), help="Bot for commands like /stop, /status")
+                    TG_ALLOWED_USERS = st.text_input("Allowed Telegram User IDs (comma separated)", value=creds.get("tg_allowed_users", ""))
                 SAVE_CREDS = st.checkbox("Remember Credentials Securely (Cloud DB)", value=True)
                 keep_signed = st.checkbox("Keep me signed in (auto‑login using URL)")
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -3332,23 +4243,22 @@ if not getattr(st.session_state, "bot", None):
                             request_token=Z_REQ if use_zerodha else "",
                             coindcx_api=DCX_API if use_coindcx else "", coindcx_secret=DCX_SEC if use_coindcx else "",
                             delta_api=DELTA_API if use_delta else "", delta_secret=DELTA_SEC if use_delta else "",
-                            ib_host=IB_HOST if use_ib else "", ib_port=IB_PORT if use_ib else 7497, ib_client_id=IB_CLIENT_ID if use_ib else 1,
-                            is_mock=False
+                            is_mock=False,
+                            tg_bot_token=TG_BOT_TOKEN, tg_allowed_users=TG_ALLOWED_USERS,
+                            fyers_client_id=FYERS_CLIENT_ID if use_fyers else "", fyers_secret=FYERS_SECRET if use_fyers else "", fyers_token=FYERS_TOKEN if use_fyers else ""
                         )
                         temp_bot.system_user_id = USER_ID
                         with st.spinner("Authenticating Secure Connections..."):
                             if temp_bot.login():
                                 temp_bot.state["daily_pnl"] = temp_bot.load_daily_pnl()
-                                if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC, IB_HOST, IB_PORT, IB_CLIENT_ID)
+                                if SAVE_CREDS: save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC, TG_BOT_TOKEN, TG_ALLOWED_USERS, FYERS_CLIENT_ID, FYERS_SECRET, FYERS_TOKEN)
                                 st.session_state.bot = temp_bot
                                 st.session_state.audio_enabled = True
                                 unlock_audio()
                                 play_sound_ui("entry")
                                 if keep_signed:
                                     st.query_params["user_id"] = USER_ID
-                                    play_sound_ui("entry")
-                                    st.rerun()
-                                # No explicit rerun
+                                st.rerun()
                             else:
                                 err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
                                 st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
@@ -3364,9 +4274,7 @@ if not getattr(st.session_state, "bot", None):
                     st.session_state.audio_enabled = True
                     unlock_audio()
                     play_sound_ui("entry")
-                    play_sound_ui("entry")
                     st.rerun()
-                    # No explicit rerun
             st.markdown("</div>", unsafe_allow_html=True)
 
 # --- MAIN TERMINAL ---
@@ -3388,13 +4296,11 @@ else:
         if bot.coindcx_api: connected.append("CoinDCX")
         if bot.delta_api: connected.append("Delta")
         if bot.is_mt5_connected: connected.append("MT5")
-        if bot.is_ib_connected: connected.append("IB")
+        if bot.is_fyers_connected: connected.append("Fyers")
         if bot.is_mock: connected.append("Paper")
         st.markdown(f"**🔌 Connected:** {', '.join(connected) if connected else 'None'}")
     with head_c3:
         if st.button("🚪 LOGOUT", use_container_width=True):
-            BACKGROUND_BOT.stop_background_bot()
-            STOP_EVENT.set()
             bot.state["is_running"] = False
             st.session_state.clear()
             st.query_params.clear()
@@ -3415,12 +4321,18 @@ else:
             st.success("🔊 Audio is ON")
         
         st.markdown("**1. Market Setup**")
-        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5", "Interactive Brokers"], index=0)
+        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5", "Fyers"], index=0)
         
         st.divider()
         st.markdown("**📈 High‑Profit Strategies**")
         martingale_mode = st.selectbox("Martingale Mode", ["Off", "Martingale", "Anti‑Martingale"], index=0)
-        # Scalper always active – no toggle
+        
+        # FOMO Toggle (placeholder, not fully implemented)
+        st.markdown("**🚀 FOMO Mode**")
+        fomo_enabled = st.toggle("Enable FOMO (Trade Nifty, Bank Nifty, Sensex simultaneously)", value=st.session_state.fomo_mode)
+        if fomo_enabled != st.session_state.fomo_mode:
+            st.session_state.fomo_mode = fomo_enabled
+            st.rerun()
         
         CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE").upper().strip()
         st.session_state.custom_stock = CUSTOM_STOCK
@@ -3430,8 +4342,9 @@ else:
         if BROKER in ["CoinDCX", "Delta Exchange"]:
             valid_assets = [a for a in all_assets if "USD" in a or "USDT" in a]
         elif BROKER in ["Angel One", "Zerodha"]:
-            valid_assets = [a for a in all_assets if a in INDEX_TOKENS or a in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] or a.isalpha()]
-        elif BROKER == "Interactive Brokers":
+            valid_assets = [a for a in all_assets if (a in INDEX_TOKENS or a in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] or a.isalpha()) and "USD" not in a and "USDT" not in a]
+        elif BROKER == "Fyers":
+            # Fyers supports equities (NSE), indices (NSE), commodities (MCX), forex (NSE?), etc. We'll allow all assets and let the user ensure correct symbol.
             valid_assets = all_assets
         else:
             valid_assets = [a for a in all_assets if a in ["XAUUSD", "EURUSD", "BTCUSD", "ETHUSD", "SOLUSD"]]
@@ -3487,16 +4400,16 @@ else:
         min_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
         step_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
         LOTS = st.number_input(
-            "Lots",
+            "Base Lots",
             min_value=min_val,
             max_value=10000.0,
             value=1.0,
             step=step_val,
             key=f"lots_input_{INDEX}",
-            help="Number of lots to trade"
+            help="Base number of lots. Dynamic multiplier (win-streak) will adjust actual quantity."
         )
         actual_qty = LOTS * lot_size
-        st.caption(f"Total quantity: {actual_qty:.2f} units")
+        st.caption(f"Base quantity: {actual_qty:.2f} units")
         
         col_s1, col_s2 = st.columns(2)
         with col_s1:
@@ -3603,7 +4516,6 @@ else:
                     else: 
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
                     
-                    # Merge all indicator columns
                     temp_df = bot.analyzer.calculate_indicators(df_preload, INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
                     for col in temp_df.columns:
                         if col not in df_preload.columns:
@@ -3619,7 +4531,7 @@ else:
     if not is_mkt_open: 
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 HERO/ZERO SCANNER"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 HERO/ZERO SCANNER", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT"])
 
     # ========== TAB1 : DASHBOARD ==========
     with tab1:
@@ -3627,19 +4539,15 @@ else:
         english_news = st.session_state.english_news
 
         if not kannada_news:
-            kannada_news = ["📰 Loading Kannada news... (first fetch in progress)"]
+            kannada_news = [generate_market_prediction(INDEX)]
+        # Use separate CSS classes for different speeds
+        ticker_text = " 🔹 ".join(kannada_news)
+        st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+
         if not english_news:
-            english_news = ["📰 Loading English news... (first fetch in progress)"]
-
-        kannada_news = fetch_kannada_news(INDEX)
-        if kannada_news:
-            ticker_text = " 🔹 ".join(kannada_news)
-            st.markdown(f'<div class="news-ticker"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-
-        english_news = fetch_english_news(INDEX)
-        if english_news:
-            ticker_text = " 🔹 ".join(english_news)
-            st.markdown(f'<div class="news-ticker" style="background:#0f172a;"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+            english_news = [generate_market_prediction(INDEX)]
+        ticker_text = " 🔹 ".join(english_news)
+        st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
 
         daily_pnl = bot.state.get("daily_pnl", 0.0)
         pnl_color = "#22c55e" if daily_pnl >= 0 else "#ef4444"
@@ -3649,6 +4557,7 @@ else:
         if exch == "MT5": term_type = "🌍 MT5 Forex Terminal (Web Bridge)"
         elif exch == "COINDCX": term_type = f"🕉️ CoinDCX {CRYPTO_MODE}"
         elif exch == "DELTA": term_type = f"🔺 Delta Exchange {CRYPTO_MODE}"
+        elif exch == "FYERS": term_type = f"📈 Fyers"
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
         
         st.markdown(f"""
@@ -3694,10 +4603,12 @@ else:
                 bot.state["is_running"] = False
                 st.rerun()
         with c_kill:
-            if st.button("☠️", use_container_width=True):
+            if st.button("☠️ KILL SWITCH", use_container_width=True):  # Changed to kill switch
                 bot.state["is_running"] = False
-                if bot.state["active_trade"]: bot.state["manual_exit"] = True
+                if bot.state["active_trade"]:
+                    bot.state["manual_exit"] = True
                 st.toast("System Terminated & Trades Closed", icon="☠️")
+                st.rerun()
 
         st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
         fomo_signals = fomo_scanner.scan()
@@ -3902,6 +4813,19 @@ else:
             if 'vwap' in chart_df.columns:
                 vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
                 if vwap_data: chart_series.append({"type": 'Line', "data": vwap_data, "options": { "color": '#ff9800', "lineWidth": 2, "title": 'VWAP' }})
+            if 'anchored_vwap' in chart_df.columns:
+                av_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
+                if av_data: chart_series.append({"type": 'Line', "data": av_data, "options": { "color": '#8e44ad', "lineWidth": 2, "title": 'Anchored VWAP' }})
+            if 'supertrend' in chart_df.columns and 'supertrend_direction' in chart_df.columns:
+                st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
+                if st_data: chart_series.append({"type": 'Line', "data": st_data, "options": { "color": '#e67e22', "lineWidth": 1, "title": 'Supertrend' }})
+            if 'bb_upper' in chart_df.columns and 'bb_lower' in chart_df.columns:
+                bb_upper_data = chart_df[['time', 'bb_upper']].dropna().rename(columns={'bb_upper': 'value'}).to_dict('records')
+                bb_lower_data = chart_df[['time', 'bb_lower']].dropna().rename(columns={'bb_lower': 'value'}).to_dict('records')
+                if bb_upper_data:
+                    chart_series.append({"type": 'Line', "data": bb_upper_data, "options": { "color": '#3498db', "lineWidth": 1, "title": 'BB Upper' }})
+                if bb_lower_data:
+                    chart_series.append({"type": 'Line', "data": bb_lower_data, "options": { "color": '#3498db', "lineWidth": 1, "title": 'BB Lower' }})
             ema_col = None
             if 'ema_fast' in chart_df.columns:
                 ema_col = 'ema_fast'
@@ -4365,25 +5289,49 @@ else:
                 - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                 """)
 
-    # ========== Bottom Dock ==========
-    def cycle_asset():
-        assets = st.session_state.get('asset_options', list(LOT_SIZES.keys()))
-        if st.session_state.sb_index_input in assets:
-            st.session_state.sb_index_input = assets[(assets.index(st.session_state.sb_index_input) + 1) % len(assets)]
+    # ========== TAB6 : SAFE INVESTMENTS ==========
+    with tab6:
+        safe_investment_suggestions()
+
+    # ========== TAB7 : FIA ASSISTANT ==========
+    with tab7:
+        st.subheader("🤖 FIA Assistant – Market Analysis")
+        if bot.state.get("latest_data") is not None:
+            fia_assistant(bot.state["latest_data"], INDEX)
         else:
-            st.session_state.sb_index_input = assets[0]
+            st.info("No chart data available yet. Start the engine or refresh.")
 
-    def cycle_strat():
-        st.session_state.sb_strat_input = STRAT_LIST[(STRAT_LIST.index(st.session_state.sb_strat_input) + 1) % len(STRAT_LIST)]
+    # ========== Bottom Dock ==========
+    def toggle_engine():
+        if bot.state["is_running"]:
+            bot.state["is_running"] = False
+        else:
+            bot.state["is_running"] = True
+            t = threading.Thread(target=bot.trading_loop, daemon=True)
+            add_script_run_ctx(t)
+            t.start()
+        st.rerun()
 
+    def kill_switch():
+        bot.state["is_running"] = False
+        if bot.state["active_trade"]:
+            bot.state["manual_exit"] = True
+        st.toast("Kill switch activated! Trades closed.", icon="☠️")
+        st.rerun()
+
+    # Remove old HTML dock and use Streamlit buttons with custom CSS
+    st.markdown('<div class="bottom-dock">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.button("◀️", key="dock_back", on_click=cycle_asset, help="Cycle Asset")
+        # ◀️ button toggles engine start/stop
+        if st.button("◀️", key="dock_start_stop", help="Start/Stop Engine"):
+            toggle_engine()
     with col2:
-        st.button("🏠", key="dock_home", on_click=lambda: st.rerun(), help="Refresh")
+        # Refresh button
+        if st.button("🏠", key="dock_refresh", help="Refresh Dashboard"):
+            st.rerun()
     with col3:
-        st.button("🔲", key="dock_recent", on_click=cycle_strat, help="Cycle Strategy")
-
-    if bot.state.get("is_running"):
-        time.sleep(2)
-        st.rerun()
+        # Kill switch button
+        if st.button("🔲", key="dock_kill", help="Kill Switch (Close All Trades and Stop)"):
+            kill_switch()
+    st.markdown('</div>', unsafe_allow_html=True)
