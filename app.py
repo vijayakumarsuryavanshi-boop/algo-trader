@@ -68,6 +68,7 @@ try:
 except ImportError:
     HAS_MT5_LINUX = False
 
+# plyer notifications – will be disabled in cloud (we'll ignore silently)
 try:
     from plyer import notification
     HAS_NOTIFY = True
@@ -102,11 +103,12 @@ except ImportError:
     HAS_FYERS = False
 
 # ==========================================
-# SOUND FUNCTIONS
+# SOUND FUNCTIONS (work in browser, no desktop dependencies)
 # ==========================================
 def play_sound_ui(sound_type="entry"):
     if not st.session_state.get("audio_enabled", False):
         return
+    # Use a reliable beep sound from a CDN
     beep_url = "https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3"
     components.html(f"""
         <audio autoplay>
@@ -115,6 +117,7 @@ def play_sound_ui(sound_type="entry"):
     """, height=0)
 
 def unlock_audio():
+    # Unlock audio on first user interaction (required by some browsers)
     components.html("""
         <audio autoplay>
             <source src="data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTG9uZWx5TWVkaWEuY29tIFNvdW5kIEVmZmVjdHMAAAAAAFRBTkNFAAAAQ29udGVudCBUaGF0IFdvcmtzLCBJbmMuAAAAMzYwMDAwMDBOT1JNQUwAAAAjVGhhdHMgYSB0ZXN0IHNvdW5kLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" type="audio/mp3">
@@ -1175,7 +1178,7 @@ class ScalpingModule:
         return None
 
 # ==========================================
-# TECHNICAL ANALYZER (full definition with Liquidity Sweep / ORB / Trap)
+# TECHNICAL ANALYZER (with robust pandas_ta handling)
 # ==========================================
 class TechnicalAnalyzer:
     def get_atr(self, df, period=14):
@@ -1247,23 +1250,55 @@ class TechnicalAnalyzer:
             if 'ema21' not in df.columns:
                 df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
 
-            # Supertrend
+            # Supertrend - robust handling
             if HAS_PTA:
-                st = ta.supertrend(df['high'], df['low'], df['close'], length=10, multiplier=3)
-                if st is not None:
-                    df['supertrend'] = st['SUPERT_10_3.0']
-                    df['supertrend_direction'] = st['SUPERTd_10_3.0']
+                try:
+                    st = ta.supertrend(df['high'], df['low'], df['close'], length=10, multiplier=3)
+                    if st is not None and isinstance(st, pd.DataFrame):
+                        # Find columns that start with SUPERT_ and SUPERTd_
+                        supert_cols = [col for col in st.columns if col.startswith('SUPERT_')]
+                        supertd_cols = [col for col in st.columns if col.startswith('SUPERTd_')]
+                        if supert_cols and supertd_cols:
+                            df['supertrend'] = st[supert_cols[0]]
+                            df['supertrend_direction'] = st[supertd_cols[0]]
+                        else:
+                            df['supertrend'] = df['close']
+                            df['supertrend_direction'] = 1
+                    else:
+                        df['supertrend'] = df['close']
+                        df['supertrend_direction'] = 1
+                except Exception:
+                    df['supertrend'] = df['close']
+                    df['supertrend_direction'] = 1
             else:
                 df['supertrend'] = df['close']
                 df['supertrend_direction'] = 1
 
-            # Bollinger Bands
+            # Bollinger Bands - robust handling
             if HAS_PTA:
-                bb = ta.bbands(df['close'], length=20, std=2)
-                if bb is not None:
-                    df['bb_upper'] = bb['BBU_20_2.0']
-                    df['bb_middle'] = bb['BBM_20_2.0']
-                    df['bb_lower'] = bb['BBL_20_2.0']
+                try:
+                    bb = ta.bbands(df['close'], length=20, std=2)
+                    if bb is not None and isinstance(bb, pd.DataFrame):
+                        # Expected columns: BBL_20_2.0, BBM_20_2.0, BBU_20_2.0, BBB_20_2.0, etc.
+                        bb_lower_cols = [col for col in bb.columns if col.startswith('BBL_')]
+                        bb_mid_cols = [col for col in bb.columns if col.startswith('BBM_')]
+                        bb_upper_cols = [col for col in bb.columns if col.startswith('BBU_')]
+                        if bb_lower_cols and bb_mid_cols and bb_upper_cols:
+                            df['bb_lower'] = bb[bb_lower_cols[0]]
+                            df['bb_middle'] = bb[bb_mid_cols[0]]
+                            df['bb_upper'] = bb[bb_upper_cols[0]]
+                        else:
+                            df['bb_upper'] = df['close'] * 1.02
+                            df['bb_middle'] = df['close']
+                            df['bb_lower'] = df['close'] * 0.98
+                    else:
+                        df['bb_upper'] = df['close'] * 1.02
+                        df['bb_middle'] = df['close']
+                        df['bb_lower'] = df['close'] * 0.98
+                except Exception:
+                    df['bb_upper'] = df['close'] * 1.02
+                    df['bb_middle'] = df['close']
+                    df['bb_lower'] = df['close'] * 0.98
             else:
                 df['bb_upper'] = df['close'] * 1.02
                 df['bb_middle'] = df['close']
@@ -1337,6 +1372,7 @@ class TechnicalAnalyzer:
             for col in ['liquidity_sweep_up','liquidity_sweep_down','trap_up','trap_down','orb_breakout_up','orb_breakout_down']:
                 df[col] = False
             return df
+
     def calculate_fib_zones(self, df, lookback=100):
         if df is None or len(df) < 10:
             return 0, 0, 0, 0
@@ -1933,9 +1969,16 @@ class MLPredictor:
         if HAS_PTA:
             bbands = ta.bbands(df['close'], length=20, std=2)
             if bbands is not None:
-                df['bb_lower'] = bbands.iloc[:, 0]
-                df['bb_middle'] = bbands.iloc[:, 1]
-                df['bb_upper'] = bbands.iloc[:, 2]
+                # Use the first found columns
+                lower_cols = [col for col in bbands.columns if col.startswith('BBL_')]
+                mid_cols = [col for col in bbands.columns if col.startswith('BBM_')]
+                upper_cols = [col for col in bbands.columns if col.startswith('BBU_')]
+                if lower_cols and mid_cols and upper_cols:
+                    df['bb_lower'] = bbands[lower_cols[0]]
+                    df['bb_middle'] = bbands[mid_cols[0]]
+                    df['bb_upper'] = bbands[upper_cols[0]]
+                else:
+                    df['bb_lower'] = df['bb_middle'] = df['bb_upper'] = df['close']
             else:
                 df['bb_lower'] = df['bb_middle'] = df['bb_upper'] = df['close']
         else:
@@ -2784,9 +2827,12 @@ class SniperBot:
 
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
+        # plyer notification – silently ignore if not available
         if HAS_NOTIFY:
-            try: notification.notify(title=title, message=message, app_name="QUANT", timeout=5)
-            except: pass
+            try:
+                notification.notify(title=title, message=message, app_name="QUANT", timeout=5)
+            except:
+                pass
         if self.tg_token and self.tg_chat:
             try: requests.get(f"https://api.telegram.org/bot{self.tg_token}/sendMessage", params={"chat_id": self.tg_chat, "text": f"<b>{title}</b>\n{message}", "parse_mode": "HTML"}, timeout=3)
             except: pass
