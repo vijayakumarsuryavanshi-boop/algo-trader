@@ -103,90 +103,56 @@ except ImportError:
     HAS_FYERS = False
 
 # ==========================================
-# ULTIMATE SOUND SYSTEM (iframe + Web Audio)
+# SIMPLE SOUND SYSTEM (Works in all browsers)
 # ==========================================
 def init_audio():
-    """Inject a hidden iframe that hosts the audio system."""
-    components.html("""
-        <iframe id="audioFrame" style="display:none;"></iframe>
+    """Inject a hidden audio element once."""
+    st.markdown("""
+        <audio id="beep-audio" preload="auto" style="display:none;">
+            <source src="https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3" type="audio/mpeg">
+        </audio>
         <script>
-        // Create and configure the iframe's content
-        var iframe = document.getElementById('audioFrame');
-        var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-        iframeDoc.open();
-        iframeDoc.write(`
-            <script>
-                let audioCtx = null;
-                let beepBuffer = null;
-
-                // Listen for messages from the parent window
-                window.addEventListener('message', function(event) {
-                    if (event.data === 'init') {
-                        // Create audio context if not exists
-                        if (!audioCtx) {
-                            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                            // Generate a simple beep buffer
-                            const sampleRate = audioCtx.sampleRate;
-                            const duration = 0.1; // 100 ms
-                            const frameCount = sampleRate * duration;
-                            const buffer = audioCtx.createBuffer(1, frameCount, sampleRate);
-                            const data = buffer.getChannelData(0);
-                            for (let i = 0; i < frameCount; i++) {
-                                data[i] = Math.sin(2 * Math.PI * 800 * i / sampleRate) * 0.1;
-                            }
-                            beepBuffer = buffer;
-                        }
-                        // Resume if suspended (unlock)
-                        if (audioCtx.state === 'suspended') {
-                            audioCtx.resume();
-                        }
-                        // Play a test beep to confirm unlock
-                        const source = audioCtx.createBufferSource();
-                        source.buffer = beepBuffer;
-                        source.connect(audioCtx.destination);
-                        source.start();
-                    } else if (event.data === 'beep') {
-                        // Play the beep if context is ready
-                        if (audioCtx && audioCtx.state === 'running' && beepBuffer) {
-                            const source = audioCtx.createBufferSource();
-                            source.buffer = beepBuffer;
-                            source.connect(audioCtx.destination);
-                            source.start();
-                        }
-                    }
-                });
-                // Notify parent that the audio system is ready
-                window.parent.postMessage('audioReady', '*');
-            <\/script>
-        `);
-        iframeDoc.close();
+        // Preload and unlock on first interaction
+        document.addEventListener('click', function unlockAudio() {
+            var audio = document.getElementById('beep-audio');
+            if (audio) {
+                audio.play().then(() => {
+                    audio.pause();
+                    audio.currentTime = 0;
+                }).catch(e => console.log("Audio unlock failed", e));
+            }
+            document.removeEventListener('click', unlockAudio);
+        }, { once: true });
         </script>
-    """, height=0)
+    """, unsafe_allow_html=True)
 
-def play_sound_ui(sound_type="entry"):
-    """Send a 'beep' message to the iframe."""
+def play_sound(sound_type="entry"):
+    """Play the beep sound (called from sound queue)."""
     if not st.session_state.get("audio_enabled", False):
         return
     components.html("""
         <script>
-        var iframe = document.getElementById('audioFrame');
-        if (iframe) {
-            iframe.contentWindow.postMessage('beep', '*');
+        var audio = document.getElementById('beep-audio');
+        if (audio) {
+            audio.currentTime = 0;
+            audio.play().catch(e => console.log("Play failed", e));
         }
         </script>
     """, height=0)
 
 def unlock_audio():
-    """Send 'init' message to the iframe to create and unlock audio context."""
+    """Call this on first user click to unlock audio."""
     components.html("""
         <script>
-        var iframe = document.getElementById('audioFrame');
-        if (iframe) {
-            iframe.contentWindow.postMessage('init', '*');
+        var audio = document.getElementById('beep-audio');
+        if (audio) {
+            audio.play().then(() => {
+                audio.pause();
+                audio.currentTime = 0;
+            }).catch(e => console.log("Unlock play failed", e));
         }
         </script>
     """, height=0)
-
 # ==========================================
 # LIVE NEWS FUNCTIONS (Kannada + English)
 # ==========================================
@@ -4369,7 +4335,7 @@ if not getattr(st.session_state, "bot", None):
                                 st.session_state.bot = temp_bot
                                 st.session_state.audio_enabled = True
                                 unlock_audio()
-                                play_sound_ui("entry")
+                              
                                 if keep_signed:
                                     st.query_params["user_id"] = USER_ID
                                 st.rerun()
@@ -5449,6 +5415,7 @@ else:
         if st.button("🔲", key="dock_kill", help="Kill Switch (Close All Trades and Stop)"):
             kill_switch()
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
