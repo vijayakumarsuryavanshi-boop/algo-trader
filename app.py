@@ -103,10 +103,10 @@ except ImportError:
     HAS_FYERS = False
 
 # ==========================================
-# SIMPLE SOUND SYSTEM (Hidden Audio Element)
+# SIMPLE SOUND SYSTEM (Works in all browsers)
 # ==========================================
 def init_audio():
-    """Inject hidden audio element once."""
+    """Inject a hidden audio element once."""
     st.markdown("""
         <audio id="beep-audio" preload="auto" style="display:none;">
             <source src="https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3" type="audio/mpeg">
@@ -140,7 +140,7 @@ def play_sound_ui(sound_type="entry"):
     """, height=0)
 
 def unlock_audio():
-    # Called on user click to ensure audio context is ready
+    """Call this on first user click to unlock audio."""
     components.html("""
         <script>
         var audio = document.getElementById('beep-audio');
@@ -454,7 +454,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
-# --- Audio system initialization (hidden audio element) ---
+# --- Audio system initialisation (run only once) ---
 if 'audio_system_injected' not in st.session_state:
     init_audio()
     st.session_state.audio_system_injected = True
@@ -827,238 +827,6 @@ class FyersBridge:
         except:
             pass
         return None
-
-# ==========================================
-# MT5 BRIDGE (unchanged, but keep)
-# ==========================================
-class MT5WebBridge:
-    def __init__(self, account=None, password=None, server=None, api_url=None):
-        self.account = account
-        self.password = password
-        self.server = server
-        self.api_url = api_url or "https://mt5-web-api.mtapi.io/v1"
-        self.session = requests.Session()
-        self.connected = False
-        self.token = None
-        self.use_direct_mt5 = HAS_MT5 and account and server
-        
-    def connect(self):
-        if self.use_direct_mt5:
-            try:
-                if mt5.initialize():
-                    if mt5.login(int(self.account), password=self.password, server=self.server):
-                        self.connected = True
-                        return True, "Connected via direct MT5"
-            except:
-                pass
-        
-        if HAS_MT5_LINUX and not self.connected:
-            try:
-                client = mt5linux.MT5Linux("localhost")
-                if client.initialize():
-                    self.client = client
-                    self.connected = True
-                    self.use_direct_mt5 = False
-                    return True, "Connected via MT5 Linux bridge"
-            except:
-                pass
-        
-        if not self.connected and self.api_url:
-            try:
-                response = self.session.post(
-                    f"{self.api_url}/auth",
-                    json={
-                        "login": int(self.account) if self.account else 0,
-                        "password": self.password,
-                        "server": self.server
-                    },
-                    timeout=10
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    self.token = data.get('token')
-                    self.connected = True
-                    self.use_direct_mt5 = False
-                    return True, "Connected via MT5 Web API"
-            except:
-                pass
-                
-        return False, "Could not connect to MT5"
-    
-    def get_live_price(self, symbol):
-        if self.use_direct_mt5 and mt5.initialize():
-            tick = mt5.symbol_info_tick(symbol)
-            if tick:
-                return (tick.bid + tick.ask) / 2.0
-        
-        if self.token:
-            try:
-                response = self.session.get(
-                    f"{self.api_url}/quote/{symbol}",
-                    headers={"Authorization": f"Bearer {self.token}"},
-                    timeout=5
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return (data.get('bid', 0) + data.get('ask', 0)) / 2
-            except:
-                pass
-        return None
-    
-    def place_order(self, symbol, volume, order_type, sl=None, tp=None):
-        if self.use_direct_mt5 and mt5.initialize():
-            request = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": symbol,
-                "volume": float(volume),
-                "type": mt5.ORDER_TYPE_BUY if order_type.upper() == "BUY" else mt5.ORDER_TYPE_SELL,
-                "price": 0.0,
-                "sl": sl if sl else 0,
-                "tp": tp if tp else 0,
-                "deviation": 20,
-                "magic": 234000,
-                "comment": "SHREE Algo",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
-            }
-            result = mt5.order_send(request)
-            if result.retcode == mt5.TRADE_RETCODE_DONE:
-                return result.order, f"Order placed: {result.order}"
-            return None, f"Failed: {result.comment}"
-        
-        if self.token:
-            try:
-                response = self.session.post(
-                    f"{self.api_url}/order",
-                    headers={"Authorization": f"Bearer {self.token}"},
-                    json={
-                        "symbol": symbol,
-                        "volume": float(volume),
-                        "type": order_type.upper(),
-                        "sl": sl if sl else 0,
-                        "tp": tp if tp else 0
-                    },
-                    timeout=10
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    return data.get('order_id'), "Order placed via web API"
-                else:
-                    return None, f"HTTP {response.status_code}: {response.text}"
-            except Exception as e:
-                return None, f"Exception: {e}"
-        
-        return None, "All MT5 connection methods failed"
-    
-    def get_historical_data(self, symbol, timeframe="M5", count=500):
-        timeframe_map = {
-            "1m": "M1", "5m": "M5", "15m": "M15", "30m": "M30",
-            "1h": "H1", "4h": "H4", "1d": "D1"
-        }
-        mt5_tf = timeframe_map.get(timeframe, "M5")
-        
-        if self.use_direct_mt5 and mt5.initialize():
-            mt5_tf_map = {
-                "M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15,
-                "M30": mt5.TIMEFRAME_M30, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4,
-                "D1": mt5.TIMEFRAME_D1
-            }
-            rates = mt5.copy_rates_from_pos(symbol, mt5_tf_map.get(mt5_tf, mt5.TIMEFRAME_M5), 0, count)
-            if rates is not None and len(rates) > 0:
-                df = pd.DataFrame(rates)
-                df['time'] = pd.to_datetime(df['time'], unit='s')
-                df.rename(columns={'time': 'timestamp', 'real_volume': 'volume'}, inplace=True)
-                df.index = df['timestamp']
-                return df
-        
-        if self.token:
-            try:
-                response = self.session.get(
-                    f"{self.api_url}/history/{symbol}",
-                    params={"timeframe": mt5_tf, "count": count},
-                    headers={"Authorization": f"Bearer {self.token}"},
-                    timeout=10
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    df = pd.DataFrame(data.get('rates', []))
-                    if not df.empty:
-                        df['timestamp'] = pd.to_datetime(df['time'], unit='s')
-                        df.index = df['timestamp']
-                        return df
-            except:
-                pass
-        
-        return None
-    
-    def get_account_info(self):
-        if self.use_direct_mt5 and mt5.initialize():
-            acc = mt5.account_info()
-            if acc:
-                return {
-                    'balance': acc.balance,
-                    'equity': acc.equity,
-                    'margin': acc.margin,
-                    'profit': acc.profit
-                }
-        
-        if self.token:
-            try:
-                response = self.session.get(
-                    f"{self.api_url}/account",
-                    headers={"Authorization": f"Bearer {self.token}"},
-                    timeout=5
-                )
-                if response.status_code == 200:
-                    return response.json()
-            except:
-                pass
-        return None
-    
-    def disconnect(self):
-        if self.use_direct_mt5:
-            mt5.shutdown()
-        self.connected = False
-        self.token = None
-
-# ==========================================
-# OPTION GREEKS CALCULATOR (Black-Scholes)
-# ==========================================
-class OptionGreeks:
-    @staticmethod
-    def black_scholes(S, K, T, r, sigma, option_type='call'):
-        """
-        Calculate option price and Greeks.
-        S: spot price
-        K: strike price
-        T: time to expiry in years
-        r: risk-free rate
-        sigma: implied volatility
-        option_type: 'call' or 'put'
-        """
-        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
-        d2 = d1 - sigma * np.sqrt(T)
-        
-        if option_type == 'call':
-            price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
-            delta = norm.cdf(d1)
-            gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
-            theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) - r * K * np.exp(-r * T) * norm.cdf(d2)) / 365
-            vega = S * norm.pdf(d1) * np.sqrt(T) / 100  # per 1% change in IV
-        else:
-            price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-            delta = -norm.cdf(-d1)
-            gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
-            theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) + r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
-            vega = S * norm.pdf(d1) * np.sqrt(T) / 100
-        
-        return {
-            'price': price,
-            'delta': delta,
-            'gamma': gamma,
-            'theta': theta,
-            'vega': vega
-        }
 
 # ==========================================
 # MT5 BRIDGE (unchanged, but keep)
@@ -5647,4 +5415,5 @@ else:
         if st.button("🔲", key="dock_kill", help="Kill Switch (Close All Trades and Stop)"):
             kill_switch()
     st.markdown('</div>', unsafe_allow_html=True)
+
 
