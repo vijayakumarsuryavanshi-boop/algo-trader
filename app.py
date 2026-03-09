@@ -105,23 +105,98 @@ except ImportError:
 # ==========================================
 # SOUND FUNCTIONS (work in browser, no desktop dependencies)
 # ==========================================
+# ==========================================
+# ROBUST SOUND FUNCTIONS (JavaScript + postMessage)
+# ==========================================
+def init_audio_player():
+    """Inject a hidden iframe that contains the audio player and listens for messages."""
+    html_code = """
+    <div style="display:none;">
+        <iframe id="audioFrame" style="display:none;"></iframe>
+    </div>
+    <script>
+    // Create an audio context and buffer for beep
+    let audioCtx = null;
+    let beepBuffer = null;
+
+    function initAudio() {
+        if (audioCtx) return;
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        // Create a simple beep using an oscillator
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.frequency.value = 800;
+        gainNode.gain.value = 0.1;
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.1);
+        // Also create a buffer for repeated use
+        const sampleRate = audioCtx.sampleRate;
+        const frameCount = sampleRate * 0.1; // 100ms
+        const myArrayBuffer = audioCtx.createBuffer(1, frameCount, sampleRate);
+        const nowBuffering = myArrayBuffer.getChannelData(0);
+        for (let i = 0; i < frameCount; i++) {
+            nowBuffering[i] = Math.sin(2 * Math.PI * 800 * i / sampleRate) * 0.1;
+        }
+        beepBuffer = myArrayBuffer;
+    }
+
+    function playBeep() {
+        if (!audioCtx) initAudio();
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume().then(() => {
+                const source = audioCtx.createBufferSource();
+                source.buffer = beepBuffer;
+                source.connect(audioCtx.destination);
+                source.start();
+            });
+        } else {
+            const source = audioCtx.createBufferSource();
+            source.buffer = beepBuffer;
+            source.connect(audioCtx.destination);
+            source.start();
+        }
+    }
+
+    // Listen for messages from Streamlit
+    window.addEventListener('message', function(event) {
+        if (event.data === 'play_sound') {
+            playBeep();
+        }
+    });
+
+    // Mark that the player is ready
+    window.audioPlayerReady = true;
+    </script>
+    """
+    components.html(html_code, height=0)
+
 def play_sound_ui(sound_type="entry"):
+    """Send a message to the audio player to play a sound."""
     if not st.session_state.get("audio_enabled", False):
         return
-    # Use a reliable beep sound from a CDN
-    beep_url = "https://media.geeksforgeeks.org/wp-content/uploads/20190531135120/beep.mp3"
-    components.html(f"""
-        <audio autoplay>
-            <source src="{beep_url}" type="audio/mpeg">
-        </audio>
+    # Only one sound type for now; could extend with different sounds
+    components.html("""
+        <script>
+        window.parent.postMessage('play_sound', '*');
+        </script>
     """, height=0)
 
 def unlock_audio():
-    # Unlock audio on first user interaction (required by some browsers)
+    """Call this on first user interaction to unlock audio."""
     components.html("""
-        <audio autoplay>
-            <source src="data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTG9uZWx5TWVkaWEuY29tIFNvdW5kIEVmZmVjdHMAAAAAAFRBTkNFAAAAQ29udGVudCBUaGF0IFdvcmtzLCBJbmMuAAAAMzYwMDAwMDBOT1JNQUwAAAAjVGhhdHMgYSB0ZXN0IHNvdW5kLgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==" type="audio/mp3">
-        </audio>
+        <script>
+        // Force audio context initialization
+        if (window.audioPlayerReady) {
+            window.postMessage('play_sound', '*');
+        } else {
+            // If player not ready yet, wait a bit
+            setTimeout(function() {
+                window.postMessage('play_sound', '*');
+            }, 500);
+        }
+        </script>
     """, height=0)
 
 # ==========================================
@@ -424,6 +499,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # UI & CUSTOM CSS
 # ==========================================
 st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
+init_audio_player()
 
 st.markdown("""
 <style>
@@ -5381,3 +5457,4 @@ else:
         if st.button("🔲", key="dock_kill", help="Kill Switch (Close All Trades and Stop)"):
             kill_switch()
     st.markdown('</div>', unsafe_allow_html=True)
+
