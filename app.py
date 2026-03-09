@@ -68,7 +68,7 @@ try:
 except ImportError:
     HAS_MT5_LINUX = False
 
-# plyer notifications – will be disabled in cloud (we'll ignore silently)
+# plyer notifications – silently ignored if not available
 try:
     from plyer import notification
     HAS_NOTIFY = True
@@ -110,16 +110,13 @@ def inject_audio_system():
     js_code = """
     <script>
     (function() {
-        // Create audio context and buffer
         let audioCtx = null;
         let beepBuffer = null;
-        let isUnlocked = false;
 
         window.initAudio = function() {
             if (audioCtx) return;
             try {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                // Create a simple beep buffer (800 Hz, 0.1 sec)
                 const sampleRate = audioCtx.sampleRate;
                 const duration = 0.1; // 100 ms
                 const frameCount = sampleRate * duration;
@@ -138,39 +135,20 @@ def inject_audio_system():
             if (!audioCtx) window.initAudio();
             if (audioCtx && audioCtx.state === 'suspended') {
                 audioCtx.resume().then(() => {
-                    isUnlocked = true;
                     console.log("Audio unlocked");
                 });
-            } else {
-                isUnlocked = true;
-            }
-            // Play a silent beep to actually unlock (some browsers need this)
-            if (beepBuffer) {
-                const source = audioCtx.createBufferSource();
-                source.buffer = beepBuffer;
-                source.connect(audioCtx.destination);
-                source.start();
             }
         };
 
         window.playBeep = function() {
             if (!audioCtx) window.initAudio();
-            if (audioCtx && (audioCtx.state === 'running' || isUnlocked)) {
-                if (audioCtx.state === 'suspended') {
-                    audioCtx.resume().then(() => {
-                        const source = audioCtx.createBufferSource();
-                        source.buffer = beepBuffer;
-                        source.connect(audioCtx.destination);
-                        source.start();
-                    });
-                } else {
-                    const source = audioCtx.createBufferSource();
-                    source.buffer = beepBuffer;
-                    source.connect(audioCtx.destination);
-                    source.start();
-                }
+            if (audioCtx && audioCtx.state === 'running') {
+                const source = audioCtx.createBufferSource();
+                source.buffer = beepBuffer;
+                source.connect(audioCtx.destination);
+                source.start();
             } else {
-                console.warn("Audio not unlocked yet");
+                console.warn("Audio not ready – call unlockAudio first");
             }
         };
     })();
@@ -179,13 +157,11 @@ def inject_audio_system():
     st.markdown(js_code, unsafe_allow_html=True)
 
 def play_sound_ui(sound_type="entry"):
-    """Call the JavaScript beep function."""
     if not st.session_state.get("audio_enabled", False):
         return
     components.html("<script>window.playBeep && window.playBeep();</script>", height=0)
 
 def unlock_audio():
-    """Unlock audio on user gesture."""
     components.html("<script>window.unlockAudio && window.unlockAudio();</script>", height=0)
 
 # ==========================================
@@ -489,7 +465,7 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # ==========================================
 st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
-# --- Audio system initialization ---
+# --- Audio system initialization (injected once) ---
 if 'audio_system_injected' not in st.session_state:
     inject_audio_system()
     st.session_state.audio_system_injected = True
@@ -1324,7 +1300,6 @@ class TechnicalAnalyzer:
                 try:
                     st = ta.supertrend(df['high'], df['low'], df['close'], length=10, multiplier=3)
                     if st is not None and isinstance(st, pd.DataFrame):
-                        # Find columns that start with SUPERT_ and SUPERTd_
                         supert_cols = [col for col in st.columns if col.startswith('SUPERT_')]
                         supertd_cols = [col for col in st.columns if col.startswith('SUPERTd_')]
                         if supert_cols and supertd_cols:
@@ -1336,7 +1311,8 @@ class TechnicalAnalyzer:
                     else:
                         df['supertrend'] = df['close']
                         df['supertrend_direction'] = 1
-                except Exception:
+                except Exception as e:
+                    print(f"Supertrend calculation failed: {e}")
                     df['supertrend'] = df['close']
                     df['supertrend_direction'] = 1
             else:
@@ -1348,14 +1324,13 @@ class TechnicalAnalyzer:
                 try:
                     bb = ta.bbands(df['close'], length=20, std=2)
                     if bb is not None and isinstance(bb, pd.DataFrame):
-                        # Expected columns: BBL_20_2.0, BBM_20_2.0, BBU_20_2.0, BBB_20_2.0, etc.
-                        bb_lower_cols = [col for col in bb.columns if col.startswith('BBL_')]
-                        bb_mid_cols = [col for col in bb.columns if col.startswith('BBM_')]
                         bb_upper_cols = [col for col in bb.columns if col.startswith('BBU_')]
-                        if bb_lower_cols and bb_mid_cols and bb_upper_cols:
-                            df['bb_lower'] = bb[bb_lower_cols[0]]
-                            df['bb_middle'] = bb[bb_mid_cols[0]]
+                        bb_mid_cols = [col for col in bb.columns if col.startswith('BBM_')]
+                        bb_lower_cols = [col for col in bb.columns if col.startswith('BBL_')]
+                        if bb_upper_cols and bb_mid_cols and bb_lower_cols:
                             df['bb_upper'] = bb[bb_upper_cols[0]]
+                            df['bb_middle'] = bb[bb_mid_cols[0]]
+                            df['bb_lower'] = bb[bb_lower_cols[0]]
                         else:
                             df['bb_upper'] = df['close'] * 1.02
                             df['bb_middle'] = df['close']
@@ -1364,7 +1339,8 @@ class TechnicalAnalyzer:
                         df['bb_upper'] = df['close'] * 1.02
                         df['bb_middle'] = df['close']
                         df['bb_lower'] = df['close'] * 0.98
-                except Exception:
+                except Exception as e:
+                    print(f"Bollinger Bands calculation failed: {e}")
                     df['bb_upper'] = df['close'] * 1.02
                     df['bb_middle'] = df['close']
                     df['bb_lower'] = df['close'] * 0.98
@@ -5450,5 +5426,3 @@ else:
         if st.button("🔲", key="dock_kill", help="Kill Switch (Close All Trades and Stop)"):
             kill_switch()
     st.markdown('</div>', unsafe_allow_html=True)
-
-
