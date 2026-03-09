@@ -103,101 +103,90 @@ except ImportError:
     HAS_FYERS = False
 
 # ==========================================
-# SOUND FUNCTIONS (work in browser, no desktop dependencies)
+# ROBUST SOUND SYSTEM (Web Audio API)
 # ==========================================
-# ==========================================
-# ROBUST SOUND FUNCTIONS (JavaScript + postMessage)
-# ==========================================
-def init_audio_player():
-    """Inject a hidden iframe that contains the audio player and listens for messages."""
-    html_code = """
-    <div style="display:none;">
-        <iframe id="audioFrame" style="display:none;"></iframe>
-    </div>
+def inject_audio_system():
+    """Inject JavaScript audio system once at startup."""
+    js_code = """
     <script>
-    // Create an audio context and buffer for beep
-    let audioCtx = null;
-    let beepBuffer = null;
+    (function() {
+        // Create audio context and buffer
+        let audioCtx = null;
+        let beepBuffer = null;
+        let isUnlocked = false;
 
-    function initAudio() {
-        if (audioCtx) return;
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        // Create a simple beep using an oscillator
-        const oscillator = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
-        oscillator.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        oscillator.frequency.value = 800;
-        gainNode.gain.value = 0.1;
-        oscillator.start();
-        oscillator.stop(audioCtx.currentTime + 0.1);
-        // Also create a buffer for repeated use
-        const sampleRate = audioCtx.sampleRate;
-        const frameCount = sampleRate * 0.1; // 100ms
-        const myArrayBuffer = audioCtx.createBuffer(1, frameCount, sampleRate);
-        const nowBuffering = myArrayBuffer.getChannelData(0);
-        for (let i = 0; i < frameCount; i++) {
-            nowBuffering[i] = Math.sin(2 * Math.PI * 800 * i / sampleRate) * 0.1;
-        }
-        beepBuffer = myArrayBuffer;
-    }
+        window.initAudio = function() {
+            if (audioCtx) return;
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                // Create a simple beep buffer (800 Hz, 0.1 sec)
+                const sampleRate = audioCtx.sampleRate;
+                const duration = 0.1; // 100 ms
+                const frameCount = sampleRate * duration;
+                const buffer = audioCtx.createBuffer(1, frameCount, sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < frameCount; i++) {
+                    data[i] = Math.sin(2 * Math.PI * 800 * i / sampleRate) * 0.1;
+                }
+                beepBuffer = buffer;
+            } catch(e) {
+                console.error("AudioContext failed", e);
+            }
+        };
 
-    function playBeep() {
-        if (!audioCtx) initAudio();
-        if (audioCtx.state === 'suspended') {
-            audioCtx.resume().then(() => {
+        window.unlockAudio = function() {
+            if (!audioCtx) window.initAudio();
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume().then(() => {
+                    isUnlocked = true;
+                    console.log("Audio unlocked");
+                });
+            } else {
+                isUnlocked = true;
+            }
+            // Play a silent beep to actually unlock (some browsers need this)
+            if (beepBuffer) {
                 const source = audioCtx.createBufferSource();
                 source.buffer = beepBuffer;
                 source.connect(audioCtx.destination);
                 source.start();
-            });
-        } else {
-            const source = audioCtx.createBufferSource();
-            source.buffer = beepBuffer;
-            source.connect(audioCtx.destination);
-            source.start();
-        }
-    }
+            }
+        };
 
-    // Listen for messages from Streamlit
-    window.addEventListener('message', function(event) {
-        if (event.data === 'play_sound') {
-            playBeep();
-        }
-    });
-
-    // Mark that the player is ready
-    window.audioPlayerReady = true;
+        window.playBeep = function() {
+            if (!audioCtx) window.initAudio();
+            if (audioCtx && (audioCtx.state === 'running' || isUnlocked)) {
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume().then(() => {
+                        const source = audioCtx.createBufferSource();
+                        source.buffer = beepBuffer;
+                        source.connect(audioCtx.destination);
+                        source.start();
+                    });
+                } else {
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = beepBuffer;
+                    source.connect(audioCtx.destination);
+                    source.start();
+                }
+            } else {
+                console.warn("Audio not unlocked yet");
+            }
+        };
+    })();
     </script>
     """
-    components.html(html_code, height=0)
+    st.markdown(js_code, unsafe_allow_html=True)
 
 def play_sound_ui(sound_type="entry"):
-    """Send a message to the audio player to play a sound."""
+    """Call the JavaScript beep function."""
     if not st.session_state.get("audio_enabled", False):
         return
-    # Only one sound type for now; could extend with different sounds
-    components.html("""
-        <script>
-        window.parent.postMessage('play_sound', '*');
-        </script>
-    """, height=0)
+    components.html("<script>window.playBeep && window.playBeep();</script>", height=0)
 
 def unlock_audio():
-    """Call this on first user interaction to unlock audio."""
-    components.html("""
-        <script>
-        // Force audio context initialization
-        if (window.audioPlayerReady) {
-            window.postMessage('play_sound', '*');
-        } else {
-            // If player not ready yet, wait a bit
-            setTimeout(function() {
-                window.postMessage('play_sound', '*');
-            }, 500);
-        }
-        </script>
-    """, height=0)
+    """Unlock audio on user gesture."""
+    components.html("<script>window.unlockAudio && window.unlockAudio();</script>", height=0)
 
 # ==========================================
 # LIVE NEWS FUNCTIONS (Kannada + English)
@@ -499,7 +488,11 @@ def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit
 # UI & CUSTOM CSS
 # ==========================================
 st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
-init_audio_player()
+
+# --- Audio system initialization ---
+if 'audio_system_injected' not in st.session_state:
+    inject_audio_system()
+    st.session_state.audio_system_injected = True
 
 st.markdown("""
 <style>
@@ -5457,4 +5450,5 @@ else:
         if st.button("🔲", key="dock_kill", help="Kill Switch (Close All Trades and Stop)"):
             kill_switch()
     st.markdown('</div>', unsafe_allow_html=True)
+
 
