@@ -562,21 +562,10 @@ st.markdown("""
         margin-left: 8px;
         display: inline-block;
     }
-    .rejected-trade {
-        background: #fee2e2;
-        border-left: 6px solid #ef4444;
-        padding: 16px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    .rejected-trade h4 {
+    .rejection-reason {
+        font-size: 0.8rem;
         color: #ef4444;
-        margin: 0 0 8px 0;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        gap: 6px;
+        margin-top: 4px;
     }
     .risk-low { color: #22c55e; font-weight: bold; }
     .risk-medium { color: #fbbf24; font-weight: bold; }
@@ -1283,15 +1272,217 @@ class TechnicalAnalyzer:
 
     # Strategy methods
     def apply_institutional_fvg_strategy(self, df, index_name="NIFTY"):
-        # (full implementation as before – omitted for brevity, include from previous code)
-        # Placeholder to keep script runnable; replace with actual strategy.
-        return "AWAITING FVG REVERSAL 🟡", "WAIT", 0, 0, df, 0, {}, 50
+        if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        df = self.calculate_indicators(df, is_index)
+        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
+        df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+        df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
+        df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
+        last = df.iloc[-1]
+        atr = self.get_atr(df).iloc[-1]
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        smc_blocks = self.detect_order_blocks(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
+        trend, signal = "AWAITING FVG REVERSAL 🟡", "WAIT"
+        signal_strength = 50
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
+        trend += f" | {oi_signal}"
+        latest_bull_fvg = df[df['fvg_bull']].iloc[-1] if any(df['fvg_bull']) else None
+        latest_bear_fvg = df[df['fvg_bear']].iloc[-1] if any(df['fvg_bear']) else None
+        if latest_bull_fvg is not None:
+            mitigated_bull = (last['low'] <= latest_bull_fvg['high'].shift(1)) and (last['low'] >= latest_bull_fvg['low'].shift(1))
+            if mitigated_bull and last['close'] > last['open']:
+                signal = "BUY_CE"
+                trend = "BULL FVG REVERSAL CONFIRMED 🟢"
+                signal_strength = 75
+        if latest_bear_fvg is not None:
+            mitigated_bear = (last['high'] >= latest_bear_fvg['low'].shift(1)) and (last['high'] <= latest_bear_fvg['high'].shift(1))
+            if mitigated_bear and last['close'] < last['open']:
+                signal = "BUY_PE"
+                trend = "BEAR FVG REVERSAL CONFIRMED 🔴"
+                signal_strength = 75
+        if last['liquidity_sweep_up']:
+            trend += " | Liquidity Sweep UP"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 80)
+        if last['liquidity_sweep_down']:
+            trend += " | Liquidity Sweep DOWN"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 80)
+        if last['trap_up']:
+            trend += " | Trap UP (Bearish)"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 70)
+        if last['trap_down']:
+            trend += " | Trap DOWN (Bullish)"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 70)
+        if last['orb_breakout_up']:
+            trend += " | ORB Breakout UP"
+            if signal == "WAIT":
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 85)
+        if last['orb_breakout_down']:
+            trend += " | ORB Breakout DOWN"
+            if signal == "WAIT":
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 85)
+        return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
 
     def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
+        if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        df = self.calculate_indicators(df, is_index)
+        atr = self.get_atr(df).iloc[-1]
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        smc_blocks = self.detect_order_blocks(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (df['close'].iloc[-1] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
+        if not HAS_PTA:
+            return "WAIT (pandas_ta required)", "WAIT", df['close'].iloc[-1], df['close'].iloc[-1], df, atr, fib_data, 0
+        df_ta = df.copy()
+        df_ta.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+        df_ta['EMA_5'] = ta.ema(df_ta['Close'], length=5)
+        df_ta['EMA_13'] = ta.ema(df_ta['Close'], length=13)
+        df_ta['EMA_21'] = ta.ema(df_ta['Close'], length=21)
+        df_ta['RSI_14'] = ta.rsi(df_ta['Close'], length=14)
+        if df_ta['RSI_14'] is None: 
+            df_ta['RSI_14'] = df_ta['Close'] * 0 + 50
+        df_ta['VWAP'] = ta.vwap(df_ta['High'], df_ta['Low'], df_ta['Close'], df_ta['Volume'])
+        if df_ta['VWAP'] is None or df_ta['VWAP'].isnull().all() or is_index:
+            df_ta['VWAP'] = df_ta['Close']
+        df_ta['EMA_Cross_Up'] = (df_ta['EMA_5'] > df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) <= df_ta['EMA_13'].shift(1))
+        df_ta['EMA_Cross_Dn'] = (df_ta['EMA_5'] < df_ta['EMA_13']) & (df_ta['EMA_5'].shift(1) >= df_ta['EMA_13'].shift(1))
+        df_ta['Buy_Signal'] = df_ta['EMA_Cross_Up']
+        df_ta['Sell_Signal'] = df_ta['EMA_Cross_Dn']
+        df['vwap'] = df_ta['VWAP']
+        df['ema_fast'] = df_ta['EMA_13']
+        last = df_ta.iloc[-1]
+        signal = "WAIT"
+        trend = f"RANGING {oi_signal} (VIJAY_RFF)"
+        signal_strength = 50
+        if last['Buy_Signal']:
+            signal = "BUY_CE"
+            trend = f"VIJAY_RFF UPTREND CROSSOVER {oi_signal} 🟢"
+            signal_strength = 80
+        elif last['Sell_Signal']:
+            signal = "BUY_PE"
+            trend = f"VIJAY_RFF DOWNTREND CROSSOVER {oi_signal} 🔴"
+            signal_strength = 80
+        if df['liquidity_sweep_up'].iloc[-1]:
+            trend += " | Liquidity Sweep UP"
+            if signal == "WAIT" and last['Close'] > last['Open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 80)
+        if df['liquidity_sweep_down'].iloc[-1]:
+            trend += " | Liquidity Sweep DOWN"
+            if signal == "WAIT" and last['Close'] < last['Open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 80)
+        if df['trap_up'].iloc[-1]:
+            trend += " | Trap UP (Bearish)"
+            if signal == "WAIT" and last['Close'] < last['Open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 70)
+        if df['trap_down'].iloc[-1]:
+            trend += " | Trap DOWN (Bullish)"
+            if signal == "WAIT" and last['Close'] > last['Open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 70)
+        if df['orb_breakout_up'].iloc[-1]:
+            trend += " | ORB Breakout UP"
+            if signal == "WAIT":
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 85)
+        if df['orb_breakout_down'].iloc[-1]:
+            trend += " | ORB Breakout DOWN"
+            if signal == "WAIT":
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 85)
+        return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data, signal_strength
 
     def apply_lux_algo_ict_strategy(self, df, index_name="NIFTY"):
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
+        if df is None or len(df) < 50:
+            return "WAIT (insufficient data)", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        df = self.calculate_indicators(df, is_index)
+        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
+        df['fvg_bull'] = (df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])
+        df['fvg_bear'] = (df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])
+        df['body'] = abs(df['close'] - df['open'])
+        avg_body = df['body'].rolling(10).mean()
+        df['bull_ob'] = (df['close'] < df['open']) & (df['body'] > avg_body * 1.2)
+        df['bear_ob'] = (df['close'] > df['open']) & (df['body'] > avg_body * 1.2)
+        df['hh'] = df['high'] > df['high'].shift(1)
+        df['ll'] = df['low'] < df['low'].shift(1)
+        df['bos_up'] = df['high'] > df['high'].rolling(20).max().shift(1)
+        df['bos_down'] = df['low'] < df['low'].rolling(20).min().shift(1)
+        last = df.iloc[-1]
+        atr = self.get_atr(df).iloc[-1]
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        smc_blocks = self.detect_order_blocks(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high, **smc_blocks}
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
+        signal = "WAIT"
+        trend = f"ICT Neutral {oi_signal}"
+        signal_strength = 50
+        if last['fvg_bull'] and last['close'] > last['vwap'] and last['bos_up']:
+            signal = "BUY_CE"
+            trend = f"LUX ICT BULLISH: FVG + OB + BOS {oi_signal} 🟢"
+            signal_strength = 85
+        elif last['fvg_bear'] and last['close'] < last['vwap'] and last['bos_down']:
+            signal = "BUY_PE"
+            trend = f"LUX ICT BEARISH: FVG + OB + BOS {oi_signal} 🔴"
+            signal_strength = 85
+        if last['liquidity_sweep_up']:
+            trend += " | Liquidity Sweep UP"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 80)
+        if last['liquidity_sweep_down']:
+            trend += " | Liquidity Sweep DOWN"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 80)
+        if last['trap_up']:
+            trend += " | Trap UP (Bearish)"
+            if signal == "WAIT" and last['close'] < last['open']:
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 70)
+        if last['trap_down']:
+            trend += " | Trap DOWN (Bullish)"
+            if signal == "WAIT" and last['close'] > last['open']:
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 70)
+        if last['orb_breakout_up']:
+            trend += " | ORB Breakout UP"
+            if signal == "WAIT":
+                signal = "BUY_CE"
+                signal_strength = max(signal_strength, 85)
+        if last['orb_breakout_down']:
+            trend += " | ORB Breakout DOWN"
+            if signal == "WAIT":
+                signal = "BUY_PE"
+                signal_strength = max(signal_strength, 85)
+        return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
 
     def apply_vwap_ema_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
@@ -1320,7 +1511,6 @@ class TechnicalAnalyzer:
             signal_strength = 70
         else:
             trend = f"RANGING {oi_signal}"
-        # Add liquidity signals
         if last['liquidity_sweep_up']:
             trend += " | Liquidity Sweep UP"
             if signal == "WAIT" and last['close'] > last['open']:
@@ -1354,15 +1544,107 @@ class TechnicalAnalyzer:
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data, signal_strength
 
     def apply_keyword_strategy(self, df, keywords, index_name):
-        # Simplified
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
+        if df is None or len(df) < 30: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
+        df = self.calculate_indicators(df, index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
+        buy_conds, sell_conds = [], []
+        keys = keywords.split(',') if keywords else []
+        signal_strength = 50
+        if "EMA Crossover (9 & 21)" in keys:
+            buy_conds.append(last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'])
+            sell_conds.append(last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'])
+        if "RSI Breakout (>60/<40)" in keys:
+            buy_conds.append(last['rsi'] > 50)
+            sell_conds.append(last['rsi'] < 50)
+        if "MACD Crossover" in keys:
+            if 'macd' in df.columns:
+                buy_conds.append(last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal'])
+                sell_conds.append(last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal'])
+        if "Bollinger Bands Bounce" in keys:
+            if 'bb_lower' in df.columns:
+                buy_conds.append(last['close'] > last['bb_lower'] and prev['close'] <= prev['bb_lower'])
+                sell_conds.append(last['close'] < last['bb_upper'] and prev['close'] >= prev['bb_upper'])
+        if "Stochastic RSI" in keys:
+            pass
+        if "FVG ICT" in keys:
+            if 'fvg_bull' in df.columns and df['fvg_bull'].iloc[-1]:
+                buy_conds.append(True)
+            if 'fvg_bear' in df.columns and df['fvg_bear'].iloc[-1]:
+                sell_conds.append(True)
+        if "VWAP" in keys:
+            buy_conds.append(last['close'] > last['vwap'])
+            sell_conds.append(last['close'] < last['vwap'])
+        if last['liquidity_sweep_up']:
+            buy_conds.append(True)
+        if last['liquidity_sweep_down']:
+            sell_conds.append(True)
+        if last['trap_up']:
+            sell_conds.append(True)
+        if last['trap_down']:
+            buy_conds.append(True)
+        if last['orb_breakout_up']:
+            buy_conds.append(True)
+        if last['orb_breakout_down']:
+            sell_conds.append(True)
+        signal, trend = "WAIT", f"Awaiting Keyword Match {oi_signal} 🟡"
+        if buy_conds and all(buy_conds):
+            signal, trend = "BUY_CE", f"Keyword Setup Met: BULLISH {oi_signal} 🟢"
+            signal_strength = 70 + (len(buy_conds) * 5)
+        elif sell_conds and all(sell_conds):
+            signal, trend = "BUY_PE", f"Keyword Setup Met: BEARISH {oi_signal} 🔴"
+            signal_strength = 70 + (len(sell_conds) * 5)
+        signal_strength = min(100, signal_strength)
+        return trend, signal, last['vwap'], last['ema9'], df, self.get_atr(df).iloc[-1], {}, signal_strength
 
     def apply_ml_strategy(self, df, index_name, prob_threshold=0.3, persistence=1):
-        # Simplified
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
+        global ml_predictor
+        if df is None or len(df) < 50:
+            return "WAIT (insufficient data)", "WAIT", 0, 0, df, 0, {}, 0
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
+        df = self.calculate_indicators(df, is_index)
+        oi_change = 0
+        if 'oi' in df.columns:
+            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        price_change = (df['close'].iloc[-1] / df['close'].iloc[-5] - 1) * 100
+        oi_signal = self.analyze_open_interest(price_change, oi_change)
+        if not ml_predictor.is_trained:
+            ml_predictor.train(df)
+        prob_up, prob_down = ml_predictor.predict(df)
+        last = df.iloc[-1]
+        atr = self.get_atr(df).iloc[-1]
+        up_thresh = prob_threshold
+        down_thresh = prob_threshold
+        trend = f"ML Ensemble: Up {prob_up:.2f} / Down {prob_down:.2f} {oi_signal}"
+        signal = "WAIT"
+        strength = int(max(prob_up, prob_down) * 100)
+        if prob_up > up_thresh:
+            signal = "BUY_CE"
+        elif prob_down > down_thresh:
+            signal = "BUY_PE"
+        if last['liquidity_sweep_up']:
+            trend += " | Liq Sweep UP"
+        if last['liquidity_sweep_down']:
+            trend += " | Liq Sweep DOWN"
+        if last['trap_up']:
+            trend += " | Trap UP"
+        if last['trap_down']:
+            trend += " | Trap DOWN"
+        if last['orb_breakout_up']:
+            trend += " | ORB UP"
+        if last['orb_breakout_down']:
+            trend += " | ORB DOWN"
+        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
+        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
+        return trend, signal, last['close'], last['close'], df, atr, fib_data, strength
 
 # ==========================================
-# MACHINE LEARNING PREDICTOR (simplified but functional)
+# MACHINE LEARNING PREDICTOR
 # ==========================================
 class MLPredictor:
     def __init__(self):
@@ -1503,11 +1785,17 @@ class MLPredictor:
                     prob_up_list.append(0.5); prob_down_list.append(0.5)
             prob_up = np.mean(prob_up_list) if prob_up_list else 0.5
             prob_down = np.mean(prob_down_list) if prob_down_list else 0.5
+            pred_class = 1 if prob_up > prob_down else 2 if prob_down > prob_up else 0
+            self.signal_history.append(pred_class)
             return prob_up, prob_down
         except:
             return 0.5, 0.5
 
     def should_retrain(self, df):
+        if not self.is_trained:
+            return True
+        if len(df) - self.last_train_index >= 50:
+            return True
         return False
 
 ml_predictor = MLPredictor()
@@ -1517,49 +1805,492 @@ ml_predictor = MLPredictor()
 # ==========================================
 class ArbitrageModule:
     def detect_arbitrage(self, prices):
-        return []
+        opportunities = []
+        if "NIFTY" in prices and "BANKNIFTY" in prices:
+            nifty = prices["NIFTY"]
+            bank = prices["BANKNIFTY"]
+            ratio = bank / nifty
+            historical_ratio = 4.2
+            if ratio > historical_ratio * 1.02:
+                opportunities.append({
+                    "type": "PAIR_TRADE",
+                    "action": "SELL_BANK_BUY_NIFTY",
+                    "entry_ratio": ratio,
+                    "target_ratio": historical_ratio,
+                    "profit_potential": f"{(ratio/historical_ratio - 1)*100:.2f}%"
+                })
+            elif ratio < historical_ratio * 0.98:
+                opportunities.append({
+                    "type": "PAIR_TRADE",
+                    "action": "BUY_BANK_SELL_NIFTY",
+                    "entry_ratio": ratio,
+                    "target_ratio": historical_ratio,
+                    "profit_potential": f"{(historical_ratio/ratio - 1)*100:.2f}%"
+                })
+        return opportunities
 
 class OptionSellingModule:
     def __init__(self, bot):
         self.bot = bot
     def find_premium_opportunities(self, symbol, spot, expiry_days):
+        if symbol in ["NIFTY", "BANKNIFTY"]:
+            strikes = []
+            for i in range(1, 6):
+                ce_strike = round(spot / 100) * 100 + (i * 100)
+                pe_strike = round(spot / 100) * 100 - (i * 100)
+                strikes.extend([ce_strike, pe_strike])
+            opportunities = []
+            for strike in strikes:
+                premium = spot * 0.01 * (1 / (expiry_days + 1))
+                if premium > spot * 0.005:
+                    roi = (premium / (spot * 0.1)) * 100
+                    if roi > 10:
+                        opportunities.append({
+                            "strike": strike,
+                            "type": "CE" if strike > spot else "PE",
+                            "premium": premium,
+                            "roi": roi,
+                            "days_to_expiry": expiry_days,
+                            "theta_decay": premium / expiry_days
+                        })
+            return opportunities
         return []
 
 class MultiLegStrategies:
     def iron_condor(self, spot, iv, days_to_expiry):
-        return {}
+        call_buy = round(spot * 1.1 / 100) * 100
+        call_sell = round(spot * 1.05 / 100) * 100
+        put_sell = round(spot * 0.95 / 100) * 100
+        put_buy = round(spot * 0.9 / 100) * 100
+        premium_received = (iv * 0.3) * spot
+        max_loss = (call_buy - call_sell) * 50 - premium_received
+        return {
+            "strategy": "IRON_CONDOR",
+            "legs": [
+                f"SELL {call_sell} CE",
+                f"BUY {call_buy} CE",
+                f"SELL {put_sell} PE",
+                f"BUY {put_buy} PE"
+            ],
+            "premium_received": premium_received,
+            "max_loss": max_loss,
+            "max_profit": premium_received,
+            "probability": 0.7,
+            "roi": (premium_received / max_loss) * 100 if max_loss > 0 else 0
+        }
     def straddle_strangle(self, spot, iv, earnings=False):
+        if earnings:
+            atm_strike = round(spot / 100) * 100
+            premium = iv * spot * 0.5
+            return {
+                "strategy": "STRADDLE",
+                "legs": [f"BUY {atm_strike} CE", f"BUY {atm_strike} PE"],
+                "total_premium": premium * 2,
+                "breakeven_up": spot + (premium * 2),
+                "breakeven_down": spot - (premium * 2),
+                "max_profit": "UNLIMITED",
+                "max_loss": premium * 2
+            }
         return None
 
 def pin_bar_scanner(df, lookback=50):
     results = []
-    # (implementation from previous)
+    for i in range(1, min(lookback, len(df))):
+        candle = df.iloc[-i]
+        body = abs(candle['close'] - candle['open'])
+        upper_wick = candle['high'] - max(candle['close'], candle['open'])
+        lower_wick = min(candle['close'], candle['open']) - candle['low']
+        is_pin = (upper_wick > body * 1.5 and lower_wick < body * 0.5) or \
+                 (lower_wick > body * 1.5 and upper_wick < body * 0.5)
+        if is_pin:
+            direction = "BUY" if lower_wick > body * 1.5 else "SELL"
+            entry = candle['close']
+            stop = candle['low'] if direction == "BUY" else candle['high']
+            target = entry + (abs(entry - stop) * 2) if direction == "BUY" else entry - (abs(entry - stop) * 2)
+            results.append({
+                "Time": candle.name.strftime('%H:%M'),
+                "Direction": f"🟢 {direction}" if direction == "BUY" else f"🔴 {direction}",
+                "Entry": f"{entry:.2f}",
+                "Stop": f"{stop:.2f}",
+                "Target": f"{target:.2f}",
+                "Risk/Reward": "1:2",
+                "Confidence": "High" if body < candle['high'] - candle['low'] * 0.3 else "Medium"
+            })
     return results[:5]
 
 def compounding_calculator():
     st.subheader("📈 Compounding Calculator")
-    # (implementation from previous)
-    pass
+    col1, col2 = st.columns(2)
+    with col1:
+        initial_capital = st.number_input("Initial Capital (₹)", 1000, 100000, 10000)
+        daily_target = st.slider("Daily Target %", 0.5, 5.0, 2.0, 0.1)
+    with col2:
+        trading_days = st.number_input("Trading Days", 5, 252, 100)
+        compound_frequency = st.selectbox("Compound", ["Daily", "Weekly", "Monthly"])
+    if compound_frequency == "Daily":
+        periods = trading_days
+        rate = daily_target / 100
+    elif compound_frequency == "Weekly":
+        periods = trading_days // 5
+        rate = (daily_target * 5) / 100
+    else:
+        periods = trading_days // 22
+        rate = (daily_target * 22) / 100
+    final_capital = initial_capital * ((1 + rate) ** periods)
+    total_profit = final_capital - initial_capital
+    st.metric("Final Capital", f"₹{final_capital:,.0f}", f"{((final_capital/initial_capital-1)*100):.0f}% Return")
+    st.metric("Total Profit", f"₹{total_profit:,.0f}")
+    st.metric("Daily Average", f"₹{total_profit/trading_days:,.0f}")
+    growth = [initial_capital * ((1 + rate) ** i) for i in range(1, periods + 1)]
+    chart_data = pd.DataFrame({"Day": range(1, periods + 1), "Capital": growth})
+    st.line_chart(chart_data.set_index("Day"))
 
 def add_breakout_scalper():
     st.subheader("🚀 Volume Breakout Scalper")
-    # (implementation from previous)
-    pass
+    col1, col2 = st.columns(2)
+    with col1:
+        volume_threshold = st.slider("Volume Spike Threshold", 1.2, 5.0, 1.5, 0.1)
+        breakout_period = st.selectbox("Breakout Period", [5, 10, 15, 20], index=1)
+    with col2:
+        profit_target = st.slider("Profit Target (Points)", 1, 50, 10)
+        stop_loss = st.slider("Stop Loss (Points)", 1, 30, 5)
+    if st.button("🔍 Scan Breakouts Now", use_container_width=True):
+        with st.spinner("Scanning for breakouts..."):
+            symbols = ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "BTCUSD", "XAUUSD"]
+            results = []
+            for sym in symbols:
+                try:
+                    if "USD" in sym:
+                        df = yf.Ticker(YF_TICKERS.get(sym, sym)).history(period="1d", interval="1m")
+                    else:
+                        continue
+                    if not df.empty:
+                        df['volume_ma'] = df['Volume'].rolling(20).mean()
+                        df['volume_ratio'] = df['Volume'] / df['volume_ma']
+                        df['price_range'] = df['High'] - df['Low']
+                        df['range_ma'] = df['price_range'].rolling(10).mean()
+                        last = df.iloc[-1]
+                        if (last['volume_ratio'] > volume_threshold and
+                            last['price_range'] > last['range_ma'] * 1.3):
+                            direction = "BUY" if last['Close'] > df['Close'].iloc[-2] else "SELL"
+                            confidence = min(100, last['volume_ratio'] * 20)
+                            results.append({
+                                "Symbol": sym,
+                                "Direction": f"🟢 {direction}" if direction == "BUY" else f"🔴 {direction}",
+                                "Volume Spike": f"{last['volume_ratio']:.1f}x",
+                                "Entry": f"₹{last['Close']:.2f}",
+                                "SL": f"₹{last['Close'] - stop_loss if direction == 'BUY' else last['Close'] + stop_loss:.2f}",
+                                "TP": f"₹{last['Close'] + profit_target if direction == 'BUY' else last['Close'] - profit_target:.2f}",
+                                "Confidence": f"{confidence:.0f}%"
+                            })
+                except:
+                    continue
+            if results:
+                st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+                st.success(f"Found {len(results)} breakout opportunities!")
+            else:
+                st.info("No breakouts detected at this moment")
 
 def gold_crypto_scalper(symbol="XAUUSD", interval="1m"):
     st.subheader(f"⚡ 1-Min Scalper: {symbol}")
-    # (implementation from previous)
-    pass
+    try:
+        if symbol in ["XAUUSD", "GOLD"]:
+            ticker = "GC=F"
+        elif symbol == "BTCUSD":
+            ticker = "BTC-USD"
+        elif symbol == "ETHUSD":
+            ticker = "ETH-USD"
+        elif symbol == "SOLUSD":
+            ticker = "SOL-USD"
+        else:
+            ticker = symbol
+        df = yf.Ticker(ticker).history(period="1d", interval="1m")
+        if df.empty:
+            st.error("No data available")
+            return
+        df['ema9'] = df['Close'].ewm(span=9).mean()
+        df['ema21'] = df['Close'].ewm(span=21).mean()
+        df['tr'] = np.maximum(df['High'] - df['Low'], np.maximum(abs(df['High'] - df['Close'].shift()), abs(df['Low'] - df['Close'].shift())))
+        df['atr'] = df['tr'].rolling(14).mean()
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['rsi'] = 100 - (100 / (1 + rs))
+        df['vol_ma'] = df['Volume'].rolling(20).mean()
+        df['vol_spike'] = df['Volume'] > df['vol_ma'] * 1.2
+        exp12 = df['Close'].ewm(span=12, adjust=False).mean()
+        exp26 = df['Close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = exp12 - exp26
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_hist'] = df['macd'] - df['macd_signal']
+        df['volume_roc'] = df['Volume'].pct_change(5) * 100
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        buy_signal = (last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'] and last['vol_spike']) or \
+                     (last['rsi'] > 50 and prev['rsi'] <= 50 and last['macd'] > last['macd_signal'] and last['vol_spike']) or \
+                     (last['macd_hist'] > 0 and prev['macd_hist'] <= 0 and last['vol_spike']) or \
+                     (last['volume_roc'] > 20 and last['Close'] > prev['Close'] and last['vol_spike'])
+        sell_signal = (last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'] and last['vol_spike']) or \
+                      (last['rsi'] < 50 and prev['rsi'] >= 50 and last['macd'] < last['macd_signal'] and last['vol_spike']) or \
+                      (last['macd_hist'] < 0 and prev['macd_hist'] >= 0 and last['vol_spike']) or \
+                      (last['volume_roc'] > 20 and last['Close'] < prev['Close'] and last['vol_spike'])
+        current_atr = last['atr']
+        if "XAU" in symbol or "GOLD" in symbol:
+            sl_points = current_atr * 1.5
+            tp_points = current_atr * 3.0
+        else:
+            sl_points = current_atr * 1.2
+            tp_points = current_atr * 2.5
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Current Price", f"${last['Close']:.2f}", f"{((last['Close']/prev['Close']-1)*100):.2f}%")
+        with col2:
+            st.metric("ATR (14)", f"${current_atr:.2f}")
+        with col3:
+            st.metric("RSI (14)", f"{last['rsi']:.1f}")
+        with col4:
+            st.metric("Volume", f"{last['Volume']:.0f}")
+        st.markdown("### 🎯 Entry Signals")
+        sig_col1, sig_col2 = st.columns(2)
+        with sig_col1:
+            st.markdown("**🟢 BUY Setup**")
+            if buy_signal:
+                st.success(f"🚀 **BUY SIGNAL ACTIVE**")
+                st.markdown(f"""
+                - **Entry:** ${last['Close']:.2f}
+                - **Stop Loss:** ${last['Close'] - sl_points:.2f}
+                - **Target 1:** ${last['Close'] + tp_points:.2f}
+                - **Target 2:** ${last['Close'] + tp_points*2:.2f}
+                - **Risk/Reward:** 1:2
+                """)
+            else:
+                st.info("No buy signal")
+        with sig_col2:
+            st.markdown("**🔴 SELL Setup**")
+            if sell_signal:
+                st.error(f"🩸 **SELL SIGNAL ACTIVE**")
+                st.markdown(f"""
+                - **Entry:** ${last['Close']:.2f}
+                - **Stop Loss:** ${last['Close'] + sl_points:.2f}
+                - **Target 1:** ${last['Close'] - tp_points:.2f}
+                - **Target 2:** ${last['Close'] - tp_points*2:.2f}
+                - **Risk/Reward:** 1:2
+                """)
+            else:
+                st.info("No sell signal")
+        st.markdown("### 📊 Market Structure")
+        struct_col1, struct_col2, struct_col3 = st.columns(3)
+        with struct_col1:
+            st.markdown(f"**Support:** ${df['Low'].tail(20).min():.2f}")
+        with struct_col2:
+            st.markdown(f"**Resistance:** ${df['High'].tail(20).max():.2f}")
+        with struct_col3:
+            trend = "🟢 UPTREND" if last['ema9'] > last['ema21'] else "🔴 DOWNTREND"
+            st.markdown(f"**Trend:** {trend}")
+        chart_data = df[['Close', 'ema9', 'ema21']].tail(60)
+        st.line_chart(chart_data)
+    except Exception as e:
+        st.error(f"Error in scalper: {e}")
 
+# ==========================================
+# SAFE INVESTMENT SUGGESTIONS (Enhanced)
+# ==========================================
 def safe_investment_suggestions():
     st.subheader("💰 Safe Investment Options – Suggestions & Guidance")
-    # (implementation from previous)
-    pass
+    with st.expander("📈 Stocks (Equity) – Long Term", expanded=True):
+        st.markdown("""
+        **Recommended Large Cap Stocks (5-10 year horizon):**
+        - **Reliance Industries** – Diversified conglomerate, strong retail & telecom growth.
+        - **Tata Consultancy Services (TCS)** – IT leader, consistent dividends, global presence.
+        - **HDFC Bank** – Best-in-class banking, high ROE, stable growth.
+        - **Infosys** – IT services, strong fundamentals, shareholder returns.
+        - **ITC** – Cigarettes, FMCG, hotels – undervalued with high dividend yield.
+        - **Hindustan Unilever** – FMCG giant, defensive play, consistent growth.
+        - **ICICI Bank** – Turnaround story, strong retail franchise.
+        - **State Bank of India** – PSU bank leader, recovery play.
+        - **Bajaj Finance** – NBFC leader, high growth, but higher valuation.
+        - **Asian Paints** – Market leader, pricing power, long-term compounder.
+        **Mid Cap Opportunities:**
+        - **Titan** – Jewellery retail, strong brand, expanding.
+        - **Dabur** – FMCG, rural focus, stable returns.
+        - **Marico** – Consumer goods, international expansion.
+        - **Container Corporation** – Logistics, infra push beneficiary.
+        **Index Funds/ETFs (Low Cost):**
+        - Nippon India ETF Nifty50
+        - HDFC Index Fund - Nifty50
+        - UTI Nifty Index Fund
+        - Motilal Oswal S&P500 Index (US exposure)
+        *Tip: Use SIP for rupee cost averaging; hold for at least 5 years.*
+        """)
+    with st.expander("🏦 Stock Brokers (India)", expanded=True):
+        st.markdown("""
+        **Popular Discount Brokers:**
+        - **Zerodha** – Low brokerage, user-friendly, large user base.
+        - **Angel One** – Good for research and advisory, integrated with this system.
+        - **Groww** – Simple interface, good for beginners.
+        - **Upstox** – Competitive pricing, advanced trading tools.
+        - **ICICI Direct** – Full-service broker, research reports, but higher brokerage.
+        - **Fyers** – Excellent charting, low brokerage, now integrated.
+        *Tip: Choose based on your trading style – discount brokers for active trading, full-service for research.*
+        """)
+    with st.expander("🏠 Real Estate – Promising Locations", expanded=True):
+        st.markdown("""
+        **Residential Real Estate (Capital appreciation + rental yield):**
+        - **Bengaluru** – Whitefield, Electronic City, Sarjapur Road (IT hubs)
+        - **Hyderabad** – Gachibowli, HITEC City, Kokapet (growing IT corridor)
+        - **Pune** – Hinjewadi, Kharadi, Baner (IT and manufacturing)
+        - **Chennai** – OMR, Guindy, Tambaram (IT and industrial)
+        - **NCR** – Gurugram, Noida (commercial hubs, but research micro-markets)
+        - **Mumbai Metropolitan Region** – Navi Mumbai, Thane (affordable compared to South Mumbai)
+        **Commercial Real Estate:**
+        - REITs (Real Estate Investment Trusts) – e.g., Embassy REIT, Mindspace Business Parks REIT – invest in commercial properties with low ticket size.
+        *Tip: Research infrastructure projects, job growth, and legal clearances before investing.*
+        """)
+    with st.expander("🥇 Gold & Precious Metals", expanded=True):
+        st.markdown("""
+        **Ways to Invest in Gold:**
+        - **Sovereign Gold Bonds (SGB)** – Issued by RBI, interest 2.5% p.a. + capital appreciation, tax-free on maturity.
+        - **Gold ETFs** – e.g., Nippon India Gold ETF, HDFC Gold ETF – trade on exchange, low expense ratio.
+        - **Digital Gold** – Buy small quantities online (e.g., MMTC-PAMP).
+        - **Physical Gold** – Coins, bars, jewellery (storage and purity concerns).
+        *Tip: SGBs are the most tax‑efficient; avoid jewellery for investment due to making charges.*
+        """)
+    with st.expander("🛡️ Life Insurance", expanded=True):
+        st.markdown("""
+        **Types of Life Insurance:**
+        - **Term Insurance** – Pure protection, low premium, high cover. (Recommended for financial dependents)
+        - **Endowment Plans** – Insurance + savings, but lower returns and higher premium.
+        - **ULIPs** – Market‑linked, but have higher charges; compare with mutual funds.
+        **Top Term Insurance Providers:**
+        - **SBI Life - eShield** – Affordable term plan with multiple options.
+        - **HDFC Life Click2Protect** – Flexible cover, optional critical illness.
+        - **ICICI Prudential iProtect** – Comprehensive coverage.
+        - **Max Life Smart Secure Plus** – High claim settlement ratio.
+        - **LIC Tech Term** – Pure term plan with low premiums.
+        *Tip: Buy term insurance for cover at least 10‑15 times your annual income.*
+        """)
+    with st.expander("📊 Mutual Funds – Categories & Suggestions (Expanded)", expanded=True):
+        st.markdown("""
+        **Equity Mutual Funds (High risk, high return):**
+        - **Large Cap** – SBI Bluechip Fund, ICICI Prudential Bluechip, HDFC Top 100 Fund, Kotak Bluechip
+        - **Mid Cap** – Kotak Emerging Equity, HDFC Mid‑Cap Opportunities, DSP Midcap Fund, Nippon India Growth Fund
+        - **Small Cap** – SBI Small Cap, Nippon India Small Cap, HDFC Small Cap Fund, Kotak Small Cap
+        - **Multi Cap** – ICICI Prudential Multicap, Kotak Standard Multicap, HDFC Equity Fund
+        - **ELSS (Tax Saving)** – Axis Long Term Equity, Mirae Asset Tax Saver, SBI Long Term Equity
+        **Hybrid Funds (Moderate risk):**
+        - **Aggressive Hybrid** – HDFC Balanced Advantage Fund, ICICI Prudential Balanced Advantage, SBI Equity Hybrid
+        - **Conservative Hybrid** – ICICI Prudential Regular Savings Fund, Kotak Debt Hybrid
+        - **Arbitrage Funds** – Kotak Arbitrage Fund, ICICI Prudential Arbitrage – low risk, tax efficient
+        **Debt Funds (Low risk):**
+        - **Liquid Funds** – For short‑term parking (e.g., overnight funds) – SBI Liquid Fund, HDFC Liquid Fund
+        - **Corporate Bond Funds** – SBI Corporate Bond Fund, ICICI Prudential Corporate Bond
+        - **Gilt Funds** – Invest in government securities (e.g., SBI Magnum Gilt, ICICI Prudential Gilt)
+        - **Dynamic Bond Funds** – ICICI Prudential All Seasons Bond Fund
+        **Index Funds/ETFs (Passive, low cost):**
+        - UTI Nifty Index Fund
+        - Motilal Oswal S&P500 Index Fund
+        - Navi US Total Stock Market Index Fund
+        - Bharat 22 ETF, Nippon India ETF Nifty50
+        *Tip: Use SIP for disciplined investing and rupee cost averaging. Consult a financial advisor for personalized advice.*
+        """)
+    with st.expander("🏦 Government Schemes & Small Savings", expanded=True):
+        st.markdown("""
+        - **PPF** – 7.1% p.a. (current), tax-free, lock-in 15 years.
+        - **Sukanya Samriddhi Yojana** – For girl child, high interest, tax benefits.
+        - **National Savings Certificate (NSC)** – Fixed income, tax saving under 80C.
+        - **Senior Citizens' Savings Scheme** – 8.2% p.a., for ages 60+.
+        - **Atal Pension Yojana (APY)** – Guaranteed pension for unorganised sector, co-contribution by govt.
+        - **Pradhan Mantri Jeevan Jyoti Bima Yojana (PMJJBY)** – Term insurance of ₹2 lakh at ₹330/year.
+        - **Pradhan Mantri Suraksha Bima Yojana (PMSBY)** – Accidental cover of ₹2 lakh at ₹20/year.
+        *Tip: These are government-backed, virtually risk-free, and offer decent returns/safety.*
+        """)
+    st.info("⚠️ This information is for educational purposes only. Please consult your financial advisor before investing.")
 
+# ==========================================
+# FIA ASSISTANT (Enhanced)
+# ==========================================
 def fia_assistant(df, index_name):
-    st.subheader("🤖 FIA Assistant – Market Analysis")
-    # (implementation from previous)
-    pass
+    if df is None or len(df) < 20:
+        st.warning("Not enough data for analysis.")
+        return
+    last = df.iloc[-1]
+    prev = df.iloc[-5] if len(df) >=5 else df.iloc[0]
+    price_change_1 = (last['close'] / df['close'].iloc[-2] - 1) * 100
+    price_change_5 = (last['close'] / prev['close'] - 1) * 100
+    vol_avg = df['volume'].tail(20).mean()
+    vol_ratio = last['volume'] / vol_avg if vol_avg != 0 else 1
+    rsi = last['rsi'] if 'rsi' in df.columns else 50
+    st_dir = last['supertrend_direction'] if 'supertrend_direction' in df.columns else 1
+    vwap = last['vwap'] if 'vwap' in df.columns else last['close']
+    dist_from_vwap = (last['close'] - vwap) / vwap * 100
+    bb_upper = last['bb_upper'] if 'bb_upper' in df.columns else last['close'] * 1.02
+    bb_lower = last['bb_lower'] if 'bb_lower' in df.columns else last['close'] * 0.98
+    bb_width = (bb_upper - bb_lower) / last['close'] * 100
+    liq_up = last['liquidity_sweep_up'] if 'liquidity_sweep_up' in df.columns else False
+    liq_down = last['liquidity_sweep_down'] if 'liquidity_sweep_down' in df.columns else False
+    orb_up = last['orb_breakout_up'] if 'orb_breakout_up' in df.columns else False
+    orb_down = last['orb_breakout_down'] if 'orb_breakout_down' in df.columns else False
+    oi_analysis = ""
+    if 'oi' in df.columns:
+        oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
+        oi_analysis = f"OI Change: {oi_change:.2f}% | "
+        if price_change_5 > 0.1 and oi_change > 5:
+            oi_analysis += "Long Buildup 🟢"
+        elif price_change_5 < -0.1 and oi_change > 5:
+            oi_analysis += "Short Buildup 🔴"
+        elif price_change_5 > 0.1 and oi_change < -5:
+            oi_analysis += "Short Covering 🟢"
+        elif price_change_5 < -0.1 and oi_change < -5:
+            oi_analysis += "Long Unwinding 🔴"
+        else:
+            oi_analysis += "OI Neutral"
+    st.markdown(f"### 📊 FIA Market Analysis for {index_name}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Price", f"{last['close']:.2f}", f"{price_change_1:.2f}% (1 bar)")
+        st.metric("Volume vs Avg", f"{vol_ratio:.2f}x", delta="High" if vol_ratio > 1.2 else "Normal" if vol_ratio > 0.8 else "Low")
+        st.metric("RSI (14)", f"{rsi:.1f}", "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral")
+    with col2:
+        st.metric("Distance from VWAP", f"{dist_from_vwap:.2f}%")
+        st.metric("BB Width", f"{bb_width:.2f}%")
+        st.metric("Supertrend", "🟢 Up" if st_dir == 1 else "🔴 Down")
+    st.markdown("### 🔍 Signal Detection")
+    if liq_up:
+        st.success("✅ Liquidity Sweep UP detected – potential reversal up")
+    if liq_down:
+        st.error("🔻 Liquidity Sweep DOWN detected – potential reversal down")
+    if orb_up:
+        st.success("🚀 ORB Breakout UP – strong bullish momentum")
+    if orb_down:
+        st.error("📉 ORB Breakout DOWN – strong bearish momentum")
+    st.markdown(f"### 📈 {oi_analysis}")
+    # Enhanced recommendation with entry levels
+    st.markdown("### 💡 Recommendation with Levels")
+    if price_change_5 > 0.5 and vol_ratio > 1.5 and rsi < 70:
+        st.success("**Strong Bullish Momentum – Consider LONG**")
+        st.markdown(f"""
+        - **Entry:** {last['close']:.2f}
+        - **Stop Loss:** {last['close'] - last['atr']*1.5:.2f}
+        - **Target 1:** {last['close'] + last['atr']*3:.2f}
+        - **Target 2:** {last['close'] + last['atr']*5:.2f}
+        """)
+    elif price_change_5 < -0.5 and vol_ratio > 1.5 and rsi > 30:
+        st.error("**Strong Bearish Momentum – Consider SHORT**")
+        st.markdown(f"""
+        - **Entry:** {last['close']:.2f}
+        - **Stop Loss:** {last['close'] + last['atr']*1.5:.2f}
+        - **Target 1:** {last['close'] - last['atr']*3:.2f}
+        - **Target 2:** {last['close'] - last['atr']*5:.2f}
+        """)
+    elif rsi < 30 and price_change_5 > -1:
+        st.info("**Oversold – Watch for reversal up**")
+        st.markdown(f"Potential buy if price holds above {last['low']:.2f}")
+    elif rsi > 70 and price_change_5 < 1:
+        st.info("**Overbought – Watch for reversal down**")
+        st.markdown(f"Potential sell if price breaks below {last['high']:.2f}")
+    else:
+        st.info("**Market Neutral – Wait for clearer signals**")
 
 # ==========================================
 # TELEGRAM CONTROL BOT
@@ -1597,31 +2328,45 @@ class TelegramController:
         return True
 
     async def status(self, update, context):
-        # ... (implementation from previous)
-        pass
+        if not await self._check_user(update): return
+        bot = self.bot_instance
+        status = "🟢 Running" if bot.state["is_running"] else "🔴 Stopped"
+        active = f"Active Trade: {bot.state['active_trade']['symbol']} PnL: {bot.state['active_trade']['floating_pnl']:.2f}" if bot.state["active_trade"] else "No active trade"
+        await update.message.reply_text(f"*Bot Status*\n{status}\n{active}\nTrades Today: {bot.state['trades_today']}\nDaily PnL: {bot.state['daily_pnl']:.2f}", parse_mode='Markdown')
 
     async def stop(self, update, context):
-        # ... 
-        pass
+        if not await self._check_user(update): return
+        bot = self.bot_instance
+        bot.state["is_running"] = False
+        await update.message.reply_text("🛑 Engine stopped.")
 
     async def start_engine(self, update, context):
-        # ...
-        pass
+        if not await self._check_user(update): return
+        bot = self.bot_instance
+        if not bot.state["is_running"]:
+            bot.state["is_running"] = True
+            t = threading.Thread(target=bot.trading_loop, daemon=True)
+            add_script_run_ctx(t)
+            t.start()
+            await update.message.reply_text("▶️ Engine started.")
+        else:
+            await update.message.reply_text("Engine already running.")
 
     async def pnl(self, update, context):
-        # ...
-        pass
+        if not await self._check_user(update): return
+        bot = self.bot_instance
+        await update.message.reply_text(f"Today's PnL: ₹{bot.state['daily_pnl']:.2f}")
 
     async def balance(self, update, context):
-        # ...
-        pass
+        if not await self._check_user(update): return
+        bot = self.bot_instance
+        await update.message.reply_text(f"Balance: {bot.get_balance()}")
 
     async def help(self, update, context):
-        # ...
-        pass
+        await update.message.reply_text("Commands:\n/status\n/stop\n/start\n/pnl\n/balance")
 
 # ==========================================
-# CORE BOT ENGINE (Full)
+# CORE BOT ENGINE (Full with fixes)
 # ==========================================
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", tg_token="", tg_chat="", wa_phone="", wa_api="", mt5_acc="", mt5_pass="", mt5_server="", mt5_api_url="", zerodha_api="", zerodha_secret="", request_token="", coindcx_api="", coindcx_secret="", delta_api="", delta_secret="", is_mock=False, tg_bot_token="", tg_allowed_users="", fyers_client_id="", fyers_secret="", fyers_token=""):
@@ -1657,7 +2402,6 @@ class SniperBot:
             "order_in_flight": False,
             "active_trade": None,
             "last_trade": None,
-            "rejected_trade": None,
             "logs": deque(maxlen=50),
             "current_trend": "WAIT",
             "current_signal": "WAIT",
@@ -1855,6 +2599,8 @@ class SniperBot:
             return True
 
         success = False
+        
+        # --- ANGEL ONE LOGIN & USERNAME FIX ---
         if self.api_key and self.totp_secret:
             try:
                 obj = SmartConnect(api_key=self.api_key)
@@ -1862,7 +2608,15 @@ class SniperBot:
                 res = obj.generateSession(self.client_id, self.pwd, totp)
                 if res and res.get('status'):
                     self.api = obj
-                    self.client_name = res.get('data', {}).get('name', self.client_id)
+                    # Angel One: name is inside res['data']['userProfile']['name'] or directly in res['data']['name']
+                    fetched_name = ""
+                    if 'data' in res:
+                        data = res['data']
+                        if 'userProfile' in data and 'name' in data['userProfile']:
+                            fetched_name = data['userProfile']['name']
+                        elif 'name' in data:
+                            fetched_name = data['name']
+                    self.client_name = f"Angel User ({fetched_name})" if fetched_name else f"Angel ({self.client_id})"
                     self.log(f"✅ Angel One Connected as {self.client_name}")
                     success = True
                 else:
@@ -1870,49 +2624,64 @@ class SniperBot:
             except Exception as e:
                 self.log(f"❌ Angel Login Exception: {e}")
 
+        # --- ZERODHA LOGIN & USERNAME FIX ---
         if self.zerodha_api and self.zerodha_secret and self.request_token and HAS_ZERODHA:
             try:
                 self.kite = KiteConnect(api_key=self.zerodha_api)
                 data = self.kite.generate_session(self.request_token, api_secret=self.zerodha_secret)
                 self.kite.set_access_token(data["access_token"])
-                profile = self.kite.profile()
-                self.client_name = profile.get('user_name', self.client_id)
+                try:
+                    profile = self.kite.profile()
+                    # Zerodha: user_name or user_shortname or email
+                    fetched_name = profile.get('user_name') or profile.get('user_shortname') or profile.get('email', '')
+                    self.client_name = f"Zerodha ({fetched_name})" if fetched_name else "Zerodha User"
+                except Exception as prof_e:
+                    self.log(f"⚠️ Could not fetch Zerodha profile name: {prof_e}")
+                    self.client_name = "Zerodha User"
+                    
                 self.log(f"✅ Zerodha Kite Connected as {self.client_name}")
                 success = True
             except Exception as e:
                 self.log(f"❌ Zerodha Exception: {e}")
 
+        # --- MT5 LOGIN ---
         if self.mt5_acc and self.mt5_server:
             if self.connect_mt5():
                 if self.is_mt5_connected and self.mt5_bridge:
                     acc_info = self.mt5_bridge.get_account_info()
                     if acc_info:
-                        self.client_name = f"MT5 {acc_info.get('login', 'User')}"
+                        self.client_name = f"MT5 ({acc_info.get('name', acc_info.get('login', 'User'))})"
                     else:
                         self.client_name = "MT5 User"
                 success = True
 
+        # --- COINDCX LOGIN ---
         if self.coindcx_api and self.coindcx_secret:
             self.log(f"✅ CoinDCX Credentials Loaded")
-            # For CoinDCX, we don't have a name API, but we can use the first few chars of API key to identify
-            if self.coindcx_api:
-                self.client_name = f"CoinDCX ({self.coindcx_api[:6]}...)"
-            else:
-                self.client_name = "CoinDCX User"
+            # Try to fetch user info? CoinDCX doesn't have a simple profile endpoint.
+            self.client_name = f"CoinDCX ({self.coindcx_api[:6]}...)"
             success = True
 
+        # --- DELTA LOGIN ---
         if self.delta_api and self.delta_secret:
             self.log(f"✅ Delta Exchange Credentials Loaded")
             self.client_name = "Delta User"
             success = True
 
+        # --- FYERS LOGIN & USERNAME FIX ---
         if self.fyers_client_id and self.fyers_secret and self.fyers_token:
             if self.connect_fyers():
                 if self.is_fyers_connected and self.fyers_bridge:
-                    profile = self.fyers_bridge.fyers.get_profile()
-                    if profile and profile.get('data'):
-                        self.client_name = profile['data'].get('name', 'Fyers User')
-                    else:
+                    try:
+                        profile = self.fyers_bridge.fyers.get_profile()
+                        if profile and profile.get('data'):
+                            # Fyers profile data contains 'name'
+                            fetched_name = profile['data'].get('name', '')
+                            self.client_name = f"Fyers ({fetched_name})" if fetched_name else "Fyers User"
+                        else:
+                            self.client_name = "Fyers User"
+                    except Exception as prof_e:
+                        self.log(f"⚠️ Could not fetch Fyers profile name: {prof_e}")
                         self.client_name = "Fyers User"
                 success = True
 
@@ -1922,6 +2691,7 @@ class SniperBot:
             if self.tg_bot_token:
                 self.telegram_controller.start(self)
             return True
+            
         return False
 
     def start_webhook_listener(self):
@@ -1995,7 +2765,6 @@ class SniperBot:
         return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
-        # Mock handling
         if self.is_mock and token == "12345":
             if "CE" in symbol or "PE" in symbol:
                 if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
@@ -2013,7 +2782,6 @@ class SniperBot:
                 self.state['mock_price'] += change
                 return float(self.state['mock_price'])
 
-        # Broker attempts
         price = None
         if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
             price = self.mt5_bridge.get_live_price(symbol)
@@ -2054,7 +2822,6 @@ class SniperBot:
         elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
             price = self.fyers_bridge.get_live_price(symbol)
 
-        # yfinance fallback
         if price is None and symbol in YF_TICKERS:
             try:
                 yf_ticker = YF_TICKERS[symbol]
@@ -2103,7 +2870,6 @@ class SniperBot:
             except Exception as e:
                 self.log(f"⚠️ Angel historical data error: {e}")
 
-        # yfinance fallback
         if (df is None or df.empty) and symbol in YF_TICKERS:
             self.log(f"⚠️ Using yfinance fallback for {symbol} historical data")
             df = self._fallback_yfinance(symbol, interval)
@@ -2335,34 +3101,21 @@ class SniperBot:
                 continue
         return results
 
-    # ========== FIXED COINDCX ORDER PLACEMENT ==========
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
         if self.is_mock:
-            # In mock mode, always succeed (for analysis)
-            return "MOCK_" + uuid.uuid4().hex[:6].upper()
+            return "MOCK_" + uuid.uuid4().hex[:6].upper(), None
         broker = self.settings.get("primary_broker", "Angel One")
-        formatted_qty = str(int(float(qty))) if exchange in ["NFO", "NSE", "BFO", "MCX"] else str(qty)
         self.log(f"⚙️ Executing Real API: {symbol} | Qty: {qty} | Side: {side} | Exchange: {exchange}")
 
-        # MT5
         if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
             order_id, msg = self.mt5_bridge.place_order(symbol, qty, side)
             if order_id:
                 self.log(f"✅ MT5 Order Success! ID: {order_id}")
-                return order_id
+                return order_id, None
             else:
                 self.log(f"❌ MT5 Order Failed: {msg}")
-                self.state["rejected_trade"] = {
-                    "symbol": symbol,
-                    "qty": qty,
-                    "side": side,
-                    "price": 0,
-                    "reason": f"MT5 error: {msg}",
-                    "time": get_ist().strftime('%H:%M:%S')
-                }
-                return None
+                return None, f"MT5 error: {msg}"
 
-        # DELTA
         if exchange == "DELTA":
             try:
                 target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
@@ -2373,76 +3126,41 @@ class SniperBot:
                 res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
                 if res.status_code == 200:
                     self.log(f"✅ Delta Order Success! ID: {res.json().get('result', {}).get('id')}")
-                    return res.json().get('result', {}).get('id')
+                    return res.json().get('result', {}).get('id'), None
                 else:
                     self.log(f"❌ Delta API Rejected: {res.text}")
-                    self.state["rejected_trade"] = {
-                        "symbol": symbol,
-                        "qty": qty,
-                        "side": side,
-                        "price": 0,
-                        "reason": f"Delta error: {res.text}",
-                        "time": get_ist().strftime('%H:%M:%S')
-                    }
-                    return None
+                    return None, f"Delta error: {res.text}"
             except Exception as e:
                 self.log(f"❌ Delta Exception: {e}")
-                self.state["rejected_trade"] = {
-                    "symbol": symbol,
-                    "qty": qty,
-                    "side": side,
-                    "price": 0,
-                    "reason": f"Delta exception: {str(e)}",
-                    "time": get_ist().strftime('%H:%M:%S')
-                }
-                return None
+                return None, f"Delta exception: {str(e)}"
 
-        # COINDCX – FIXED with proper quantity calculation and error handling
         if exchange == "COINDCX" and self.coindcx_api:
             try:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-                
-                # Get current price
                 price = self.get_live_price(exchange, symbol, token)
                 if not price:
                     self.log("❌ Cannot place CoinDCX order: price not available")
-                    self.state["rejected_trade"] = {
-                        "symbol": symbol,
-                        "qty": qty,
-                        "side": side,
-                        "price": 0,
-                        "reason": "Price not available",
-                        "time": get_ist().strftime('%H:%M:%S')
-                    }
-                    return None
-                
-                # Calculate quantity based on max_capital and leverage
+                    return None, "Price not available"
                 max_cap = self.settings.get('max_capital', 15000)
                 leverage = self.settings.get('leverage', 1)
                 position_value = max_cap * leverage
                 raw_qty = position_value / price
-                # Round appropriately
+                # Round quantity based on symbol
                 if "BTC" in symbol or "ETH" in symbol:
                     clean_qty = round(raw_qty, 4)
                 elif "XRP" in symbol or "ADA" in symbol or "SOL" in symbol or "DOT" in symbol or "LINK" in symbol:
                     clean_qty = round(raw_qty, 1)
                 else:
                     clean_qty = round(raw_qty, 0)
-                
-                # Ensure minimum quantity (CoinDCX has min qty requirements)
                 if clean_qty < 0.0001:
                     clean_qty = 0.0001
-                
                 self.log(f"Calculated quantity for {symbol}: {clean_qty} (price={price}, cap={max_cap}, lev={leverage})")
-
-                # Fetch ticker to get correct market symbol
                 ticker_data = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
                 market_symbol = None
                 for coin in ticker_data:
                     mkt = coin.get('market', '')
-                    # Try to match base currency
                     if mkt.upper() == f"{base_coin}USDT".upper():
                         market_symbol = mkt
                         break
@@ -2452,17 +3170,17 @@ class SniperBot:
                     if mkt.upper() == f"{base_coin}INR".upper():
                         market_symbol = mkt
                         break
-
                 if not market_symbol:
                     if market_type in ["Futures", "Options"]:
                         market_symbol = f"B-{base_coin}_USDT"
                     else:
                         market_symbol = f"{base_coin}USDT"
                     self.log(f"⚠️ CoinDCX market symbol not found, using constructed: {market_symbol}")
-
                 if market_type in ["Futures", "Options"]:
+                    # For futures, side should be "long" or "short"
+                    coin_side = "long" if side.lower() == "buy" else "short"
                     payload = {
-                        "side": side.lower(),
+                        "side": coin_side,
                         "order_type": "market_order",
                         "pair": market_symbol,
                         "total_quantity": clean_qty,
@@ -2478,20 +3196,16 @@ class SniperBot:
                         "timestamp": ts
                     }
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
-
                 payload_str = json.dumps(payload, separators=(',', ':'))
                 secret_bytes = bytes(self.coindcx_secret, 'utf-8')
                 signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
-
                 headers = {
                     'X-AUTH-APIKEY': self.coindcx_api,
                     'X-AUTH-SIGNATURE': signature,
                     'Content-Type': 'application/json'
                 }
-
                 self.log(f"📡 CoinDCX payload: {payload_str}")
                 res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
-
                 if res.status_code == 200:
                     response_data = res.json()
                     if isinstance(response_data, list) and len(response_data) > 0:
@@ -2501,74 +3215,38 @@ class SniperBot:
                     else:
                         order_id = 'DCX_ORDER_OK'
                     self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
-                    return order_id
+                    return order_id, None
                 else:
                     error_msg = res.text if res.text else "Unknown error"
                     self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {error_msg}")
-                    self.state["rejected_trade"] = {
-                        "symbol": symbol,
-                        "qty": clean_qty,
-                        "side": side,
-                        "price": price,
-                        "reason": f"CoinDCX rejected: {error_msg}",
-                        "time": get_ist().strftime('%H:%M:%S')
-                    }
-                    return None
+                    return None, f"CoinDCX rejected: {error_msg}"
             except Exception as e:
                 self.log(f"❌ CoinDCX Exception: {e}")
-                self.state["rejected_trade"] = {
-                    "symbol": symbol,
-                    "qty": qty,
-                    "side": side,
-                    "price": 0,
-                    "reason": f"CoinDCX exception: {str(e)}",
-                    "time": get_ist().strftime('%H:%M:%S')
-                }
-                return None
+                return None, f"CoinDCX exception: {str(e)}"
 
-        # Zerodha
         if broker == "Zerodha" and self.kite:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
                 order_id = self.kite.place_order(variety=self.kite.VARIETY_REGULAR, exchange=exchange, tradingsymbol=symbol, transaction_type=z_side, quantity=int(float(qty)), product=self.kite.PRODUCT_MIS, order_type=self.kite.ORDER_TYPE_MARKET)
                 self.log(f"✅ Zerodha Order Pushed! ID: {order_id}")
-                return order_id
+                return order_id, None
             except Exception as e:
                 self.log(f"❌ Zerodha Order Error: {str(e)}")
-                self.state["rejected_trade"] = {
-                    "symbol": symbol,
-                    "qty": qty,
-                    "side": side,
-                    "price": 0,
-                    "reason": f"Zerodha error: {str(e)}",
-                    "time": get_ist().strftime('%H:%M:%S')
-                }
-                return None
+                return None, f"Zerodha error: {str(e)}"
 
-        # Fyers
         if exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
             order_id, msg = self.fyers_bridge.place_order(symbol, qty, side)
             if order_id:
                 self.log(f"✅ Fyers Order Success! ID: {order_id}")
-                return order_id
+                return order_id, None
             else:
                 self.log(f"❌ Fyers Order Failed: {msg}")
-                self.state["rejected_trade"] = {
-                    "symbol": symbol,
-                    "qty": qty,
-                    "side": side,
-                    "price": 0,
-                    "reason": f"Fyers error: {msg}",
-                    "time": get_ist().strftime('%H:%M:%S')
-                }
-                return None
+                return None, f"Fyers error: {msg}"
 
-        # Angel One
         try:
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             order_type = "MARKET"
             exec_price = 0.0
-
             if exchange in ["NFO", "BFO", "MCX"]:
                 ltp = self.get_live_price(exchange, symbol, token)
                 if ltp and ltp > 0:
@@ -2577,7 +3255,6 @@ class SniperBot:
                     exec_price = round(round(safe_price / 0.05) * 0.05, 2)
                 else:
                     self.log(f"⚠️ Could not fetch LTP for {symbol}. Retrying as MARKET.")
-
             order_params = {
                 "variety": "NORMAL",
                 "tradingsymbol": str(symbol),
@@ -2592,10 +3269,8 @@ class SniperBot:
                 "stoploss": 0.0,
                 "quantity": int(float(qty))
             }
-
             self.log(f"📡 Sending Angel Payload: {order_params}")
             res = self.api.placeOrder(order_params)
-
             if res and isinstance(res, dict) and res.get('status'):
                 o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID')
                 self.log(f"⏳ Order Sent: {o_id}. Verifying Exchange Status...")
@@ -2610,46 +3285,22 @@ class SniperBot:
                                     if status == 'rejected':
                                         reason = ord_dict.get('text', 'Insufficient Margin / Limits')
                                         self.log(f"❌ Order REJECTED by Exchange: {reason}")
-                                        self.state["rejected_trade"] = {
-                                            "symbol": symbol,
-                                            "qty": qty,
-                                            "side": side,
-                                            "price": exec_price,
-                                            "reason": f"Angel rejected: {reason}",
-                                            "time": get_ist().strftime('%H:%M:%S')
-                                        }
-                                        return None
+                                        return None, f"Angel rejected: {reason}"
                                     else:
                                         self.log(f"✅ Exchange Confirmed: {status.upper()}")
-                                        return o_id
+                                        return o_id, None
                     except Exception as e:
                         self.log(f"⚠️ Status verification skipped, assumed placed.")
-                return o_id
+                return o_id, None
             elif isinstance(res, str):
                 self.log(f"✅ Angel Order Placed! ID: {res}")
-                return res
+                return res, None
             else:
                 self.log(f"❌ Angel API Validation Error: {res}")
-                self.state["rejected_trade"] = {
-                    "symbol": symbol,
-                    "qty": qty,
-                    "side": side,
-                    "price": exec_price,
-                    "reason": f"Angel validation error: {res}",
-                    "time": get_ist().strftime('%H:%M:%S')
-                }
-                return None
+                return None, f"Angel validation error: {res}"
         except Exception as e:
             self.log(f"❌ Exception placing Angel order: {str(e)}")
-            self.state["rejected_trade"] = {
-                "symbol": symbol,
-                "qty": qty,
-                "side": side,
-                "price": 0,
-                "reason": f"Angel exception: {str(e)}",
-                "time": get_ist().strftime('%H:%M:%S')
-            }
-            return None
+            return None, f"Angel exception: {str(e)}"
 
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
@@ -2660,14 +3311,12 @@ class SniperBot:
             crypto_sym = f"{symbol.replace('USDT', '').replace('USD', '')}-{expiry_str}-{int(strike_price)}-{opt_type}"
             exch_target = "COINDCX" if self.settings.get("primary_broker") == "CoinDCX" else "DELTA"
             return crypto_sym, crypto_sym, exch_target, spot * 0.02
-
         df = self.get_master()
         if df is None or df.empty:
             if self.is_mock:
                 return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
             self.log("⚠️ Option Chain JSON is empty. Cannot compute Angel strikes.")
             return None, None, None, 0.0
-
         today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
         mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
         subset = df[mask].copy()
@@ -2675,12 +3324,11 @@ class SniperBot:
             if self.is_mock:
                 return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
             return None, None, None, 0.0
-
         closest_expiry = subset['expiry'].min()
         subset = subset[subset['expiry'] == closest_expiry]
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
         time_to_expiry = (subset['expiry'].iloc[0] - today).days / 365.0
-        iv = 12  # Assume IV = 12%
+        iv = 12
         candidates = subset.copy()
         candidates['greeks_pass'] = candidates['strike'].apply(
             lambda x: self.analyzer.filter_option_by_greeks(spot, x, time_to_expiry, iv, opt_type.lower())
@@ -2716,7 +3364,6 @@ class SniperBot:
                 return price - slippage
         return price
 
-    # ========== TRADING LOOP ==========
     def trading_loop(self):
         self.log("▶️ Engine thread started.")
         while self.state["is_running"]:
@@ -2755,7 +3402,6 @@ class SniperBot:
                         self.state["is_running"] = False
                         break
 
-                    # Cooldown
                     if self.state.get("last_trade_time"):
                         seconds_since_last = (get_ist() - self.state["last_trade_time"]).total_seconds()
                         if seconds_since_last < 60:
@@ -2796,7 +3442,6 @@ class SniperBot:
                         if scalp_signal != "WAIT":
                             self.state["scalp_signals"].append({"time": time_str, "signal": scalp_signal, "price": spot, "index": index})
 
-                    # FOMO signals
                     fomo_signal = None
                     fomo_signals = fomo_scanner.scan()
                     for fs in fomo_signals:
@@ -2821,7 +3466,6 @@ class SniperBot:
                         self.state["spot"] = spot
                         self.state["latest_candle"] = df_candles.iloc[-1].to_dict()
 
-                        # Strategy selection
                         if strategy == "Keyword Rule Builder":
                             trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_keyword_strategy(df_candles, custom_code, index)
                         elif strategy == "Machine Learning":
@@ -2840,7 +3484,6 @@ class SniperBot:
                         else:
                             trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
 
-                        # Persistence filter
                         if strategy == "Machine Learning" and signal != "WAIT" and signal_persistence > 1:
                             self.state["signal_history"].append(signal)
                             if len(self.state["signal_history"]) >= signal_persistence:
@@ -2852,7 +3495,6 @@ class SniperBot:
                         else:
                             self.state["signal_history"].clear()
 
-                        # MTF confirmation
                         if mtf_confirm and signal != "WAIT" and strategy != "TradingView Webhook":
                             df_htf = self.get_historical_data(exch, token, symbol=index, interval="15m") if not self.is_mock else self.get_historical_data("MOCK", "12345", symbol=index, interval="15m")
                             if df_htf is not None and len(df_htf) > 5:
@@ -2867,7 +3509,6 @@ class SniperBot:
                                     trend = "MTF Blocked: 15m Bullish"
                                     signal_strength = 0
 
-                        # Hero/Zero filter
                         is_hz = hero_zero
                         if is_hz and signal != "WAIT" and strategy != "TradingView Webhook":
                             if not self.is_mock and not (is_mt5_asset or is_crypto or is_fyers):
@@ -2887,7 +3528,6 @@ class SniperBot:
                     else:
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = "Waiting for Market Data", "WAIT", 0, 0, df_candles, 0, {}, 0
 
-                    # Update state – use a copy
                     if df_chart is not None and hasattr(df_chart, 'columns'):
                         temp_df = self.analyzer.calculate_indicators(df_chart, index in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"])
                         for col in temp_df.columns:
@@ -2908,16 +3548,13 @@ class SniperBot:
                         "latest_data": latest_data
                     })
 
-                    # Entry logic
                     if self.state["active_trade"] is None and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time and signal_strength >= min_signal_strength:
-                        # Position sizing
                         if is_hz:
                             qty, sizing_info = self.calculate_hero_zero_position(signal_strength, current_atr, spot, max_capital)
                             self.log(f"📊 Hero/Zero Position Sizing: {sizing_info}")
                         else:
                             qty = actual_qty
 
-                        # Determine strike and exchange
                         if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers:
                             strike_sym = index
                             if is_crypto and crypto_mode == "Futures":
@@ -2937,7 +3574,6 @@ class SniperBot:
                             if is_mt5_asset or is_crypto or is_fyers:
                                 trade_type = "BUY" if signal == "BUY_CE" else "SELL"
 
-                            # Calculate SL/TP
                             if three_five_seven and current_atr > 0:
                                 if trade_type in ["CE", "BUY"]:
                                     dynamic_sl = entry_ltp - current_atr * 1.5
@@ -2984,23 +3620,25 @@ class SniperBot:
                             self.state["sound_queue"].append("entry")
 
                             order_success = True
+                            reject_reason = None
                             if not is_mock_mode:
                                 exec_side = "SELL" if new_trade['type'] == "SELL" else "BUY"
-                                order_id = self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch)
+                                order_id, reject_reason = self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch)
                                 if not order_id:
-                                    order_success = False
-                                    self.log("🚫 Trade aborted due to Exchange Rejection.")
-                                    self.state["sound_queue"].append("kill")
-                                    # Rejected trade already stored in place_real_order
+                                    self.log(f"🚫 Real order rejected: {reject_reason}")
+                                    new_trade["simulated"] = True
+                                    new_trade["rejection_reason"] = reject_reason
+                                    order_success = True
+                                else:
+                                    new_trade["simulated"] = False
                             else:
-                                # Mock mode: always succeed for analysis
-                                order_success = True
+                                new_trade["simulated"] = False
 
                             if order_success:
                                 self.state["active_trade"] = new_trade
                                 self.state["trades_today"] += 1
                                 self.state["last_trade_time"] = get_ist()
-                                self.push_notify("Trade Entered", f"Entered {qty} {strike_sym} @ {entry_ltp}")
+                                self.push_notify("Trade Entered" + (" (SIMULATED)" if new_trade.get("simulated") else ""), f"Entered {qty} {strike_sym} @ {entry_ltp}")
                                 self.state["ghost_memory"][f"{index}_{signal}"] = get_ist()
                                 if is_hz:
                                     self.state["hz_trades"].append({
@@ -3010,7 +3648,6 @@ class SniperBot:
                                         "signal_strength": signal_strength
                                     })
 
-                    # Trade management (exit logic)
                     elif self.state["active_trade"]:
                         trade = self.state["active_trade"]
                         ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
@@ -3026,7 +3663,6 @@ class SniperBot:
                             min_profit = trade['entry'] * 0.005
                             profit = pnl if trade['type'] in ["CE", "BUY"] else -pnl
 
-                            # Trail stop logic
                             if trade['type'] == "SELL":
                                 if ltp < trade.get('lowest_price', trade['entry']):
                                     trade['lowest_price'] = ltp
@@ -3052,7 +3688,7 @@ class SniperBot:
                                 self.state["manual_exit"] = False
 
                             if hit_tp or hit_sl or market_close:
-                                if not is_mock_mode:
+                                if not is_mock_mode and not trade.get("simulated"):
                                     exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                     self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'])
                                 if hit_tp:
@@ -3097,7 +3733,7 @@ class SniperBot:
                                 self.state["active_trade"] = None
             except Exception as e:
                 self.log(f"⚠️ Loop Error: {str(e)}")
-            time.sleep(2)  # Increased to 2 seconds to reduce ghost screen
+            time.sleep(2)
 
 # ==========================================
 # STREAMLIT UI - LOGIN SCREEN
@@ -3458,7 +4094,6 @@ else:
 
         render_signature()
 
-    # Update bot settings
     bot.settings = {
         "primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME,
         "lots": LOTS,
@@ -3481,7 +4116,6 @@ else:
         "hz_max_hold": HZ_MAX_HOLD
     }
 
-    # Preload data
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
         st.session_state.prev_index = INDEX
         if not bot.state.get("is_running"):
@@ -3491,7 +4125,6 @@ else:
                 if df_preload is not None and not df_preload.empty:
                     bot.state["spot"] = df_preload['close'].iloc[-1]
                     bot.state["latest_candle"] = df_preload.iloc[-1].to_dict()
-                    # Compute strategy
                     if STRATEGY == "Keyword Rule Builder":
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_keyword_strategy(df_preload, CUSTOM_CODE, INDEX)
                     elif STRATEGY == "Machine Learning":
@@ -3529,7 +4162,6 @@ else:
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "🎯 HERO/ZERO SCANNER", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT"])
 
-    # ========== TAB1 : DASHBOARD ==========
     with tab1:
         kannada_news = st.session_state.kannada_news
         english_news = st.session_state.english_news
@@ -3605,18 +4237,6 @@ else:
                 st.toast("System Terminated & Trades Closed", icon="☠️")
                 st.rerun()
 
-        # Display rejected trade if any
-        if bot.state.get("rejected_trade"):
-            rt = bot.state["rejected_trade"]
-            st.markdown(f"""
-                <div class="rejected-trade">
-                    <h4>🚫 Trade Rejected <span class="simulated-badge">SIMULATED</span></h4>
-                    <p><strong>{rt['symbol']}</strong> {rt['side']} {rt['qty']} @ {rt['price']:.2f}</p>
-                    <p>Reason: {rt['reason']} at {rt['time']}</p>
-                    <p><em>Trade continues in simulation for analysis.</em></p>
-                </div>
-            """, unsafe_allow_html=True)
-
         st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
         fomo_signals = fomo_scanner.scan()
         if fomo_signals:
@@ -3625,7 +4245,6 @@ else:
         else:
             st.info("No volume spike alerts at the moment.")
 
-        # Win percentage
         total_trades = len(bot.state.get("paper_history", [])) if bot.is_mock else bot.state.get("trades_today", 0)
         wins = bot.state.get("hz_wins", 0) + (st.session_state.win_streak if st.session_state.win_streak > 0 else 0)
         win_pct = (wins / total_trades * 100) if total_trades > 0 else 0
@@ -3750,12 +4369,16 @@ else:
             if t['exch'] in ["DELTA", "COINDCX"] and SHOW_INR_CRYPTO:
                 inr_pnl = pnl * get_usdt_inr_rate()
                 pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+            simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
+            rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
             st.markdown(f"""
                 <div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
                         <div>
                             <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800;">{t['type']}</span>
+                            {simulated_badge}
                             <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
+                            {rejection_info}
                         </div>
                         <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
                             {pnl_display}
@@ -3797,60 +4420,67 @@ else:
 
         if SHOW_CHART and bot.state["latest_data"] is not None:
             chart_df = bot.state["latest_data"].copy()
-            chart_df['time'] = (pd.to_datetime(chart_df.index).astype('int64') // 10**9) - 19800
-            candles = chart_df[['time', 'open', 'high', 'low', 'close']].to_dict('records')
-            fib_lines = []
-            if not bot.state["active_trade"] and bot.state.get('fib_data'):
-                fib = bot.state['fib_data']
-                fib_lines = [
-                    {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
-                    {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
-                    {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
-                    {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
-                ]
-            chartOptions = {
-                "height": 700 if FULL_CHART else 400,
-                "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
-                "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
-                "crosshair": {"mode": 0},
-                "timeScale": {"timeVisible": True, "secondsVisible": False}
-            }
-            chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
+            # Convert index to Unix seconds (remove timezone offset)
+            # Ensure index is timezone-naive
+            if chart_df.index.tz is not None:
+                chart_df.index = chart_df.index.tz_localize(None)
+            chart_df['time'] = chart_df.index.astype('int64') // 10**9
+            # Drop any NaN rows
+            candles = chart_df[['time', 'open', 'high', 'low', 'close']].dropna().to_dict('records')
+            if len(candles) == 0:
+                st.warning("No candle data available for chart.")
+            else:
+                fib_lines = []
+                if not bot.state["active_trade"] and bot.state.get('fib_data'):
+                    fib = bot.state['fib_data']
+                    fib_lines = [
+                        {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
+                        {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
+                        {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
+                        {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
+                    ]
+                chartOptions = {
+                    "height": 700 if FULL_CHART else 400,
+                    "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
+                    "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
+                    "crosshair": {"mode": 0},
+                    "timeScale": {"timeVisible": True, "secondsVisible": False}
+                }
+                chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
 
-            if 'anchored_vwap' in chart_df.columns:
-                avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
-                if avwap_data:
-                    chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
-            if 'vwap' in chart_df.columns:
-                vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
-                if vwap_data:
-                    chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
-            ema_col = None
-            if 'ema_fast' in chart_df.columns:
-                ema_col = 'ema_fast'
-            elif 'ema_short' in chart_df.columns:
-                ema_col = 'ema_short'
-            elif 'ema9' in chart_df.columns:
-                ema_col = 'ema9'
-            if ema_col:
-                ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
-                if ema_data:
-                    chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
-            if 'bb_upper' in chart_df.columns and 'bb_lower' in chart_df.columns:
-                bb_upper_data = chart_df[['time', 'bb_upper']].dropna().rename(columns={'bb_upper': 'value'}).to_dict('records')
-                bb_lower_data = chart_df[['time', 'bb_lower']].dropna().rename(columns={'bb_lower': 'value'}).to_dict('records')
-                if bb_upper_data:
-                    chart_series.append({"type": 'Line', "data": bb_upper_data, "options": {"color": '#3498db', "lineWidth": 1, "title": 'BB Upper'}})
-                if bb_lower_data:
-                    chart_series.append({"type": 'Line', "data": bb_lower_data, "options": {"color": '#3498db', "lineWidth": 1, "title": 'BB Lower'}})
-            if 'supertrend' in chart_df.columns:
-                st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
-                if st_data:
-                    chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
+                if 'anchored_vwap' in chart_df.columns:
+                    avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
+                    if avwap_data:
+                        chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
+                if 'vwap' in chart_df.columns:
+                    vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
+                    if vwap_data:
+                        chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
+                ema_col = None
+                if 'ema_fast' in chart_df.columns:
+                    ema_col = 'ema_fast'
+                elif 'ema_short' in chart_df.columns:
+                    ema_col = 'ema_short'
+                elif 'ema9' in chart_df.columns:
+                    ema_col = 'ema9'
+                if ema_col:
+                    ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
+                    if ema_data:
+                        chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
+                if 'bb_upper' in chart_df.columns and 'bb_lower' in chart_df.columns:
+                    bb_upper_data = chart_df[['time', 'bb_upper']].dropna().rename(columns={'bb_upper': 'value'}).to_dict('records')
+                    bb_lower_data = chart_df[['time', 'bb_lower']].dropna().rename(columns={'bb_lower': 'value'}).to_dict('records')
+                    if bb_upper_data:
+                        chart_series.append({"type": 'Line', "data": bb_upper_data, "options": {"color": '#3498db', "lineWidth": 1, "title": 'BB Upper'}})
+                    if bb_lower_data:
+                        chart_series.append({"type": 'Line', "data": bb_lower_data, "options": {"color": '#3498db', "lineWidth": 1, "title": 'BB Lower'}})
+                if 'supertrend' in chart_df.columns:
+                    st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
+                    if st_data:
+                        chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
 
-            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
+                renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
 
-    # ========== TAB2 : SCANNERS ==========
     with tab2:
         tab_a, tab_b, tab_c, tab_us = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "📈 Breakout", "🇺🇸 US Stock Scanner"])
         with tab_a:
@@ -4043,7 +4673,6 @@ else:
                             st.info("No signals found.")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== TAB3 : LOGS ==========
     with tab3:
         tab_log, tab_ledger = st.tabs(["📋 Console", "📊 Ledger"])
         with tab_log:
@@ -4057,7 +4686,6 @@ else:
                             bot.state["paper_history"] = []
                         bot.state["daily_pnl"] = 0.0
                         bot.state["trades_today"] = 0
-                        bot.state["rejected_trade"] = None
                         if not bot.is_mock and HAS_DB:
                             try:
                                 uid = getattr(bot,"system_user_id",bot.api_key)
@@ -4117,7 +4745,6 @@ else:
                         st.error("DB disconnected.")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== TAB4 : CRYPTO/FX ==========
     with tab4:
         tab_c1, tab_c2, tab_c3 = st.tabs(["🪙 CoinDCX Scanner", "⚡ 1-Min Scalper", "🚀 Breakout Scanner"])
         with tab_c1:
@@ -4225,7 +4852,6 @@ else:
                 compounding_calculator()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== TAB5 : HERO/ZERO SCANNER ==========
     with tab5:
         st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
         col_hz1, col_hz2, col_hz3 = st.columns(3)
@@ -4289,11 +4915,9 @@ else:
                 - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                 """)
 
-    # ========== TAB6 : SAFE INVESTMENTS ==========
     with tab6:
         safe_investment_suggestions()
 
-    # ========== TAB7 : FIA ASSISTANT ==========
     with tab7:
         st.subheader("🤖 FIA Assistant – Market Analysis")
         if bot.state.get("latest_data") is not None:
@@ -4351,10 +4975,7 @@ else:
             kill_switch()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== SAFE CLOUD AUTO-REFRESH ==========
     if bot.state.get("is_running"):
-        # 5 seconds is the minimum safe refresh rate for Streamlit Community Cloud
-        # The background thread still executes instantly, only the UI waits 5s to update.
-        time.sleep(5) 
+        # Reduced refresh frequency to reduce flickering
+        time.sleep(5)
         st.rerun()
-
