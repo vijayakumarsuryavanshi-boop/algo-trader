@@ -3302,57 +3302,7 @@ class SniperBot:
             self.log(f"❌ Exception placing Angel order: {str(e)}")
             return None, f"Angel exception: {str(e)}"
 
-    def get_strike(self, symbol, spot, signal, max_premium=None):
-        opt_type = "CE" if "BUY_CE" in signal else "PE"
-        
-        # 1. Crypto Options Handling
-        if self.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange"] and self.settings.get("crypto_mode") == "Options":
-            rounder = 500 if "BTC" in symbol else (50 if "ETH" in symbol else 1)
-            strike_price = round(spot / rounder) * rounder
-            expiry_str = (get_ist() + dt.timedelta(days=(4 - get_ist().weekday()) % 7)).strftime("%d%b%y").upper()
-            crypto_sym = f"{symbol.replace('USDT', '').replace('USD', '')}-{expiry_str}-{int(strike_price)}-{opt_type}"
-            exch_target = "COINDCX" if self.settings.get("primary_broker") == "CoinDCX" else "DELTA"
-            return crypto_sym, crypto_sym, exch_target, spot * 0.02
-
-        # 2. Indian Indices (NFO/BFO/MCX) Handling
-        df = self.get_master()
-        if df is None or df.empty:
-            if self.is_mock:
-                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", 100.0
-            self.log("⚠️ Option Chain JSON is empty. Cannot compute strikes.")
-            return None, None, None, 0.0
-
-        # Filter for today's active options for the specific index
-        today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
-        mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
-        subset = df[mask].copy()
-        
-        if subset.empty:
-            if self.is_mock:
-                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", 100.0
-            return None, None, None, 0.0
-
-        # Get the closest weekly expiry
-        closest_expiry = subset['expiry'].min()
-        candidates = subset[subset['expiry'] == closest_expiry].copy()
-        
-        # BULLETPROOF FIX: Calculate absolute distance to spot price to find At-The-Money (ATM)
-        # We bypass the Greeks filter entirely since it breaks on large index values.
-        candidates['dist_to_spot'] = abs(candidates['strike'] - spot)
-        candidates = candidates.sort_values('dist_to_spot', ascending=True)
-
-        # 3. Execution Loop
-        for _, row in candidates.iterrows():
-            ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
-            
-            if ltp is None and self.is_mock:
-                ltp = 100.0 
-            
-            if ltp and ltp > 0:
-                return row['symbol'], row['token'], row['exch_seg'], ltp
-                
-        self.log(f"⚠️ No valid {opt_type} strikes with live pricing found.")
-        return None, None, None, 0.0
+    def get_strike
         closest_expiry = subset['expiry'].min()
         subset = subset[subset['expiry'] == closest_expiry]
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
