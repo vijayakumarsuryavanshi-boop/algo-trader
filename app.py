@@ -2765,72 +2765,85 @@ class SniperBot:
         return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
-        if self.is_mock and token == "12345":
+        # --- 1. MOCK / PAPER TRADING LOGIC ---
+        if self.is_mock:
+            # If it's an Option (CE or PE)
             if "CE" in symbol or "PE" in symbol:
                 if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
                     base_price = self.state["active_trade"]["entry"]
+                    # Simulate realistic tick movement up/down
                     change = np.random.normal(0, base_price * 0.005)
                     new_ltp = self.state["active_trade"].get("current_ltp", base_price) + change
-                    return float(new_ltp)
-                return float(np.random.uniform(150, 300))
+                    return float(max(0.05, new_ltp)) # Prevent negative prices
+                return float(np.random.uniform(80, 200)) # Random initial option price
+                
+            # If it's a standard Index/Stock
             else:
                 if self.state.get('mock_price') is None:
-                    base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
-                    base = base_prices.get(symbol, 500)
-                    self.state['mock_price'] = float(base)
+                    base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "BTCUSD": 65000.0}
+                    self.state['mock_price'] = float(base_prices.get(symbol, 500))
                 change = np.random.normal(0, self.state['mock_price'] * 0.0005)
                 self.state['mock_price'] += change
                 return float(self.state['mock_price'])
 
+        # --- 2. REAL TRADING LOGIC ---
         price = None
+        
         if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
             price = self.mt5_bridge.get_live_price(symbol)
+            
         elif exchange == "COINDCX" and self.coindcx_api:
             try:
                 market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
                 res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
                 for coin in res:
                     mkt = coin.get('market', '')
-                    if mkt == market_symbol or mkt.upper() == market_symbol.upper() or mkt.replace('_', '').upper() == market_symbol.upper():
+                    if mkt.upper() == market_symbol.upper() or mkt.replace('_', '').upper() == market_symbol.upper():
                         price = float(coin['last_price'])
                         break
             except Exception as e:
                 self.log(f"⚠️ CoinDCX price fetch error: {e}")
+                
         elif exchange == "DELTA" and self.delta_api:
             try:
                 target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
                 res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={target}").json()
                 if res.get('success'):
                     price = float(res['result']['close'])
-            except:
-                pass
+            except: pass
+            
         elif self.kite and self.settings.get("primary_broker") == "Zerodha":
             try:
                 tsym = f"{exchange}:{symbol}"
                 res = self.kite.quote([tsym])
                 price = float(res[tsym]['last_price'])
-            except:
-                pass
+            except: pass
+            
         elif self.api:
             try:
                 trading_symbol = INDEX_SYMBOLS.get(symbol, symbol)
+                # Primary attempt: ltpData
                 res = self.api.ltpData(exchange, trading_symbol, str(token))
                 if res and res.get('status'):
                     price = float(res['data']['ltp'])
-            except:
-                pass
+                else:
+                    # Fallback attempt: marketData (if ltpData is rate-limited)
+                    res_md = self.api.marketData({"mode": "LTP", "exchangeTokens": {exchange: [str(token)]}})
+                    if res_md and res_md.get('status') and res_md.get('data') and res_md['data'].get('fetched'):
+                        price = float(res_md['data']['fetched'][0]['ltp'])
+            except: pass
+            
         elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
             price = self.fyers_bridge.get_live_price(symbol)
 
+        # Fallback to YFinance for global assets if broker API fails
         if price is None and symbol in YF_TICKERS:
             try:
                 yf_ticker = YF_TICKERS[symbol]
                 df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
                 if not df.empty:
                     price = float(df['Close'].iloc[-1])
-                    self.log(f"⚠️ Using yfinance fallback for {symbol}: {price}")
-            except:
-                pass
+            except: pass
 
         return price
 
@@ -5004,4 +5017,5 @@ else:
         # Reduced refresh frequency to reduce flickering
         time.sleep(5)
         st.rerun()
+
 
