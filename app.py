@@ -4351,7 +4351,10 @@ else:
             kill_switch()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Auto-refresh with longer interval
+    # ========== SAFE CLOUD AUTO-REFRESH ==========
     if bot.state.get("is_running"):
-        time.sleep(2)
+        # 5 seconds is the minimum safe refresh rate for Streamlit Community Cloud
+        # The background thread still executes instantly, only the UI waits 5s to update.
+        time.sleep(5) 
         st.rerun()
+
