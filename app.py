@@ -2588,7 +2588,7 @@ class SniperBot:
             return f"₹ {current_cap:,.2f} (Manual Cap)"
         return " | ".join(b_str)
 
-    def login(self):
+   def login(self):
     if self.is_mock:
         self.client_name, self.api_key = "Paper Trading User", "mock_user"
         self.user_hash = get_user_hash(self.api_key)
@@ -2599,7 +2599,7 @@ class SniperBot:
         return True
 
     success = False
-    # Helper to set client_name only if not already set
+
     def set_name(name):
         if self.client_name == "Offline User":
             self.client_name = name
@@ -2644,7 +2644,7 @@ class SniperBot:
                     set_name("MT5 User")
             success = True
 
-    # CoinDCX – set a descriptive name but only if no name yet
+    # CoinDCX
     if self.coindcx_api and self.coindcx_secret:
         self.log(f"✅ CoinDCX Credentials Loaded")
         if self.client_name == "Offline User":
@@ -2678,7 +2678,6 @@ class SniperBot:
             self.telegram_controller.start(self)
         return True
     return False
-
     def start_webhook_listener(self):
         if not HAS_FLASK:
             self.log("⚠️ Flask not installed. Webhook listener won't work.")
