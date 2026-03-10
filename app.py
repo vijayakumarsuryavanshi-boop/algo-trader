@@ -3302,8 +3302,10 @@ class SniperBot:
             self.log(f"❌ Exception placing Angel order: {str(e)}")
             return None, f"Angel exception: {str(e)}"
 
-    def get_strike(self, symbol, spot, signal, max_premium):
+    def get_strike(self, symbol, spot, signal, max_premium=None):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
+        
+        # 1. Crypto Options Handling
         if self.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange"] and self.settings.get("crypto_mode") == "Options":
             rounder = 500 if "BTC" in symbol else (50 if "ETH" in symbol else 1)
             strike_price = round(spot / rounder) * rounder
@@ -3311,40 +3313,59 @@ class SniperBot:
             crypto_sym = f"{symbol.replace('USDT', '').replace('USD', '')}-{expiry_str}-{int(strike_price)}-{opt_type}"
             exch_target = "COINDCX" if self.settings.get("primary_broker") == "CoinDCX" else "DELTA"
             return crypto_sym, crypto_sym, exch_target, spot * 0.02
+
+        # 2. Indian Indices (NFO/BFO/MCX) Handling
         df = self.get_master()
         if df is None or df.empty:
             if self.is_mock:
-                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
-            self.log("⚠️ Option Chain JSON is empty. Cannot compute Angel strikes.")
+                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", 100.0
+            self.log("⚠️ Option Chain JSON is empty. Cannot compute strikes.")
             return None, None, None, 0.0
+
+        # Filter for today's active options for the specific index
         today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
         mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
         subset = df[mask].copy()
+        
         if subset.empty:
             if self.is_mock:
-                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
+                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", 100.0
             return None, None, None, 0.0
+
+        # Get the closest weekly expiry
         closest_expiry = subset['expiry'].min()
         subset = subset[subset['expiry'] == closest_expiry]
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
         time_to_expiry = (subset['expiry'].iloc[0] - today).days / 365.0
         iv = 12
+        
+        # Filter strikes using your Option Greeks calculator
         candidates = subset.copy()
         candidates['greeks_pass'] = candidates['strike'].apply(
             lambda x: self.analyzer.filter_option_by_greeks(spot, x, time_to_expiry, iv, opt_type.lower())
         )
+        
+        # Sort so the closest ATM strike is at the top of the list
         candidates = candidates[candidates['greeks_pass']].sort_values('dist_to_spot', ascending=True)
+        
         if candidates.empty and self.is_mock:
-            return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
+            return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", 100.0
+
+        # 3. Execution Loop (Capital Limit Completely Removed)
         for _, row in candidates.iterrows():
             ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
+            
             if ltp is None and self.is_mock:
-                ltp = max_premium * 0.85
-            if ltp and ltp <= max_premium:
+                ltp = 100.0 # Standard mock price fallback
+            
+            # If the exchange returns a valid price, grab this strike immediately
+            if ltp and ltp > 0:
                 return row['symbol'], row['token'], row['exch_seg'], ltp
-        self.log(f"⚠️ Capital Filter: No valid {opt_type} strikes found below ₹{max_premium:.2f} premium.")
+                
+        # Fallback if no prices could be fetched from the broker
+        self.log(f"⚠️ No valid {opt_type} strikes with live pricing found.")
         return None, None, None, 0.0
-
+        
     def get_dynamic_lot_multiplier(self):
         win_streak = st.session_state.win_streak
         loss_streak = st.session_state.loss_streak
@@ -5009,4 +5030,5 @@ else:
         # Reduced refresh frequency to reduce flickering
         time.sleep(5)
         st.rerun()
+
 
