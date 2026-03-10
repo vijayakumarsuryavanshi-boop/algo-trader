@@ -2599,8 +2599,6 @@ class SniperBot:
             return True
 
         success = False
-        
-        # --- ANGEL ONE LOGIN & USERNAME FIX ---
         if self.api_key and self.totp_secret:
             try:
                 obj = SmartConnect(api_key=self.api_key)
@@ -2608,15 +2606,7 @@ class SniperBot:
                 res = obj.generateSession(self.client_id, self.pwd, totp)
                 if res and res.get('status'):
                     self.api = obj
-                    # Angel One: name is inside res['data']['userProfile']['name'] or directly in res['data']['name']
-                    fetched_name = ""
-                    if 'data' in res:
-                        data = res['data']
-                        if 'userProfile' in data and 'name' in data['userProfile']:
-                            fetched_name = data['userProfile']['name']
-                        elif 'name' in data:
-                            fetched_name = data['name']
-                    self.client_name = f"Angel User ({fetched_name})" if fetched_name else f"Angel ({self.client_id})"
+                    self.client_name = res.get('data', {}).get('name', self.client_id)
                     self.log(f"✅ Angel One Connected as {self.client_name}")
                     success = True
                 else:
@@ -2624,64 +2614,48 @@ class SniperBot:
             except Exception as e:
                 self.log(f"❌ Angel Login Exception: {e}")
 
-        # --- ZERODHA LOGIN & USERNAME FIX ---
         if self.zerodha_api and self.zerodha_secret and self.request_token and HAS_ZERODHA:
             try:
                 self.kite = KiteConnect(api_key=self.zerodha_api)
                 data = self.kite.generate_session(self.request_token, api_secret=self.zerodha_secret)
                 self.kite.set_access_token(data["access_token"])
-                try:
-                    profile = self.kite.profile()
-                    # Zerodha: user_name or user_shortname or email
-                    fetched_name = profile.get('user_name') or profile.get('user_shortname') or profile.get('email', '')
-                    self.client_name = f"Zerodha ({fetched_name})" if fetched_name else "Zerodha User"
-                except Exception as prof_e:
-                    self.log(f"⚠️ Could not fetch Zerodha profile name: {prof_e}")
-                    self.client_name = "Zerodha User"
-                    
+                profile = self.kite.profile()
+                self.client_name = profile.get('user_name', self.client_id)
                 self.log(f"✅ Zerodha Kite Connected as {self.client_name}")
                 success = True
             except Exception as e:
                 self.log(f"❌ Zerodha Exception: {e}")
 
-        # --- MT5 LOGIN ---
         if self.mt5_acc and self.mt5_server:
             if self.connect_mt5():
                 if self.is_mt5_connected and self.mt5_bridge:
                     acc_info = self.mt5_bridge.get_account_info()
                     if acc_info:
-                        self.client_name = f"MT5 ({acc_info.get('name', acc_info.get('login', 'User'))})"
+                        self.client_name = f"MT5 {acc_info.get('login', 'User')}"
                     else:
                         self.client_name = "MT5 User"
                 success = True
 
-        # --- COINDCX LOGIN ---
         if self.coindcx_api and self.coindcx_secret:
             self.log(f"✅ CoinDCX Credentials Loaded")
-            # Try to fetch user info? CoinDCX doesn't have a simple profile endpoint.
-            self.client_name = f"CoinDCX ({self.coindcx_api[:6]}...)"
+            if self.coindcx_api:
+                self.client_name = f"CoinDCX ({self.coindcx_api[:6]}...)"
+            else:
+                self.client_name = "CoinDCX User"
             success = True
 
-        # --- DELTA LOGIN ---
         if self.delta_api and self.delta_secret:
             self.log(f"✅ Delta Exchange Credentials Loaded")
             self.client_name = "Delta User"
             success = True
 
-        # --- FYERS LOGIN & USERNAME FIX ---
         if self.fyers_client_id and self.fyers_secret and self.fyers_token:
             if self.connect_fyers():
                 if self.is_fyers_connected and self.fyers_bridge:
-                    try:
-                        profile = self.fyers_bridge.fyers.get_profile()
-                        if profile and profile.get('data'):
-                            # Fyers profile data contains 'name'
-                            fetched_name = profile['data'].get('name', '')
-                            self.client_name = f"Fyers ({fetched_name})" if fetched_name else "Fyers User"
-                        else:
-                            self.client_name = "Fyers User"
-                    except Exception as prof_e:
-                        self.log(f"⚠️ Could not fetch Fyers profile name: {prof_e}")
+                    profile = self.fyers_bridge.fyers.get_profile()
+                    if profile and profile.get('data'):
+                        self.client_name = profile['data'].get('name', 'Fyers User')
+                    else:
                         self.client_name = "Fyers User"
                 success = True
 
@@ -2691,7 +2665,6 @@ class SniperBot:
             if self.tg_bot_token:
                 self.telegram_controller.start(self)
             return True
-            
         return False
 
     def start_webhook_listener(self):
@@ -3147,7 +3120,6 @@ class SniperBot:
                 leverage = self.settings.get('leverage', 1)
                 position_value = max_cap * leverage
                 raw_qty = position_value / price
-                # Round quantity based on symbol
                 if "BTC" in symbol or "ETH" in symbol:
                     clean_qty = round(raw_qty, 4)
                 elif "XRP" in symbol or "ADA" in symbol or "SOL" in symbol or "DOT" in symbol or "LINK" in symbol:
@@ -4421,65 +4393,59 @@ else:
         if SHOW_CHART and bot.state["latest_data"] is not None:
             chart_df = bot.state["latest_data"].copy()
             # Convert index to Unix seconds (remove timezone offset)
-            # Ensure index is timezone-naive
-            if chart_df.index.tz is not None:
-                chart_df.index = chart_df.index.tz_localize(None)
             chart_df['time'] = chart_df.index.astype('int64') // 10**9
             # Drop any NaN rows
             candles = chart_df[['time', 'open', 'high', 'low', 'close']].dropna().to_dict('records')
-            if len(candles) == 0:
-                st.warning("No candle data available for chart.")
-            else:
-                fib_lines = []
-                if not bot.state["active_trade"] and bot.state.get('fib_data'):
-                    fib = bot.state['fib_data']
-                    fib_lines = [
-                        {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
-                        {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
-                        {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
-                        {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
-                    ]
-                chartOptions = {
-                    "height": 700 if FULL_CHART else 400,
-                    "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
-                    "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
-                    "crosshair": {"mode": 0},
-                    "timeScale": {"timeVisible": True, "secondsVisible": False}
-                }
-                chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
+            fib_lines = []
+            if not bot.state["active_trade"] and bot.state.get('fib_data'):
+                fib = bot.state['fib_data']
+                fib_lines = [
+                    {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
+                    {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
+                    {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
+                    {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
+                ]
+            chartOptions = {
+                "height": 700 if FULL_CHART else 400,
+                "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
+                "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
+                "crosshair": {"mode": 0},
+                "timeScale": {"timeVisible": True, "secondsVisible": False}
+            }
+            chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
 
-                if 'anchored_vwap' in chart_df.columns:
-                    avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
-                    if avwap_data:
-                        chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
-                if 'vwap' in chart_df.columns:
-                    vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
-                    if vwap_data:
-                        chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
-                ema_col = None
-                if 'ema_fast' in chart_df.columns:
-                    ema_col = 'ema_fast'
-                elif 'ema_short' in chart_df.columns:
-                    ema_col = 'ema_short'
-                elif 'ema9' in chart_df.columns:
-                    ema_col = 'ema9'
-                if ema_col:
-                    ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
-                    if ema_data:
-                        chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
-                if 'bb_upper' in chart_df.columns and 'bb_lower' in chart_df.columns:
-                    bb_upper_data = chart_df[['time', 'bb_upper']].dropna().rename(columns={'bb_upper': 'value'}).to_dict('records')
-                    bb_lower_data = chart_df[['time', 'bb_lower']].dropna().rename(columns={'bb_lower': 'value'}).to_dict('records')
-                    if bb_upper_data:
-                        chart_series.append({"type": 'Line', "data": bb_upper_data, "options": {"color": '#3498db', "lineWidth": 1, "title": 'BB Upper'}})
-                    if bb_lower_data:
-                        chart_series.append({"type": 'Line', "data": bb_lower_data, "options": {"color": '#3498db', "lineWidth": 1, "title": 'BB Lower'}})
-                if 'supertrend' in chart_df.columns:
-                    st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
-                    if st_data:
-                        chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
+            if 'anchored_vwap' in chart_df.columns:
+                avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
+                if avwap_data:
+                    chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
+            if 'vwap' in chart_df.columns:
+                vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
+                if vwap_data:
+                    chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
+            ema_col = None
+            if 'ema_fast' in chart_df.columns:
+                ema_col = 'ema_fast'
+            elif 'ema_short' in chart_df.columns:
+                ema_col = 'ema_short'
+            elif 'ema9' in chart_df.columns:
+                ema_col = 'ema9'
+            if ema_col:
+                ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
+                if ema_data:
+                    chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
+            if 'bb_upper' in chart_df.columns and 'bb_lower' in chart_df.columns:
+                bb_upper_data = chart_df[['time', 'bb_upper']].dropna().rename(columns={'bb_upper': 'value'}).to_dict('records')
+                bb_lower_data = chart_df[['time', 'bb_lower']].dropna().rename(columns={'bb_lower': 'value'}).to_dict('records')
+                if bb_upper_data:
+                    chart_series.append({"type": 'Line', "data": bb_upper_data, "options": {"color": '#3498db', "lineWidth": 1, "title": 'BB Upper'}})
+                if bb_lower_data:
+                    chart_series.append({"type": 'Line', "data": bb_lower_data, "options": {"color": '#3498db', "lineWidth": 1, "title": 'BB Lower'}})
+            if 'supertrend' in chart_df.columns:
+                st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
+                if st_data:
+                    chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
 
-                renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
+            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
 
     with tab2:
         tab_a, tab_b, tab_c, tab_us = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "📈 Breakout", "🇺🇸 US Stock Scanner"])
@@ -4976,6 +4942,5 @@ else:
     st.markdown('</div>', unsafe_allow_html=True)
 
     if bot.state.get("is_running"):
-        # Reduced refresh frequency to reduce flickering
-        time.sleep(5)
+        time.sleep(2)
         st.rerun()
