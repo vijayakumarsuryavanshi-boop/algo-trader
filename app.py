@@ -4210,23 +4210,41 @@ else:
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
 
         st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
-                <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
-                    <div style="display: flex; justify-content: space-between;">
-                        <div>
-                            <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
-                            <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
-                        </div>
-                        <div style="text-align: right;">
-                            <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
-                            <span style="font-size: 2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+<div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
+        <div>
+            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800;">{t['type']}</span>
+            {simulated_badge}
+            <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
+            {rejection_info}
+        </div>
+        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
+            {pnl_display}
+        </div>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
+        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
+            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br>
+            <b style="font-size: 1.1rem; color: #0f111a;">{t['entry']:.4f}</b>
+        </div>
+        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
+            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br>
+            <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
+        </div>
+        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
+            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br>
+            <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span>
+        </div>
+        <div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;">
+            <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br>
+            <b style="font-size: 1.1rem; color: #ef4444;">{t['sl']:.4f}</b>
+        </div>
+    </div>
+    <div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700;">
+        🎯 TP1: {t.get('tp1', 0):.2f} &nbsp;|&nbsp; TP2: {t.get('tp2', 0):.2f} &nbsp;|&nbsp; TP3: {t.get('tp3', 0):.2f}
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
         is_running = bot.state["is_running"]
         status_color = "#22c55e" if is_running else "#ef4444"
@@ -5017,5 +5035,6 @@ else:
         # Reduced refresh frequency to reduce flickering
         time.sleep(5)
         st.rerun()
+
 
 
