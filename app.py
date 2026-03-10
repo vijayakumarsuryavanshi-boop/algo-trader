@@ -2387,7 +2387,8 @@ class SniperBot:
         self.fyers_bridge = None
         self.is_mt5_connected = False
         self.is_fyers_connected = False
-        self.client_name = "Offline User"
+        self.client_name = "Offline User"  # will be set on first successful login
+        self._primary_client_set = False   # flag to keep first client name
         self.client_ip = get_client_ip()
         self.user_hash = get_user_hash(self.api_key)
         self.analyzer = TechnicalAnalyzer()
@@ -2616,8 +2617,11 @@ class SniperBot:
                             fetched_name = data['userProfile']['name']
                         elif 'name' in data:
                             fetched_name = data['name']
-                    self.client_name = f"Angel User ({fetched_name})" if fetched_name else f"Angel ({self.client_id})"
-                    self.log(f"✅ Angel One Connected as {self.client_name}")
+                    # Set client_name only if not already set (first successful login)
+                    if not self._primary_client_set:
+                        self.client_name = f"Angel User ({fetched_name})" if fetched_name else f"Angel ({self.client_id})"
+                        self._primary_client_set = True
+                    self.log(f"✅ Angel One Connected as {fetched_name if fetched_name else self.client_id}")
                     success = True
                 else:
                     self.log(f"❌ Angel Login failed: {res.get('message', 'Check credentials')}")
@@ -2634,12 +2638,16 @@ class SniperBot:
                     profile = self.kite.profile()
                     # Zerodha: user_name or user_shortname or email
                     fetched_name = profile.get('user_name') or profile.get('user_shortname') or profile.get('email', '')
-                    self.client_name = f"Zerodha ({fetched_name})" if fetched_name else "Zerodha User"
+                    if not self._primary_client_set:
+                        self.client_name = f"Zerodha ({fetched_name})" if fetched_name else "Zerodha User"
+                        self._primary_client_set = True
                 except Exception as prof_e:
                     self.log(f"⚠️ Could not fetch Zerodha profile name: {prof_e}")
-                    self.client_name = "Zerodha User"
+                    if not self._primary_client_set:
+                        self.client_name = "Zerodha User"
+                        self._primary_client_set = True
                     
-                self.log(f"✅ Zerodha Kite Connected as {self.client_name}")
+                self.log(f"✅ Zerodha Kite Connected")
                 success = True
             except Exception as e:
                 self.log(f"❌ Zerodha Exception: {e}")
@@ -2650,22 +2658,30 @@ class SniperBot:
                 if self.is_mt5_connected and self.mt5_bridge:
                     acc_info = self.mt5_bridge.get_account_info()
                     if acc_info:
-                        self.client_name = f"MT5 ({acc_info.get('name', acc_info.get('login', 'User'))})"
+                        name = acc_info.get('name', acc_info.get('login', 'User'))
+                        if not self._primary_client_set:
+                            self.client_name = f"MT5 ({name})"
+                            self._primary_client_set = True
                     else:
-                        self.client_name = "MT5 User"
+                        if not self._primary_client_set:
+                            self.client_name = "MT5 User"
+                            self._primary_client_set = True
                 success = True
 
         # --- COINDCX LOGIN ---
         if self.coindcx_api and self.coindcx_secret:
             self.log(f"✅ CoinDCX Credentials Loaded")
-            # Try to fetch user info? CoinDCX doesn't have a simple profile endpoint.
-            self.client_name = f"CoinDCX ({self.coindcx_api[:6]}...)"
+            if not self._primary_client_set:
+                self.client_name = f"CoinDCX ({self.coindcx_api[:6]}...)"
+                self._primary_client_set = True
             success = True
 
         # --- DELTA LOGIN ---
         if self.delta_api and self.delta_secret:
             self.log(f"✅ Delta Exchange Credentials Loaded")
-            self.client_name = "Delta User"
+            if not self._primary_client_set:
+                self.client_name = "Delta User"
+                self._primary_client_set = True
             success = True
 
         # --- FYERS LOGIN & USERNAME FIX ---
@@ -2677,12 +2693,18 @@ class SniperBot:
                         if profile and profile.get('data'):
                             # Fyers profile data contains 'name'
                             fetched_name = profile['data'].get('name', '')
-                            self.client_name = f"Fyers ({fetched_name})" if fetched_name else "Fyers User"
+                            if not self._primary_client_set:
+                                self.client_name = f"Fyers ({fetched_name})" if fetched_name else "Fyers User"
+                                self._primary_client_set = True
                         else:
-                            self.client_name = "Fyers User"
+                            if not self._primary_client_set:
+                                self.client_name = "Fyers User"
+                                self._primary_client_set = True
                     except Exception as prof_e:
                         self.log(f"⚠️ Could not fetch Fyers profile name: {prof_e}")
-                        self.client_name = "Fyers User"
+                        if not self._primary_client_set:
+                            self.client_name = "Fyers User"
+                            self._primary_client_set = True
                 success = True
 
         if success:
@@ -2765,85 +2787,72 @@ class SniperBot:
         return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
-        # --- 1. MOCK / PAPER TRADING LOGIC ---
-        if self.is_mock:
-            # If it's an Option (CE or PE)
+        if self.is_mock and token == "12345":
             if "CE" in symbol or "PE" in symbol:
                 if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
                     base_price = self.state["active_trade"]["entry"]
-                    # Simulate realistic tick movement up/down
                     change = np.random.normal(0, base_price * 0.005)
                     new_ltp = self.state["active_trade"].get("current_ltp", base_price) + change
-                    return float(max(0.05, new_ltp)) # Prevent negative prices
-                return float(np.random.uniform(80, 200)) # Random initial option price
-                
-            # If it's a standard Index/Stock
+                    return float(new_ltp)
+                return float(np.random.uniform(150, 300))
             else:
                 if self.state.get('mock_price') is None:
-                    base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "BTCUSD": 65000.0}
-                    self.state['mock_price'] = float(base_prices.get(symbol, 500))
+                    base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
+                    base = base_prices.get(symbol, 500)
+                    self.state['mock_price'] = float(base)
                 change = np.random.normal(0, self.state['mock_price'] * 0.0005)
                 self.state['mock_price'] += change
                 return float(self.state['mock_price'])
 
-        # --- 2. REAL TRADING LOGIC ---
         price = None
-        
         if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
             price = self.mt5_bridge.get_live_price(symbol)
-            
         elif exchange == "COINDCX" and self.coindcx_api:
             try:
                 market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
                 res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
                 for coin in res:
                     mkt = coin.get('market', '')
-                    if mkt.upper() == market_symbol.upper() or mkt.replace('_', '').upper() == market_symbol.upper():
+                    if mkt == market_symbol or mkt.upper() == market_symbol.upper() or mkt.replace('_', '').upper() == market_symbol.upper():
                         price = float(coin['last_price'])
                         break
             except Exception as e:
                 self.log(f"⚠️ CoinDCX price fetch error: {e}")
-                
         elif exchange == "DELTA" and self.delta_api:
             try:
                 target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
                 res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={target}").json()
                 if res.get('success'):
                     price = float(res['result']['close'])
-            except: pass
-            
+            except:
+                pass
         elif self.kite and self.settings.get("primary_broker") == "Zerodha":
             try:
                 tsym = f"{exchange}:{symbol}"
                 res = self.kite.quote([tsym])
                 price = float(res[tsym]['last_price'])
-            except: pass
-            
+            except:
+                pass
         elif self.api:
             try:
                 trading_symbol = INDEX_SYMBOLS.get(symbol, symbol)
-                # Primary attempt: ltpData
                 res = self.api.ltpData(exchange, trading_symbol, str(token))
                 if res and res.get('status'):
                     price = float(res['data']['ltp'])
-                else:
-                    # Fallback attempt: marketData (if ltpData is rate-limited)
-                    res_md = self.api.marketData({"mode": "LTP", "exchangeTokens": {exchange: [str(token)]}})
-                    if res_md and res_md.get('status') and res_md.get('data') and res_md['data'].get('fetched'):
-                        price = float(res_md['data']['fetched'][0]['ltp'])
-            except: pass
-            
+            except:
+                pass
         elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
             price = self.fyers_bridge.get_live_price(symbol)
 
-        # Fallback to YFinance for global assets if broker API fails
         if price is None and symbol in YF_TICKERS:
             try:
                 yf_ticker = YF_TICKERS[symbol]
                 df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
                 if not df.empty:
                     price = float(df['Close'].iloc[-1])
-            except: pass
+                    self.log(f"⚠️ Using yfinance fallback for {symbol}: {price}")
+            except:
+                pass
 
         return price
 
@@ -3315,57 +3324,53 @@ class SniperBot:
             self.log(f"❌ Exception placing Angel order: {str(e)}")
             return None, f"Angel exception: {str(e)}"
 
-    def get_strike(self, symbol, spot, signal, max_premium=None):
-        opt_type = "CE" if "BUY_CE" in signal else "PE"
+    def get_atm_strike(self, symbol, spot, opt_type):
+        """Fast ATM strike selection - NO CAPITAL FILTERING"""
+        if self.is_mock:
+            return f"{symbol}{int(round(spot/100)*100)}{opt_type}", "12345", "NFO", spot * 0.1
         
-        # 1. Crypto Options Handling
-        if self.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange"] and self.settings.get("crypto_mode") == "Options":
-            rounder = 500 if "BTC" in symbol else (50 if "ETH" in symbol else 1)
-            strike_price = round(spot / rounder) * rounder
-            expiry_str = (get_ist() + dt.timedelta(days=(4 - get_ist().weekday()) % 7)).strftime("%d%b%y").upper()
-            crypto_sym = f"{symbol.replace('USDT', '').replace('USD', '')}-{expiry_str}-{int(strike_price)}-{opt_type}"
-            exch_target = "COINDCX" if self.settings.get("primary_broker") == "CoinDCX" else "DELTA"
-            return crypto_sym, crypto_sym, exch_target, spot * 0.02
-
-        # 2. Indian Indices (NFO/BFO/MCX) Handling
-        df = self.get_master()
-        if df is None or df.empty:
-            if self.is_mock:
-                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", 100.0
-            self.log("⚠️ Option Chain JSON is empty. Cannot compute strikes.")
-            return None, None, None, 0.0
-
-        # Filter for today's active options for the specific index
-        today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
-        mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
-        subset = df[mask].copy()
-        
-        if subset.empty:
-            if self.is_mock:
-                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", 100.0
-            return None, None, None, 0.0
-
-        # Get the closest weekly expiry
-        closest_expiry = subset['expiry'].min()
-        candidates = subset[subset['expiry'] == closest_expiry].copy()
-        
-        # BULLETPROOF FIX: Calculate absolute distance to spot price to find At-The-Money (ATM)
-        # We bypass the Greeks filter entirely since it breaks on large index values.
-        candidates['dist_to_spot'] = abs(candidates['strike'] - spot)
-        candidates = candidates.sort_values('dist_to_spot', ascending=True)
-
-        # 3. Execution Loop
-        for _, row in candidates.iterrows():
-            ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
+        try:
+            df_map = self.get_master()
+            if df_map is None or df_map.empty:
+                self.log("⚠️ Scrip master not available for ATM strike")
+                return None, None, None, 0.0
+                
+            today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
+            
+            # Filter for options
+            subset = df_map[
+                (df_map['name'] == symbol) & 
+                (df_map['instrumenttype'].isin(['OPTIDX', 'OPTSTK'])) &
+                (df_map['expiry'] >= today)
+            ].copy()
+            
+            if subset.empty:
+                self.log(f"⚠️ No options found for {symbol}")
+                return None, None, None, 0.0
+                
+            # Get closest expiry
+            closest_expiry = subset['expiry'].min()
+            subset = subset[subset['expiry'] == closest_expiry]
+            
+            # Find ATM strike (nearest to spot)
+            subset['dist_to_spot'] = abs(subset['strike'] - spot)
+            atm_row = subset.loc[subset['dist_to_spot'].idxmin()]
+            
+            # Get live price
+            ltp = self.get_live_price(atm_row['exch_seg'], atm_row['symbol'], atm_row['token'])
             
             if ltp is None and self.is_mock:
-                ltp = 100.0 
-            
-            if ltp and ltp > 0:
-                return row['symbol'], row['token'], row['exch_seg'], ltp
+                ltp = spot * 0.1
                 
-        self.log(f"⚠️ No valid {opt_type} strikes with live pricing found.")
-        return None, None, None, 0.0
+            if ltp:
+                return atm_row['symbol'], atm_row['token'], atm_row['exch_seg'], ltp
+            else:
+                self.log(f"⚠️ Could not fetch LTP for ATM {opt_type} strike")
+                return None, None, None, 0.0
+                
+        except Exception as e:
+            self.log(f"❌ Error getting ATM strike: {e}")
+            return None, None, None, 0.0
 
     def get_dynamic_lot_multiplier(self):
         win_streak = st.session_state.win_streak
@@ -3585,8 +3590,8 @@ class SniperBot:
                             strike_token, strike_exch = strike_sym, exch
                             entry_ltp = spot
                         else:
-                            max_prem = max_capital / qty if qty > 0 else 0
-                            strike_sym, strike_token, strike_exch, entry_ltp = self.get_strike(index, spot, signal, max_prem)
+                            # Get ATM strike directly - NO CAPITAL FILTERING
+                            strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
 
                         if strike_sym and entry_ltp:
                             if is_mock_mode:
@@ -3949,6 +3954,8 @@ else:
     head_c1, head_c2, head_c3 = st.columns([2, 1, 1])
     with head_c1:
         broker_name = bot.settings.get("primary_broker", "Unknown")
+        # Display the primary session name (first connected broker's username without broker tag)
+        # We have already set bot.client_name to the appropriate format during login.
         st.markdown(
             f"**👤 Session:** <span style='color:#0284c7; font-weight:800;'>{bot.client_name}</span> "
             f"<span class='broker-badge'>{broker_name}</span> | **IP:** `{bot.client_ip}`",
@@ -4210,41 +4217,23 @@ else:
         else: term_type = f"🇮🇳 {BROKER} NSE/NFO"
 
         st.markdown(f"""
-<div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
-        <div>
-            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800;">{t['type']}</span>
-            {simulated_badge}
-            <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
-            {rejection_info}
-        </div>
-        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
-            {pnl_display}
-        </div>
-    </div>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
-        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
-            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br>
-            <b style="font-size: 1.1rem; color: #0f111a;">{t['entry']:.4f}</b>
-        </div>
-        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
-            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br>
-            <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
-        </div>
-        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
-            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br>
-            <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span>
-        </div>
-        <div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;">
-            <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br>
-            <b style="font-size: 1.1rem; color: #ef4444;">{t['sl']:.4f}</b>
-        </div>
-    </div>
-    <div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700;">
-        🎯 TP1: {t.get('tp1', 0):.2f} &nbsp;|&nbsp; TP2: {t.get('tp2', 0):.2f} &nbsp;|&nbsp; TP3: {t.get('tp3', 0):.2f}
-    </div>
-</div>
-""", unsafe_allow_html=True)
+            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
+                <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
+                    <div style="display: flex; justify-content: space-between;">
+                        <div>
+                            <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
+                            <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
+                            <span style="font-size: 2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
         is_running = bot.state["is_running"]
         status_color = "#22c55e" if is_running else "#ef4444"
@@ -5035,6 +5024,3 @@ else:
         # Reduced refresh frequency to reduce flickering
         time.sleep(5)
         st.rerun()
-
-
-
