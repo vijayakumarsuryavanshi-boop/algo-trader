@@ -3952,6 +3952,7 @@ else:
     st.sidebar.markdown("---")
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
+        
         if not st.session_state.audio_enabled:
             if st.button("🔊 Enable Audio", use_container_width=True):
                 st.session_state.audio_enabled = True
@@ -3962,23 +3963,32 @@ else:
             st.success("🔊 Audio is ON")
 
         st.markdown("**1. Market Setup**")
-        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5", "Fyers"], index=0)
+        
+        # --- SAFE BROKER SELECTION ---
+        BROKER = st.selectbox(
+            "Primary Broker", 
+            ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5", "Fyers"], 
+            index=["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5", "Fyers"].index(st.session_state.bot.settings.get("primary_broker", "Angel One")) if getattr(st.session_state, 'bot', None) else 0
+        )
 
         st.divider()
         st.markdown("**📈 High‑Profit Strategies**")
         martingale_mode = st.selectbox("Martingale Mode", ["Off", "Martingale", "Anti‑Martingale"], index=0)
 
         st.markdown("**🚀 FOMO Mode**")
-        fomo_enabled = st.toggle("Enable FOMO (Trade Nifty, Bank Nifty, Sensex simultaneously)", value=st.session_state.fomo_mode)
+        fomo_enabled = st.toggle("Enable FOMO (Trade Nifty, BankNifty, Sensex)", value=st.session_state.fomo_mode)
         if fomo_enabled != st.session_state.fomo_mode:
             st.session_state.fomo_mode = fomo_enabled
             st.rerun()
 
+        # --- SAFE ASSET LIST GENERATION ---
         CUSTOM_STOCK = st.text_input("Add Custom Stock/Coin", value=st.session_state.custom_stock, placeholder="e.g. RELIANCE").upper().strip()
         st.session_state.custom_stock = CUSTOM_STOCK
+        
         all_assets = list(LOT_SIZES.keys()) + ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
         if CUSTOM_STOCK and CUSTOM_STOCK not in all_assets:
             all_assets.append(CUSTOM_STOCK)
+            
         if BROKER in ["CoinDCX", "Delta Exchange"]:
             valid_assets = [a for a in all_assets if "USD" in a or "USDT" in a]
         elif BROKER in ["Angel One", "Zerodha"]:
@@ -3987,15 +3997,20 @@ else:
             valid_assets = all_assets
         else:
             valid_assets = [a for a in all_assets if a in ["XAUUSD", "EURUSD", "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "BNBUSD", "LTCUSD", "DOTUSD", "MATICUSD", "SHIBUSD", "TRXUSD", "LINKUSD"]]
-        if CUSTOM_STOCK and CUSTOM_STOCK not in valid_assets:
+            
+        if CUSTOM_STOCK and CUSTOM_STOCK in valid_assets and CUSTOM_STOCK not in valid_assets:
             valid_assets.append(CUSTOM_STOCK)
+            
         if not valid_assets:
             valid_assets = ["NIFTY"] if BROKER in ["Angel One", "Zerodha"] else ["BTCUSD"]
+            
         st.session_state.asset_options = valid_assets
-        if st.session_state.sb_index_input not in valid_assets:
-            st.session_state.sb_index_input = valid_assets[0]
 
-        INDEX = st.selectbox("Watchlist Asset", valid_assets, index=valid_assets.index(st.session_state.sb_index_input), key="sb_index_input")
+        # PREVENT VALUE ERROR: Safely find index or default to 0
+        current_selection = st.session_state.get('sb_index_input', valid_assets[0])
+        safe_index = valid_assets.index(current_selection) if current_selection in valid_assets else 0
+        
+        INDEX = st.selectbox("Watchlist Asset", valid_assets, index=safe_index, key="sb_index_input")
         STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
         TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
 
@@ -4013,6 +4028,7 @@ else:
             )
             CUSTOM_CODE = ",".join(selected_rules)
             st.session_state.custom_code_input = CUSTOM_CODE
+            
         elif STRATEGY == "TradingView Webhook":
             st.divider()
             st.markdown("**📡 TradingView Integration**")
@@ -4038,14 +4054,16 @@ else:
         st.caption(f"1 lot = {lot_size} units for {INDEX}")
         min_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
         step_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
-        LOTS = st.number_input("Base Lots", min_value=min_val, max_value=10000.0, value=1.0, step=step_val, key=f"lots_input_{INDEX}")
+        
+        # REMOVED DYNAMIC KEY TO PREVENT RESETTING ON ASSET SWITCH
+        LOTS = st.number_input("Base Lots", min_value=min_val, max_value=10000.0, value=max(1.0, min_val), step=step_val, key="global_lots_input")
         actual_qty = LOTS * lot_size
         st.caption(f"Base quantity: {actual_qty:.2f} units")
 
         col_s1, col_s2 = st.columns(2)
         with col_s1:
             MAX_TRADES = st.number_input("Max Trades/Day", 1, 50, 5)
-            MAX_CAPITAL = st.number_input("Max Cap/Trade (₹/$)", 10.0, 500000.0, 15000.0, step=100.0)
+            MAX_CAPITAL = st.number_input("Max Cap/Trade", 10.0, 500000.0, 15000.0, step=100.0)
             SL_PTS = st.number_input("SL Points", 5.0, 500.0, 20.0)
             TSL_PTS = st.number_input("Trail SL", 5.0, 500.0, 15.0)
         with col_s2:
@@ -4059,8 +4077,8 @@ else:
         col_adv1, col_adv2 = st.columns(2)
         with col_adv1:
             MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
-            HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
-            THREE_FIVE_SEVEN = st.toggle("🔢 3-5-7 Rule (ATR based)", False)
+            HERO_ZERO = st.toggle("🚀 Hero/Zero Setup", False)
+            THREE_FIVE_SEVEN = st.toggle("🔢 3-5-7 Rule (ATR)", False)
         with col_adv2:
             if STRATEGY == "Machine Learning":
                 ML_PROB_THRESHOLD = st.slider("ML Probability Threshold", 0.1, 0.6, 0.30, 0.05)
@@ -4071,19 +4089,16 @@ else:
 
         if HERO_ZERO:
             st.divider()
-            st.markdown("**🎯 Hero/Zero Specific Settings**")
+            st.markdown("**🎯 Hero/Zero Settings**")
             hz_col1, hz_col2 = st.columns(2)
             with hz_col1:
-                HZ_MAX_RISK = st.number_input("Max Risk per HZ Trade (%)", 0.5, 5.0, 2.0, 0.5) / 100
-                HZ_MIN_PROFIT = st.number_input("Min Profit to Book (%)", 1.0, 10.0, 5.0, 0.5)
+                HZ_MAX_RISK = st.number_input("Max Risk/Trade (%)", 0.5, 5.0, 2.0, 0.5) / 100
+                HZ_MIN_PROFIT = st.number_input("Min Book (%)", 1.0, 10.0, 5.0, 0.5)
             with hz_col2:
-                HZ_TRAIL_ATR = st.slider("Trail Stop (ATR multiple)", 0.3, 2.0, 0.5, 0.1)
-                HZ_MAX_HOLD = st.number_input("Max Hold Time (minutes)", 15, 120, 60, 15)
+                HZ_TRAIL_ATR = st.slider("Trail Stop (ATR)", 0.3, 2.0, 0.5, 0.1)
+                HZ_MAX_HOLD = st.number_input("Max Hold (mins)", 15, 120, 60, 15)
         else:
-            HZ_MAX_RISK = 0.02
-            HZ_MIN_PROFIT = 5.0
-            HZ_TRAIL_ATR = 0.5
-            HZ_MAX_HOLD = 60
+            HZ_MAX_RISK, HZ_MIN_PROFIT, HZ_TRAIL_ATR, HZ_MAX_HOLD = 0.02, 5.0, 0.5, 60
 
         st.divider()
         if st.button("🔄 Refresh Balance", use_container_width=True):
@@ -4093,7 +4108,6 @@ else:
             bot.log(f"🧪 User executed manual Ping API Connection for {BROKER}.")
 
         render_signature()
-
     bot.settings = {
         "primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME,
         "lots": LOTS,
@@ -4995,3 +5009,4 @@ else:
         # Reduced refresh frequency to reduce flickering
         time.sleep(5)
         st.rerun()
+
