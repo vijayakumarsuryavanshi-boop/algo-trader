@@ -2589,83 +2589,95 @@ class SniperBot:
         return " | ".join(b_str)
 
     def login(self):
-        if self.is_mock:
-            self.client_name, self.api_key = "Paper Trading User", "mock_user"
-            self.user_hash = get_user_hash(self.api_key)
-            self.push_notify("🟢 Session Started", f"Paper Trading active.")
-            self.start_webhook_listener()
-            if self.tg_bot_token:
-                self.telegram_controller.start(self)
-            return True
+    if self.is_mock:
+        self.client_name, self.api_key = "Paper Trading User", "mock_user"
+        self.user_hash = get_user_hash(self.api_key)
+        self.push_notify("🟢 Session Started", f"Paper Trading active.")
+        self.start_webhook_listener()
+        if self.tg_bot_token:
+            self.telegram_controller.start(self)
+        return True
 
-        success = False
-        if self.api_key and self.totp_secret:
-            try:
-                obj = SmartConnect(api_key=self.api_key)
-                totp = pyotp.TOTP(self.totp_secret).now()
-                res = obj.generateSession(self.client_id, self.pwd, totp)
-                if res and res.get('status'):
-                    self.api = obj
-                    self.client_name = res.get('data', {}).get('name', self.client_id)
-                    self.log(f"✅ Angel One Connected as {self.client_name}")
-                    success = True
+    success = False
+    # Helper to set client_name only if not already set
+    def set_name(name):
+        if self.client_name == "Offline User":
+            self.client_name = name
+
+    # Angel One
+    if self.api_key and self.totp_secret:
+        try:
+            obj = SmartConnect(api_key=self.api_key)
+            totp = pyotp.TOTP(self.totp_secret).now()
+            res = obj.generateSession(self.client_id, self.pwd, totp)
+            if res and res.get('status'):
+                self.api = obj
+                set_name(res.get('data', {}).get('name', self.client_id))
+                self.log(f"✅ Angel One Connected as {self.client_name}")
+                success = True
+            else:
+                self.log(f"❌ Angel Login failed: {res.get('message', 'Check credentials')}")
+        except Exception as e:
+            self.log(f"❌ Angel Login Exception: {e}")
+
+    # Zerodha
+    if self.zerodha_api and self.zerodha_secret and self.request_token and HAS_ZERODHA:
+        try:
+            self.kite = KiteConnect(api_key=self.zerodha_api)
+            data = self.kite.generate_session(self.request_token, api_secret=self.zerodha_secret)
+            self.kite.set_access_token(data["access_token"])
+            profile = self.kite.profile()
+            set_name(profile.get('user_name', self.client_id))
+            self.log(f"✅ Zerodha Kite Connected as {self.client_name}")
+            success = True
+        except Exception as e:
+            self.log(f"❌ Zerodha Exception: {e}")
+
+    # MT5
+    if self.mt5_acc and self.mt5_server:
+        if self.connect_mt5():
+            if self.is_mt5_connected and self.mt5_bridge:
+                acc_info = self.mt5_bridge.get_account_info()
+                if acc_info:
+                    set_name(f"MT5 {acc_info.get('login', 'User')}")
                 else:
-                    self.log(f"❌ Angel Login failed: {res.get('message', 'Check credentials')}")
-            except Exception as e:
-                self.log(f"❌ Angel Login Exception: {e}")
+                    set_name("MT5 User")
+            success = True
 
-        if self.zerodha_api and self.zerodha_secret and self.request_token and HAS_ZERODHA:
-            try:
-                self.kite = KiteConnect(api_key=self.zerodha_api)
-                data = self.kite.generate_session(self.request_token, api_secret=self.zerodha_secret)
-                self.kite.set_access_token(data["access_token"])
-                profile = self.kite.profile()
-                self.client_name = profile.get('user_name', self.client_id)
-                self.log(f"✅ Zerodha Kite Connected as {self.client_name}")
-                success = True
-            except Exception as e:
-                self.log(f"❌ Zerodha Exception: {e}")
-
-        if self.mt5_acc and self.mt5_server:
-            if self.connect_mt5():
-                if self.is_mt5_connected and self.mt5_bridge:
-                    acc_info = self.mt5_bridge.get_account_info()
-                    if acc_info:
-                        self.client_name = f"MT5 {acc_info.get('login', 'User')}"
-                    else:
-                        self.client_name = "MT5 User"
-                success = True
-
-        if self.coindcx_api and self.coindcx_secret:
-            self.log(f"✅ CoinDCX Credentials Loaded")
+    # CoinDCX – set a descriptive name but only if no name yet
+    if self.coindcx_api and self.coindcx_secret:
+        self.log(f"✅ CoinDCX Credentials Loaded")
+        if self.client_name == "Offline User":
             if self.coindcx_api:
                 self.client_name = f"CoinDCX ({self.coindcx_api[:6]}...)"
             else:
                 self.client_name = "CoinDCX User"
+        success = True
+
+    # Delta Exchange
+    if self.delta_api and self.delta_secret:
+        self.log(f"✅ Delta Exchange Credentials Loaded")
+        set_name("Delta User")
+        success = True
+
+    # Fyers
+    if self.fyers_client_id and self.fyers_secret and self.fyers_token:
+        if self.connect_fyers():
+            if self.is_fyers_connected and self.fyers_bridge:
+                profile = self.fyers_bridge.fyers.get_profile()
+                if profile and profile.get('data'):
+                    set_name(profile['data'].get('name', 'Fyers User'))
+                else:
+                    set_name("Fyers User")
             success = True
 
-        if self.delta_api and self.delta_secret:
-            self.log(f"✅ Delta Exchange Credentials Loaded")
-            self.client_name = "Delta User"
-            success = True
-
-        if self.fyers_client_id and self.fyers_secret and self.fyers_token:
-            if self.connect_fyers():
-                if self.is_fyers_connected and self.fyers_bridge:
-                    profile = self.fyers_bridge.fyers.get_profile()
-                    if profile and profile.get('data'):
-                        self.client_name = profile['data'].get('name', 'Fyers User')
-                    else:
-                        self.client_name = "Fyers User"
-                success = True
-
-        if success:
-            self.push_notify("🟢 Gateway Active", f"Connections established.")
-            self.start_webhook_listener()
-            if self.tg_bot_token:
-                self.telegram_controller.start(self)
-            return True
-        return False
+    if success:
+        self.push_notify("🟢 Gateway Active", f"Connections established.")
+        self.start_webhook_listener()
+        if self.tg_bot_token:
+            self.telegram_controller.start(self)
+        return True
+    return False
 
     def start_webhook_listener(self):
         if not HAS_FLASK:
