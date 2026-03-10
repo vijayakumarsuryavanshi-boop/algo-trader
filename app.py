@@ -4390,7 +4390,6 @@ else:
             ltp = t.get('current_ltp', t['entry'])
             pnl = t.get('floating_pnl', 0.0)
             
-            # --- Variables required for the HTML ---
             pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
             pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
             pnl_sign = "+" if pnl >= 0 else ""
@@ -4405,43 +4404,26 @@ else:
             simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
             rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
 
-            # --- Flush-left HTML rendering ---
-            st.markdown(f"""
-<div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">
-        <div>
-            <span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800;">{t['type']}</span>
-            {simulated_badge}
-            <strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t['symbol']}</strong>
-            {rejection_info}
-        </div>
-        <div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">
-            {pnl_display}
-        </div>
-    </div>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
-        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
-            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br>
-            <b style="font-size: 1.1rem; color: #0f111a;">{t['entry']:.4f}</b>
-        </div>
-        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
-            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br>
-            <b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b>
-        </div>
-        <div style="background: #f8fafc; padding: 10px; border-radius: 4px;">
-            <span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br>
-            <b style="font-size: 1.1rem; color: #0f111a;">{t['qty']}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span>
-        </div>
-        <div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;">
-            <span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br>
-            <b style="font-size: 1.1rem; color: #ef4444;">{t['sl']:.4f}</b>
-        </div>
-    </div>
-    <div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700;">
-        🎯 TP1: {t.get('tp1', 0):.2f} &nbsp;|&nbsp; TP2: {t.get('tp2', 0):.2f} &nbsp;|&nbsp; TP3: {t.get('tp3', 0):.2f}
-    </div>
-</div>
-""", unsafe_allow_html=True)
+            # Build the HTML as a strict string
+            html_block = (
+                f'<div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">'
+                f'<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">'
+                f'<div><span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800;">{t["type"]}</span>'
+                f'{simulated_badge}<strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t["symbol"]}</strong>{rejection_info}</div>'
+                f'<div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">{pnl_display}</div>'
+                f'</div>'
+                f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">'
+                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br><b style="font-size: 1.1rem; color: #0f111a;">{t["entry"]:.4f}</b></div>'
+                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br><b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b></div>'
+                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br><b style="font-size: 1.1rem; color: #0f111a;">{t["qty"]}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span></div>'
+                f'<div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;"><span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br><b style="font-size: 1.1rem; color: #ef4444;">{t["sl"]:.4f}</b></div>'
+                f'</div>'
+                f'<div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700;">🎯 TP1: {t.get("tp1", 0):.2f} &nbsp;|&nbsp; TP2: {t.get("tp2", 0):.2f} &nbsp;|&nbsp; TP3: {t.get("tp3", 0):.2f}</div>'
+                f'</div>'
+            )
+
+            # Write it directly to Streamlit
+            st.write(html_block, unsafe_allow_html=True)
             
             if st.button("🛑 KILL TRADE", type="primary", use_container_width=True):
                 bot.state["manual_exit"] = True
@@ -5033,4 +5015,5 @@ else:
         # Reduced refresh frequency to reduce flickering
         time.sleep(5)
         st.rerun()
+
 
