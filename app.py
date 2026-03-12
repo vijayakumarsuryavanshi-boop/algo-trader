@@ -376,7 +376,7 @@ def generate_delta_signature(method, endpoint, payload_string, secret):
     signature = hmac.new(secret.encode('utf-8'), signature_data.encode('utf-8'), hashlib.sha256).hexdigest()
     return timestamp, signature
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def get_usdt_inr_rate():
     try:
         res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
@@ -5396,3 +5396,4 @@ else:
             height=0,
             width=0,
         )
+
