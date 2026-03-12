@@ -112,7 +112,7 @@ def play_sound_ui(sound_type="entry"):
         "entry": "https://assets.mixkit.co/active_storage/sfx/2870/2870-preview.mp3",
         "tp": "https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3",
         "sl": "https://assets.mixkit.co/active_storage/sfx/2997/2997-preview.mp3",
-        "kill": "https://assets.mixkit.co/active_storage/sfx/2868/2868-preview.mp3",
+        "Exit": "https://assets.mixkit.co/active_storage/sfx/2868/2868-preview.mp3",
         "alert": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
     }
     url = sound_urls.get(sound_type, sound_urls["entry"])
@@ -691,7 +691,7 @@ st.markdown("""
     .start-btn button { background: #22c55e; color: white; }
     .stop-btn button { background: #ef4444; color: white; }
     .refresh-btn button { background: #3b82f6; color: white; }
-    .kill-btn button { background: #7f1d1d; color: white; }
+    .Exit-btn button { background: #7f1d1d; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -4485,7 +4485,7 @@ else:
     if not is_mkt_open:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
 
-    # Button row (Start, Stop, Refresh, Kill Engine) above live position tracker
+    # Button row (Start, Stop, Refresh, Exit Engine) above live position tracker
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
     bcol1, bcol2, bcol3, bcol4 = st.columns(4)
     with bcol1:
@@ -4503,11 +4503,11 @@ else:
         if st.button("🔄 Refresh", use_container_width=True, on_click=trigger_click_sound):
             st.rerun()
     with bcol4:
-        if st.button("☠️ Kill Engine", use_container_width=True, on_click=trigger_click_sound):
+        if st.button("☠️ Exit Engine", use_container_width=True, on_click=trigger_click_sound):
             bot.state["is_running"] = False
             if bot.state["active_trade"]:
                 bot.state["manual_exit"] = True
-            st.toast("Kill switch activated! Engine stopped and trade closed.", icon="☠️")
+            st.toast("Exit switch activated! Engine stopped and trade closed.", icon="☠️")
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -4610,10 +4610,10 @@ else:
             )
             st.write(html_block, unsafe_allow_html=True)
 
-            if st.button("🛑 KILL TRADE", type="primary", use_container_width=True, on_click=trigger_click_sound):
+            if st.button("🛑 Exit TRADE", type="primary", use_container_width=True, on_click=trigger_click_sound):
                 bot.state["manual_exit"] = True
                 bot.state["is_running"] = False
-                st.toast("Trade killed and engine stopped.", icon="🛑")
+                st.toast("Trade Exited and engine stopped.", icon="🛑")
                 st.rerun()
         else:
             st.info("⏳ Radar Active: Waiting for High-Probability Setup...")
@@ -5370,11 +5370,11 @@ else:
             t.start()
         st.rerun()
 
-    def kill_switch():
+    def Exit_switch():
         bot.state["is_running"] = False
         if bot.state["active_trade"]:
             bot.state["manual_exit"] = True
-        st.toast("Kill switch activated! Trades closing.", icon="☠️")
+        st.toast("Exit switch activated! Trades closing.", icon="☠️")
         st.rerun()
 
     st.markdown('<div class="bottom-dock">', unsafe_allow_html=True)
@@ -5386,8 +5386,8 @@ else:
         if st.button("🔄\nSync", key="dock_refresh", on_click=trigger_click_sound):
             st.rerun()
     with d3:
-        if st.button("☠️\nKill", key="dock_kill", on_click=trigger_click_sound):
-            kill_switch()
+        if st.button("☠️\nExit", key="dock_Exit", on_click=trigger_click_sound):
+            Exit_switch()
     st.markdown('</div>', unsafe_allow_html=True)
 
     if bot.state.get("is_running"):
@@ -5404,5 +5404,6 @@ else:
             height=0,
             width=0,
         )
+
 
 
