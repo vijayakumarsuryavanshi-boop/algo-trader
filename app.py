@@ -779,15 +779,23 @@ if not st.session_state.user_lots:
 
 is_mkt_open, mkt_status_msg = get_market_status(st.session_state.sb_index_input)
 
-@st.cache_data(ttl=43200) 
+@st.cache_data(ttl=43200)
 def get_angel_scrip_master():
+    # Main master
+    main_url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+    main_df = pd.DataFrame(requests.get(main_url, timeout=45).json())
+    
+    # MCX master (if exists)
+    mcx_url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster_MCX.json"
     try:
-        url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-        df = pd.DataFrame(requests.get(url, timeout=45).json())
-        df['expiry'] = pd.to_datetime(df['expiry'], errors='coerce')
-        df['strike'] = pd.to_numeric(df['strike'], errors='coerce') / 100 
-        return df
-    except Exception: return pd.DataFrame()
+        mcx_df = pd.DataFrame(requests.get(mcx_url, timeout=45).json())
+        df = pd.concat([main_df, mcx_df], ignore_index=True)
+    except:
+        df = main_df  # fallback
+    
+    df['expiry'] = pd.to_datetime(df['expiry'], errors='coerce')
+    df['strike'] = pd.to_numeric(df['strike'], errors='coerce') / 100
+    return df
 
 # ==========================================
 # FYERS BRIDGE
@@ -5396,4 +5404,5 @@ else:
             height=0,
             width=0,
         )
+
 
