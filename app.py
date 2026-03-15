@@ -26,7 +26,6 @@ import xml.etree.ElementTree as ET
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import hashlib
 import secrets
 from datetime import datetime, timedelta
 import qrcode
@@ -44,6 +43,7 @@ except ImportError:
     firebase_admin = None
     messaging = None
     print("⚠️ firebase_admin not installed. Push notifications disabled.")
+
 # ---------- shap for ML explainability ----------
 try:
     import shap
@@ -52,12 +52,14 @@ except ImportError:
     HAS_SHAP = False
     shap = None
     print("⚠️ shap not installed. ML explanations disabled.")
+
 try:
     import joblib
     HAS_JOBLIB = True
 except ImportError:
     HAS_JOBLIB = False
     joblib = None
+
 import asyncio
 import aiohttp
 import base64
@@ -175,40 +177,65 @@ from PIL import Image
 from streamlit_autorefresh import st_autorefresh
 
 # ==========================================
-# AUDIO FUNCTIONS – FIXED FOR STREAMLIT CLOUD
+# AUDIO FUNCTIONS – IMMEDIATE PLAY FOR BUTTONS
 # ==========================================
 def play_sound_ui(sound_type="entry"):
     """Play a sound using HTML5 Audio (works on Streamlit Cloud)."""
     if not st.session_state.get("audio_enabled", False):
         return
-    # Reliable MP3 URLs (using same mixkit URL for all events to ensure availability)
     sound_urls = {
         "login": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
         "entry": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
         "tp": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
         "sl": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
         "exit": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
-        "alert": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
+        "alert": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
+        "click": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
     }
     url = sound_urls.get(sound_type, sound_urls["alert"])
-    # Add a random query param to bypass cache
     unique_url = f"{url}?{uuid.uuid4()}"
-    # Use HTML5 audio via components.html for reliable playback
     audio_html = f"""
     <audio autoplay style="display:none;">
         <source src="{unique_url}" type="audio/mpeg">
     </audio>
     """
     components.html(audio_html, height=0)
-    # Toast for visibility
     st.toast(f"🔔 {sound_type.upper()} signal", icon="🔊")
 
+def play_sound_now(sound_type="click"):
+    """Play a sound immediately (for button clicks)."""
+    if not st.session_state.get("audio_enabled", False):
+        return
+    sound_urls = {
+        "login": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
+        "entry": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
+        "tp": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
+        "sl": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
+        "exit": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
+        "alert": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
+        "click": "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"
+    }
+    url = sound_urls.get(sound_type, sound_urls["alert"])
+    unique_url = f"{url}?{uuid.uuid4()}"
+    audio_html = f"""
+    <audio autoplay style="display:none;">
+        <source src="{unique_url}" type="audio/mpeg">
+    </audio>
+    <script>
+        setTimeout(function() {{
+            var audio = document.currentScript.previousElementSibling;
+            audio.play().catch(e => {{}});
+        }}, 10);
+    </script>
+    """
+    components.html(audio_html, height=0)
+
 def trigger_click_sound(sound_type="entry"):
-    """Queue a sound to be played on next rerun."""
+    """Queue a sound to be played on next rerun (kept for compatibility)."""
     st.session_state.sound_queue.append(sound_type)
 
 def unlock_audio():
-    """Dummy function to enable audio (kept for compatibility)."""
+    """Dummy function to enable audio."""
     pass
 
 # ==========================================
@@ -793,6 +820,7 @@ st.markdown(f"""
         header[data-testid="stHeader"] {{ visibility: visible !important; height: auto !important; background-color: #0284c7 !important; }}
         header[data-testid="stHeader"] svg {{ fill: white !important; }}
         .main .block-container {{ padding-top: 50px !important; padding-bottom: 90px !important; }}
+        .landing-hero {{ padding: 2rem 1rem !important; max-width: 100% !important; }}
     }}
     [data-testid="stSidebar"] {{ background-color: #0284c7 !important; border-right: 1px solid #0369a1; }}
     [data-testid="stSidebar"] * {{ color: #ffffff !important; }}
@@ -975,23 +1003,6 @@ st.markdown(f"""
     }}
     .admin-card h4 {{ color: #fbbf24; margin-top: 0; }}
     .blocked-user {{ background: #7f1d1d; padding: 5px; border-radius: 4px; }}
-    /* Chat widget */
-    .chat-container {{
-        max-height: 400px;
-        overflow-y: auto;
-        border: 1px solid #ccc;
-        padding: 10px;
-        border-radius: 5px;
-        background-color: #f9f9f9;
-    }}
-    .chat-message {{
-        margin-bottom: 10px;
-        padding: 5px 10px;
-        border-radius: 5px;
-    }}
-    .chat-message.user {{ background-color: #d1e7dd; text-align: right; }}
-    .chat-message.other {{ background-color: #f8d7da; }}
-    /* Risk & Rules */
     .risk-box {{
         background: #fff3cd;
         border-left: 5px solid #ffc107;
@@ -1081,6 +1092,28 @@ st.markdown(f"""
         border-top: 1px solid {border_color};
         padding: 2rem;
         margin-top: 3rem;
+    }}
+    /* Splash screen animation */
+    .splash {{
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 80vh;
+        font-size: 3rem;
+        animation: fadeIn 1s ease-in;
+    }}
+    @keyframes fadeIn {{
+        0% {{ opacity: 0; transform: scale(0.9); }}
+        100% {{ opacity: 1; transform: scale(1); }}
+    }}
+    /* Live position tracker container – stable background to reduce flicker */
+    .live-tracker {{
+        background: {card_bg};
+        border: 2px solid #0284c7;
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        margin-bottom: 15px;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -1228,7 +1261,7 @@ class UpstoxBridge:
         except:
             return None
 
-    def place_order(self, symbol, qty, side, order_type="MARKET"):
+    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
         if not self.connected:
             return None, "Not connected"
         try:
@@ -1238,7 +1271,8 @@ class UpstoxBridge:
                 transaction_type=side,
                 order_type=order_type,
                 product="MIS",
-                exchange="NSE"
+                exchange="NSE",
+                price=price
             )
             return order['order_id'], "Order placed"
         except Exception as e:
@@ -1314,7 +1348,7 @@ class FivePaisaBridge:
         except:
             return None
 
-    def place_order(self, symbol, qty, side, order_type="MARKET"):
+    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
         if not self.connected:
             return None, "Not connected"
         try:
@@ -1323,7 +1357,8 @@ class FivePaisaBridge:
                 quantity=qty,
                 transaction_type=side,
                 order_type=order_type,
-                exchange="NSE"
+                exchange="NSE",
+                price=price
             )
             return order['OrderNo'], "Order placed"
         except Exception as e:
@@ -1348,7 +1383,7 @@ class FivePaisaBridge:
             return None
 
 # ==========================================
-# BINANCE BRIDGE
+# BINANCE BRIDGE (with limit order support)
 # ==========================================
 class BinanceBridge:
     def __init__(self, api_key, api_secret, testnet=False):
@@ -1504,7 +1539,7 @@ class FyersBridge:
             pass
         return None
 
-    def place_order(self, symbol, qty, side, order_type="MARKET", product_type="INTRADAY"):
+    def place_order(self, symbol, qty, side, order_type="MARKET", product_type="INTRADAY", price=None):
         if not self.connected:
             return None, "Not connected"
         try:
@@ -1515,7 +1550,7 @@ class FyersBridge:
                 "type": 2 if order_type.upper() == "MARKET" else 1,
                 "side": side_enum,
                 "productType": product_type.upper(),
-                "limitPrice": 0,
+                "limitPrice": price if price else 0,
                 "stopPrice": 0,
                 "validity": "DAY",
                 "disclosedQty": 0,
@@ -2119,7 +2154,7 @@ class TechnicalAnalyzer:
             return True
         return False
 
-    # ====== STRATEGY METHODS (continued) ======
+    # ====== STRATEGY METHODS (enhanced with additional filters) ======
     def apply_institutional_fvg_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
@@ -2146,44 +2181,44 @@ class TechnicalAnalyzer:
         latest_bear_fvg = df[df['fvg_bear']].iloc[-1] if any(df['fvg_bear']) else None
         if latest_bull_fvg is not None:
             mitigated_bull = (last['low'] <= latest_bull_fvg['high'].shift(1)) and (last['low'] >= latest_bull_fvg['low'].shift(1))
-            if mitigated_bull and last['close'] > last['open']:
+            if mitigated_bull and last['close'] > last['open'] and last['volume'] > df['volume'].rolling(20).mean().iloc[-1]:
                 signal = "BUY_CE"
                 trend = "BULL FVG REVERSAL CONFIRMED 🟢"
                 signal_strength = 75
         if latest_bear_fvg is not None:
             mitigated_bear = (last['high'] >= latest_bear_fvg['low'].shift(1)) and (last['high'] <= latest_bear_fvg['high'].shift(1))
-            if mitigated_bear and last['close'] < last['open']:
+            if mitigated_bear and last['close'] < last['open'] and last['volume'] > df['volume'].rolling(20).mean().iloc[-1]:
                 signal = "BUY_PE"
                 trend = "BEAR FVG REVERSAL CONFIRMED 🔴"
                 signal_strength = 75
         if last['liquidity_sweep_up']:
             trend += " | Liquidity Sweep UP"
-            if signal == "WAIT" and last['close'] > last['open']:
+            if signal == "WAIT" and last['close'] > last['open'] and last['rsi'] > 50:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 80)
         if last['liquidity_sweep_down']:
             trend += " | Liquidity Sweep DOWN"
-            if signal == "WAIT" and last['close'] < last['open']:
+            if signal == "WAIT" and last['close'] < last['open'] and last['rsi'] < 50:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 80)
         if last['trap_up']:
             trend += " | Trap UP (Bearish)"
-            if signal == "WAIT" and last['close'] < last['open']:
+            if signal == "WAIT" and last['close'] < last['open'] and last['macd'] < last['macd_signal']:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 70)
         if last['trap_down']:
             trend += " | Trap DOWN (Bullish)"
-            if signal == "WAIT" and last['close'] > last['open']:
+            if signal == "WAIT" and last['close'] > last['open'] and last['macd'] > last['macd_signal']:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 70)
         if last['orb_breakout_up']:
             trend += " | ORB Breakout UP"
-            if signal == "WAIT":
+            if signal == "WAIT" and last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.2:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 85)
         if last['orb_breakout_down']:
             trend += " | ORB Breakout DOWN"
-            if signal == "WAIT":
+            if signal == "WAIT" and last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.2:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 85)
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
@@ -2224,42 +2259,42 @@ class TechnicalAnalyzer:
         signal = "WAIT"
         trend = f"RANGING {oi_signal} (VIJAY_RFF)"
         signal_strength = 50
-        if last['Buy_Signal']:
+        if last['Buy_Signal'] and last['RSI_14'] > 50 and last['Volume'] > df_ta['Volume'].rolling(20).mean().iloc[-1]:
             signal = "BUY_CE"
             trend = f"VIJAY_RFF UPTREND CROSSOVER {oi_signal} 🟢"
             signal_strength = 80
-        elif last['Sell_Signal']:
+        elif last['Sell_Signal'] and last['RSI_14'] < 50 and last['Volume'] > df_ta['Volume'].rolling(20).mean().iloc[-1]:
             signal = "BUY_PE"
             trend = f"VIJAY_RFF DOWNTREND CROSSOVER {oi_signal} 🔴"
             signal_strength = 80
         if df['liquidity_sweep_up'].iloc[-1]:
             trend += " | Liquidity Sweep UP"
-            if signal == "WAIT" and last['Close'] > last['Open']:
+            if signal == "WAIT" and last['Close'] > last['Open'] and last['RSI_14'] > 50:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 80)
         if df['liquidity_sweep_down'].iloc[-1]:
             trend += " | Liquidity Sweep DOWN"
-            if signal == "WAIT" and last['Close'] < last['Open']:
+            if signal == "WAIT" and last['Close'] < last['Open'] and last['RSI_14'] < 50:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 80)
         if df['trap_up'].iloc[-1]:
             trend += " | Trap UP (Bearish)"
-            if signal == "WAIT" and last['Close'] < last['Open']:
+            if signal == "WAIT" and last['Close'] < last['Open'] and last['macd'] < last['macd_signal']:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 70)
         if df['trap_down'].iloc[-1]:
             trend += " | Trap DOWN (Bullish)"
-            if signal == "WAIT" and last['Close'] > last['Open']:
+            if signal == "WAIT" and last['Close'] > last['Open'] and last['macd'] > last['macd_signal']:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 70)
         if df['orb_breakout_up'].iloc[-1]:
             trend += " | ORB Breakout UP"
-            if signal == "WAIT":
+            if signal == "WAIT" and last['Volume'] > df_ta['Volume'].rolling(20).mean().iloc[-1] * 1.2:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 85)
         if df['orb_breakout_down'].iloc[-1]:
             trend += " | ORB Breakout DOWN"
-            if signal == "WAIT":
+            if signal == "WAIT" and last['Volume'] > df_ta['Volume'].rolling(20).mean().iloc[-1] * 1.2:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 85)
         return trend, signal, last['VWAP'], last['EMA_13'], df, atr, fib_data, signal_strength
@@ -2293,42 +2328,42 @@ class TechnicalAnalyzer:
         signal = "WAIT"
         trend = f"ICT Neutral {oi_signal}"
         signal_strength = 50
-        if last['fvg_bull'] and last['close'] > last['vwap'] and last['bos_up']:
+        if last['fvg_bull'] and last['close'] > last['vwap'] and last['bos_up'] and last['rsi'] > 50:
             signal = "BUY_CE"
             trend = f"LUX ICT BULLISH: FVG + OB + BOS {oi_signal} 🟢"
             signal_strength = 85
-        elif last['fvg_bear'] and last['close'] < last['vwap'] and last['bos_down']:
+        elif last['fvg_bear'] and last['close'] < last['vwap'] and last['bos_down'] and last['rsi'] < 50:
             signal = "BUY_PE"
             trend = f"LUX ICT BEARISH: FVG + OB + BOS {oi_signal} 🔴"
             signal_strength = 85
         if last['liquidity_sweep_up']:
             trend += " | Liquidity Sweep UP"
-            if signal == "WAIT" and last['close'] > last['open']:
+            if signal == "WAIT" and last['close'] > last['open'] and last['macd'] > last['macd_signal']:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 80)
         if last['liquidity_sweep_down']:
             trend += " | Liquidity Sweep DOWN"
-            if signal == "WAIT" and last['close'] < last['open']:
+            if signal == "WAIT" and last['close'] < last['open'] and last['macd'] < last['macd_signal']:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 80)
         if last['trap_up']:
             trend += " | Trap UP (Bearish)"
-            if signal == "WAIT" and last['close'] < last['open']:
+            if signal == "WAIT" and last['close'] < last['open'] and last['rsi'] > 70:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 70)
         if last['trap_down']:
             trend += " | Trap DOWN (Bullish)"
-            if signal == "WAIT" and last['close'] > last['open']:
+            if signal == "WAIT" and last['close'] > last['open'] and last['rsi'] < 30:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 70)
         if last['orb_breakout_up']:
             trend += " | ORB Breakout UP"
-            if signal == "WAIT":
+            if signal == "WAIT" and last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.2:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 85)
         if last['orb_breakout_down']:
             trend += " | ORB Breakout DOWN"
-            if signal == "WAIT":
+            if signal == "WAIT" and last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.2:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 85)
         return trend, signal, last['vwap'], last['ema9'], df, atr, fib_data, signal_strength
@@ -2352,42 +2387,42 @@ class TechnicalAnalyzer:
         price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
         oi_signal = self.analyze_open_interest(price_change, oi_change)
         benchmark = last['ema_long'] if is_index else last['vwap']
-        if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark):
+        if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark) and last['rsi'] > 50 and last['volume'] > df['volume'].rolling(20).mean().iloc[-1]:
             trend, signal = f"BULLISH MOMENTUM {oi_signal} 🟢", "BUY_CE"
             signal_strength = 70
-        elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark):
+        elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark) and last['rsi'] < 50 and last['volume'] > df['volume'].rolling(20).mean().iloc[-1]:
             trend, signal = f"BEARISH MOMENTUM {oi_signal} 🔴", "BUY_PE"
             signal_strength = 70
         else:
             trend = f"RANGING {oi_signal}"
         if last['liquidity_sweep_up']:
             trend += " | Liquidity Sweep UP"
-            if signal == "WAIT" and last['close'] > last['open']:
+            if signal == "WAIT" and last['close'] > last['open'] and last['macd'] > last['macd_signal']:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 80)
         if last['liquidity_sweep_down']:
             trend += " | Liquidity Sweep DOWN"
-            if signal == "WAIT" and last['close'] < last['open']:
+            if signal == "WAIT" and last['close'] < last['open'] and last['macd'] < last['macd_signal']:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 80)
         if last['trap_up']:
             trend += " | Trap UP (Bearish)"
-            if signal == "WAIT" and last['close'] < last['open']:
+            if signal == "WAIT" and last['close'] < last['open'] and last['rsi'] > 70:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 70)
         if last['trap_down']:
             trend += " | Trap DOWN (Bullish)"
-            if signal == "WAIT" and last['close'] > last['open']:
+            if signal == "WAIT" and last['close'] > last['open'] and last['rsi'] < 30:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 70)
         if last['orb_breakout_up']:
             trend += " | ORB Breakout UP"
-            if signal == "WAIT":
+            if signal == "WAIT" and last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.2:
                 signal = "BUY_CE"
                 signal_strength = max(signal_strength, 85)
         if last['orb_breakout_down']:
             trend += " | ORB Breakout DOWN"
-            if signal == "WAIT":
+            if signal == "WAIT" and last['volume'] > df['volume'].rolling(20).mean().iloc[-1] * 1.2:
                 signal = "BUY_PE"
                 signal_strength = max(signal_strength, 85)
         return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data, signal_strength
@@ -2409,26 +2444,26 @@ class TechnicalAnalyzer:
             buy_conds.append(last['ema9'] > last['ema21'] and prev['ema9'] <= prev['ema21'])
             sell_conds.append(last['ema9'] < last['ema21'] and prev['ema9'] >= prev['ema21'])
         if "RSI Breakout (>60/<40)" in keys:
-            buy_conds.append(last['rsi'] > 50)
-            sell_conds.append(last['rsi'] < 50)
+            buy_conds.append(last['rsi'] > 50 and last['rsi'] > 60)
+            sell_conds.append(last['rsi'] < 50 and last['rsi'] < 40)
         if "MACD Crossover" in keys:
             if 'macd' in df.columns:
                 buy_conds.append(last['macd'] > last['macd_signal'] and prev['macd'] <= prev['macd_signal'])
                 sell_conds.append(last['macd'] < last['macd_signal'] and prev['macd'] >= prev['macd_signal'])
         if "Bollinger Bands Bounce" in keys:
             if 'bb_lower' in df.columns:
-                buy_conds.append(last['close'] > last['bb_lower'] and prev['close'] <= prev['bb_lower'])
-                sell_conds.append(last['close'] < last['bb_upper'] and prev['close'] >= prev['bb_upper'])
+                buy_conds.append(last['close'] > last['bb_lower'] and prev['close'] <= prev['bb_lower'] and last['rsi'] < 30)
+                sell_conds.append(last['close'] < last['bb_upper'] and prev['close'] >= prev['bb_upper'] and last['rsi'] > 70)
         if "Stochastic RSI" in keys:
             pass
         if "FVG ICT" in keys:
-            if 'fvg_bull' in df.columns and df['fvg_bull'].iloc[-1]:
+            if 'fvg_bull' in df.columns and df['fvg_bull'].iloc[-1] and last['rsi'] > 50:
                 buy_conds.append(True)
-            if 'fvg_bear' in df.columns and df['fvg_bear'].iloc[-1]:
+            if 'fvg_bear' in df.columns and df['fvg_bear'].iloc[-1] and last['rsi'] < 50:
                 sell_conds.append(True)
         if "VWAP" in keys:
-            buy_conds.append(last['close'] > last['vwap'])
-            sell_conds.append(last['close'] < last['vwap'])
+            buy_conds.append(last['close'] > last['vwap'] and last['rsi'] > 50)
+            sell_conds.append(last['close'] < last['vwap'] and last['rsi'] < 50)
         if last['liquidity_sweep_up']:
             buy_conds.append(True)
         if last['liquidity_sweep_down']:
@@ -2472,9 +2507,9 @@ class TechnicalAnalyzer:
         trend = f"ML Ensemble: Up {prob_up:.2f} / Down {prob_down:.2f} {oi_signal}"
         signal = "WAIT"
         strength = int(max(prob_up, prob_down) * 100)
-        if prob_up > up_thresh:
+        if prob_up > up_thresh and last['rsi'] > 50:
             signal = "BUY_CE"
-        elif prob_down > down_thresh:
+        elif prob_down > down_thresh and last['rsi'] < 50:
             signal = "BUY_PE"
         if last['liquidity_sweep_up']:
             trend += " | Liq Sweep UP"
@@ -2492,7 +2527,6 @@ class TechnicalAnalyzer:
         fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
         return trend, signal, last['close'], last['close'], df, atr, fib_data, strength
 
-    # ====== Mean Reversion Strategy (new) ======
     def apply_mean_reversion_strategy(self, df, index_name="NIFTY"):
         if df is None or len(df) < 50:
             return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
@@ -2500,20 +2534,17 @@ class TechnicalAnalyzer:
         df = self.calculate_indicators(df, is_index)
         last = df.iloc[-1]
         atr = self.get_atr(df).iloc[-1]
-        # Bollinger Bands
         bb_upper = last.get('bb_upper', last['close'] * 1.02)
         bb_lower = last.get('bb_lower', last['close'] * 0.98)
-        bb_mid = last.get('bb_middle', last['close'])
-        # RSI
         rsi = last.get('rsi', 50)
         signal = "WAIT"
         trend = "Mean Reversion Scan"
         signal_strength = 0
-        if last['close'] < bb_lower and rsi < 30:
+        if last['close'] < bb_lower and rsi < 30 and last['volume'] > df['volume'].rolling(20).mean().iloc[-1]:
             signal = "BUY_CE"
             trend = "OVERSOLD BOUNCE (BB + RSI) 🟢"
             signal_strength = 80
-        elif last['close'] > bb_upper and rsi > 70:
+        elif last['close'] > bb_upper and rsi > 70 and last['volume'] > df['volume'].rolling(20).mean().iloc[-1]:
             signal = "BUY_PE"
             trend = "OVERBOUGHT PULLBACK (BB + RSI) 🔴"
             signal_strength = 80
@@ -2521,12 +2552,10 @@ class TechnicalAnalyzer:
 
     # ====== Arbitrage Strategy (Nifty vs BankNifty) ======
     def apply_arbitrage_strategy(self, df_nifty, df_bank, index_name="NIFTY"):
-        # This would be called separately; we'll implement in bot logic
         pass
 
     # ====== Event Driven (Earnings) – placeholder ======
     def apply_event_driven_strategy(self, df, index_name="NIFTY"):
-        # Would integrate with earnings calendar API
         return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
 
 # ==========================================
@@ -2862,7 +2891,7 @@ def add_breakout_scalper():
     with col2:
         profit_target = st.slider("Profit Target (Points)", 1, 50, 10)
         stop_loss = st.slider("Stop Loss (Points)", 1, 30, 5)
-    if st.button("🔍 Scan Breakouts Now", use_container_width=True, on_click=trigger_click_sound):
+    if st.button("🔍 Scan Breakouts Now", use_container_width=True, on_click=lambda: play_sound_now("click")):
         with st.spinner("Scanning for breakouts..."):
             symbols = ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "BTCUSD", "XAUUSD"]
             results = []
@@ -3077,7 +3106,7 @@ class TelegramController:
         await update.message.reply_text("Commands:\n/status\n/stop\n/start\n/pnl\n/balance")
 
 # ==========================================
-# BACKTESTING ENGINE
+# BACKTESTING ENGINE (with detailed trade list)
 # ==========================================
 class Backtester:
     def __init__(self, bot, strategy_func, df, initial_capital=100000, lot_size=1):
@@ -3087,33 +3116,55 @@ class Backtester:
         self.initial_capital = initial_capital
         self.capital = initial_capital
         self.lot_size = lot_size
-        self.trades = []
+        self.trades = []  # list of dicts with entry, exit, pnl, etc.
         self.equity_curve = []
 
     def run(self):
         self.df['signal'] = None
         self.df['position'] = 0
+        position = 0
+        entry_price = 0
+        entry_index = None
         for i in range(50, len(self.df)):
             slice_df = self.df.iloc[:i+1]
-            # Apply strategy
             trend, signal, vwap, ema, _, atr, _, strength = self.strategy_func(slice_df, "NIFTY")
             self.df.loc[self.df.index[i], 'signal'] = signal
-            if signal != "WAIT":
-                # Simulate entry/exit logic (simplified)
-                price = self.df.iloc[i]['close']
-                if signal == "BUY_CE":
-                    # Buy
-                    self.df.loc[self.df.index[i], 'position'] = 1
-                elif signal == "BUY_PE":
-                    # Sell
-                    self.df.loc[self.df.index[i], 'position'] = -1
-        # Calculate returns
+            price = self.df.iloc[i]['close']
+            if signal != "WAIT" and position == 0:
+                # Enter trade
+                position = 1 if signal == "BUY_CE" else -1
+                entry_price = price
+                entry_index = i
+                self.df.loc[self.df.index[i], 'position'] = position
+            elif position != 0:
+                # Check for exit (simple: opposite signal or hold until end)
+                exit_signal = False
+                if (position == 1 and signal == "BUY_PE") or (position == -1 and signal == "BUY_CE"):
+                    exit_signal = True
+                elif i == len(self.df)-1:
+                    exit_signal = True
+                if exit_signal:
+                    exit_price = price
+                    pnl = (exit_price - entry_price) * position * self.lot_size
+                    self.trades.append({
+                        "entry_time": self.df.index[entry_index],
+                        "exit_time": self.df.index[i],
+                        "entry": entry_price,
+                        "exit": exit_price,
+                        "pnl": pnl,
+                        "type": "LONG" if position == 1 else "SHORT"
+                    })
+                    position = 0
+                    entry_price = 0
+            else:
+                self.df.loc[self.df.index[i], 'position'] = 0
+        # Calculate equity curve
         self.df['returns'] = self.df['close'].pct_change() * self.df['position'].shift(1)
         self.df['strategy_returns'] = self.df['returns'] * self.lot_size
         self.df['equity'] = self.initial_capital * (1 + self.df['strategy_returns']).cumprod()
         self.equity_curve = self.df[['equity']].dropna()
         self.total_return = (self.equity_curve.iloc[-1]['equity'] / self.initial_capital - 1) * 100
-        return self.equity_curve, self.total_return
+        return self.equity_curve, self.total_return, self.trades
 
     def plot_results(self):
         st.line_chart(self.equity_curve)
@@ -3182,44 +3233,6 @@ class NotificationManager:
         self.send_whatsapp(f"{title}\n{message}")
 
 # ==========================================
-# REAL-TIME CHAT (simple in‑memory) – KEPT BUT TAB REMOVED
-# ==========================================
-class ChatRoom:
-    def __init__(self):
-        self.messages = deque(maxlen=100)
-        self.users = set()
-
-    def add_message(self, user, message):
-        self.messages.append({"user": user, "message": message, "time": get_ist().strftime("%H:%M")})
-
-    def get_messages(self):
-        return list(self.messages)
-
-chat_room = ChatRoom()
-
-# ==========================================
-# SOCIAL / COMMUNITY FEATURES – KEPT BUT TAB REMOVED
-# ==========================================
-class SocialFeed:
-    def __init__(self):
-        self.posts = deque(maxlen=50)
-
-    def add_post(self, user, content, trade_data=None):
-        self.posts.append({
-            "user": user,
-            "content": content,
-            "trade": trade_data,
-            "time": get_ist().strftime("%H:%M"),
-            "likes": 0
-        })
-
-    def like_post(self, index):
-        if 0 <= index < len(self.posts):
-            self.posts[index]["likes"] += 1
-
-social_feed = SocialFeed()
-
-# ==========================================
 # TAX REPORTING
 # ==========================================
 def generate_tax_report(user_id, year):
@@ -3267,7 +3280,52 @@ def fetch_option_chain(symbol, expiry):
     return merged
 
 # ==========================================
-# CORE BOT ENGINE (SniperBot) – PARTIAL (to be continued)
+# DYNAMIC MAJOR EVENTS FETCHER (FOMC, RBI) – 2026
+# ==========================================
+def get_major_events_2026():
+    """
+    Generate FOMC and RBI meeting dates for 2026 based on standard schedules.
+    FOMC: 8 meetings per year, typically every 6 weeks starting late January.
+    RBI: 6 meetings per year, typically every 2 months starting February.
+    """
+    events = []
+    # FOMC 2026 (tentative, based on pattern: Jan 27-28, Mar 10-11, Apr 28-29, Jun 9-10, Jul 28-29, Sep 15-16, Nov 3-4, Dec 15-16)
+    fomc_dates = [
+        ("2026-01-28", "FOMC Meeting (Interest Rate Decision)"),
+        ("2026-03-11", "FOMC Meeting (Interest Rate Decision)"),
+        ("2026-04-29", "FOMC Meeting (Interest Rate Decision)"),
+        ("2026-06-10", "FOMC Meeting (Interest Rate Decision)"),
+        ("2026-07-29", "FOMC Meeting (Interest Rate Decision)"),
+        ("2026-09-16", "FOMC Meeting (Interest Rate Decision)"),
+        ("2026-11-04", "FOMC Meeting (Interest Rate Decision)"),
+        ("2026-12-16", "FOMC Meeting (Interest Rate Decision)")
+    ]
+    for date, desc in fomc_dates:
+        events.append({"date": date, "event": desc, "impact": "High"})
+
+    # RBI 2026 (typically first week of Feb, Apr, Jun, Aug, Oct, Dec)
+    rbi_dates = [
+        ("2026-02-05", "RBI Monetary Policy (Repo Rate)"),
+        ("2026-04-02", "RBI Monetary Policy (Repo Rate)"),
+        ("2026-06-04", "RBI Monetary Policy (Repo Rate)"),
+        ("2026-08-06", "RBI Monetary Policy (Repo Rate)"),
+        ("2026-10-01", "RBI Monetary Policy (Repo Rate)"),
+        ("2026-12-03", "RBI Monetary Policy (Repo Rate)")
+    ]
+    for date, desc in rbi_dates:
+        events.append({"date": date, "event": desc, "impact": "High"})
+
+    # Filter upcoming events
+    today = get_ist().date()
+    upcoming = []
+    for e in events:
+        event_date = datetime.strptime(e["date"], "%Y-%m-%d").date()
+        if event_date >= today:
+            upcoming.append(e)
+    return sorted(upcoming, key=lambda x: x["date"])
+
+# ==========================================
+# CORE BOT ENGINE (SniperBot)
 # ==========================================
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", 
@@ -3368,6 +3426,7 @@ class SniperBot:
             "daily_pnl": 0.0,
             "trades_today": 0,
             "manual_exit": False,
+            "stop_after_manual_exit": False,
             "ghost_memory": {},
             "tv_signal": {"action": "WAIT", "symbol": "", "timestamp": 0},
             "scalp_signals": deque(maxlen=20),
@@ -3473,9 +3532,7 @@ class SniperBot:
             else:
                 self.log(f"❌ Binance connection failed: {msg}")
         return False
-    # ==========================================
-    # CORE BOT ENGINE (continued)
-    # ==========================================
+
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
         if HAS_NOTIFY:
@@ -3803,8 +3860,6 @@ class SniperBot:
             else:
                 return "FYERS", f"NSE:{index_name}-EQ" if not index_name.startswith("NSE:") else index_name
         if self.settings.get("primary_broker") == "Upstox":
-            # Upstox expects symbol in format like "NSE_EQ:INE123456789"
-            # We'll need a mapping; for now return a placeholder
             return "UPSTOX", index_name
         if self.settings.get("primary_broker") == "5paisa":
             return "5PAISA", index_name
@@ -4402,11 +4457,11 @@ class SniperBot:
                 return price - slippage
         return price
 
-    def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO"):
+    def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO", order_type="MARKET", price=None):
         if self.is_mock:
             return "MOCK_" + uuid.uuid4().hex[:6].upper(), None
         broker = self.settings.get("primary_broker", "Angel One")
-        self.log(f"⚙️ Executing Real API: {symbol} | Qty: {qty} | Side: {side} | Exchange: {exchange}")
+        self.log(f"⚙️ Executing Real API: {symbol} | Qty: {qty} | Side: {side} | Exchange: {exchange} | OrderType: {order_type}")
 
         if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
             order_id, msg = self.mt5_bridge.place_order(symbol, qty, side)
@@ -4420,7 +4475,14 @@ class SniperBot:
         if exchange == "DELTA":
             try:
                 target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
-                payload = {"product_id": target, "size": int(float(qty)), "side": "buy" if side == "BUY" else "sell", "order_type": "market"}
+                payload = {
+                    "product_id": target,
+                    "size": int(float(qty)),
+                    "side": "buy" if side == "BUY" else "sell",
+                    "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order"
+                }
+                if order_type.upper() == "LIMIT" and price:
+                    payload["limit_price"] = price
                 payload_str = json.dumps(payload, separators=(',', ':'))
                 ts, sig = generate_delta_signature('POST', '/v2/orders', payload_str, self.delta_secret)
                 headers = {'api-key': self.delta_api, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
@@ -4440,10 +4502,12 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-                price = self.get_live_price(exchange, symbol, token)
-                if not price:
+                price_live = self.get_live_price(exchange, symbol, token)
+                if not price_live and not price:
                     self.log("❌ Cannot place CoinDCX order: price not available")
                     return None, "Price not available"
+                if not price:
+                    price = price_live
                 max_cap = self.settings.get('max_capital', 15000)
                 leverage = self.settings.get('leverage', 1)
                 position_value = max_cap * leverage
@@ -4479,20 +4543,24 @@ class SniperBot:
                     coin_side = "long" if side.lower() == "buy" else "short"
                     payload = {
                         "side": coin_side,
-                        "order_type": "market_order",
+                        "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order",
                         "pair": market_symbol,
                         "total_quantity": clean_qty,
                         "timestamp": ts
                     }
+                    if order_type.upper() == "LIMIT" and price:
+                        payload["price"] = price
                     endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 else:
                     payload = {
                         "side": side.lower(),
-                        "order_type": "market_order",
+                        "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order",
                         "market": market_symbol,
                         "total_quantity": clean_qty,
                         "timestamp": ts
                     }
+                    if order_type.upper() == "LIMIT" and price:
+                        payload["price"] = price
                     endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
                 payload_str = json.dumps(payload, separators=(',', ':'))
@@ -4526,7 +4594,16 @@ class SniperBot:
         if broker == "Zerodha" and self.kite:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
-                order_id = self.kite.place_order(variety=self.kite.VARIETY_REGULAR, exchange=exchange, tradingsymbol=symbol, transaction_type=z_side, quantity=int(float(qty)), product=self.kite.PRODUCT_MIS, order_type=self.kite.ORDER_TYPE_MARKET)
+                order_id = self.kite.place_order(
+                    variety=self.kite.VARIETY_REGULAR,
+                    exchange=exchange,
+                    tradingsymbol=symbol,
+                    transaction_type=z_side,
+                    quantity=int(float(qty)),
+                    product=self.kite.PRODUCT_MIS,
+                    order_type=self.kite.ORDER_TYPE_LIMIT if order_type.upper() == "LIMIT" else self.kite.ORDER_TYPE_MARKET,
+                    price=price if order_type.upper() == "LIMIT" else 0
+                )
                 self.log(f"✅ Zerodha Order Pushed! ID: {order_id}")
                 return order_id, None
             except Exception as e:
@@ -4534,7 +4611,7 @@ class SniperBot:
                 return None, f"Zerodha error: {str(e)}"
 
         if exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
-            order_id, msg = self.fyers_bridge.place_order(symbol, qty, side)
+            order_id, msg = self.fyers_bridge.place_order(symbol, qty, side, order_type, price=price)
             if order_id:
                 self.log(f"✅ Fyers Order Success! ID: {order_id}")
                 return order_id, None
@@ -4543,7 +4620,7 @@ class SniperBot:
                 return None, f"Fyers error: {msg}"
 
         if exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge:
-            order_id, msg = self.upstox_bridge.place_order(symbol, qty, side)
+            order_id, msg = self.upstox_bridge.place_order(symbol, qty, side, order_type, price)
             if order_id:
                 self.log(f"✅ Upstox Order Success! ID: {order_id}")
                 return order_id, None
@@ -4552,7 +4629,7 @@ class SniperBot:
                 return None, f"Upstox error: {msg}"
 
         if exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge:
-            order_id, msg = self.fivepaisa_bridge.place_order(symbol, qty, side)
+            order_id, msg = self.fivepaisa_bridge.place_order(symbol, qty, side, order_type, price)
             if order_id:
                 self.log(f"✅ 5paisa Order Success! ID: {order_id}")
                 return order_id, None
@@ -4561,7 +4638,7 @@ class SniperBot:
                 return None, f"5paisa error: {msg}"
 
         if exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
-            order_id, msg = self.binance_bridge.place_order(symbol, side, qty)
+            order_id, msg = self.binance_bridge.place_order(symbol, side, qty, order_type, price)
             if order_id:
                 self.log(f"✅ Binance Order Success! ID: {order_id}")
                 return order_id, None
@@ -4569,14 +4646,15 @@ class SniperBot:
                 self.log(f"❌ Binance Order Failed: {msg}")
                 return None, f"Binance error: {msg}"
 
+        # Angel One fallback
         try:
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
-            order_type = "MARKET"
-            exec_price = 0.0
-            if exchange in ["NFO", "BFO", "MCX"]:
+            order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
+            exec_price = price if order_type.upper() == "LIMIT" and price else 0.0
+            if exchange in ["NFO", "BFO", "MCX"] and order_type.upper() != "LIMIT":
                 ltp = self.get_live_price(exchange, symbol, token)
                 if ltp and ltp > 0:
-                    order_type = "LIMIT"
+                    order_type_final = "LIMIT"
                     safe_price = ltp * 1.05 if side.upper() == "BUY" else ltp * 0.95
                     exec_price = round(round(safe_price / 0.05) * 0.05, 2)
                 else:
@@ -4587,7 +4665,7 @@ class SniperBot:
                 "symboltoken": str(token),
                 "transactiontype": str(side.upper()),
                 "exchange": str(exchange.upper()),
-                "ordertype": str(order_type),
+                "ordertype": str(order_type_final),
                 "producttype": str(p_type),
                 "duration": "DAY",
                 "price": float(exec_price),
@@ -4661,6 +4739,7 @@ class SniperBot:
                     tgt_pts = s.get('tgt_pts', 15)
                     max_capital = s.get('max_capital', 15000)
                     lots = s.get('lots', 1)
+                    use_limit_orders = s.get('use_limit_orders', False)  # New setting
 
                     if self.state["trades_today"] >= max_trades or self.state.get("daily_pnl", 0.0) <= -capital_protect:
                         self.state["is_running"] = False
@@ -4739,7 +4818,6 @@ class SniperBot:
                                 df_candles, index, ml_prob_threshold, signal_persistence
                             )
                             self.log(f"ML Prob: Up={trend.split()[2]}, Down={trend.split()[4]}, Signal={signal}")
-                            # Get SHAP explanation
                             shap_values = ml_predictor.explain_prediction(df_candles)
                             if shap_values is not None:
                                 self.state["ml_explanation"] = shap_values
@@ -4951,13 +5029,20 @@ class SniperBot:
                             }
                             self.push_notify("Signal Triggered", f"Executing {qty} {strike_sym} @ {entry_ltp}")
                             self.state["sound_queue"].append("entry")
-                            st.toast(f"🚀 Entry: {qty} {strike_sym} @ {entry_ltp}", icon="💰")  # UI toast
+                            st.toast(f"🚀 Entry: {qty} {strike_sym} @ {entry_ltp}", icon="💰")
 
                             order_success = True
                             reject_reason = None
                             if not is_mock_mode:
                                 exec_side = "SELL" if new_trade['type'] == "SELL" else "BUY"
-                                order_id, reject_reason = self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch)
+                                # Determine order type
+                                if use_limit_orders and is_crypto:
+                                    order_type = "LIMIT"
+                                    order_price = entry_ltp
+                                else:
+                                    order_type = "MARKET"
+                                    order_price = None
+                                order_id, reject_reason = self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch, order_type, order_price)
                                 if not order_id:
                                     self.log(f"🚫 Real order rejected: {reject_reason}")
                                     new_trade["simulated"] = True
@@ -4987,110 +5072,120 @@ class SniperBot:
                     elif self.state["active_trade"]:
                         trade = self.state["active_trade"]
                         ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
-                        if ltp:
-                            if trade['type'] == "SELL":
-                                pnl = (trade['entry'] - ltp) * trade['qty']
-                            else:
-                                pnl = (ltp - trade['entry']) * trade['qty']
-                            if is_mt5_asset:
-                                pnl = pnl * 100000 if "USD" in trade['symbol'] else pnl
+                        if ltp is None:
+                            ltp = trade.get('current_ltp', trade['entry'])
+                            self.log(f"⚠️ Using stale price for {trade['symbol']}: {ltp}")
+                        else:
                             self.state["active_trade"]["current_ltp"] = ltp
-                            self.state["active_trade"]["floating_pnl"] = pnl
-                            min_profit = trade['entry'] * 0.005
-                            profit = pnl if trade['type'] in ["CE", "BUY"] else -pnl
 
-                            if trade['type'] == "SELL":
-                                if ltp < trade.get('lowest_price', trade['entry']):
-                                    trade['lowest_price'] = ltp
-                                    if profit > min_profit:
-                                        new_sl = ltp + tsl_pts
-                                        if new_sl < trade['sl']:
-                                            trade['sl'] = new_sl
-                                hit_tp = ltp <= trade['tgt']
-                                hit_sl = ltp >= trade['sl']
+                        if trade['type'] == "SELL":
+                            pnl = (trade['entry'] - ltp) * trade['qty']
+                        else:
+                            pnl = (ltp - trade['entry']) * trade['qty']
+
+                        if is_mt5_asset:
+                            pnl = pnl * 100000 if "USD" in trade['symbol'] else pnl
+
+                        self.state["active_trade"]["floating_pnl"] = pnl
+                        min_profit = trade['entry'] * 0.005  # 0.5% of entry
+
+                        # Trailing stop logic (using pnl, not profit)
+                        if trade['type'] == "SELL":
+                            if ltp < trade.get('lowest_price', trade['entry']):
+                                trade['lowest_price'] = ltp
+                                if pnl > min_profit:  # pnl positive means in profit
+                                    new_sl = ltp + tsl_pts
+                                    if new_sl < trade['sl']:
+                                        trade['sl'] = new_sl
+                            hit_tp = ltp <= trade['tgt']
+                            hit_sl = ltp >= trade['sl']
+                        else:
+                            if ltp > trade.get('highest_price', trade['entry']):
+                                trade['highest_price'] = ltp
+                                if pnl > min_profit:
+                                    new_sl = ltp - tsl_pts
+                                    if new_sl > trade['sl']:
+                                        trade['sl'] = new_sl
+                            hit_tp = ltp >= trade['tgt']
+                            hit_sl = ltp <= trade['sl']
+
+                        market_close = current_time >= cutoff_time
+                        if self.state.get("manual_exit"):
+                            hit_tp, market_close = True, True
+                            self.state["manual_exit"] = False
+                            self.log("Manual exit triggered.")
+
+                        if hit_tp or hit_sl or market_close:
+                            if not is_mock_mode and not trade.get("simulated"):
+                                exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
+                                self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'], "MARKET")
+                            if hit_tp:
+                                self.state["sound_queue"].append("tp")
+                                st.session_state.win_streak += 1
+                                st.session_state.loss_streak = 0
+                            elif hit_sl:
+                                self.state["sound_queue"].append("sl")
+                                st.session_state.loss_streak += 1
+                                st.session_state.win_streak = 0
+                            win_text = "profit👍" if pnl > 0 else "sl hit 🛑"
+                            if market_close:
+                                win_text += " (Force Exit)"
+                            self.log(f"🛑 EXIT {trade['symbol']} | PnL: {round(pnl, 2)} [{win_text}]")
+                            self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: {round(pnl, 2)}")
+                            if not self.is_mock:
+                                user_id = getattr(self, "system_user_id", self.api_key)
+                                save_trade(user_id, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
+                                journal_entry = {
+                                    "user_id": user_id,
+                                    "trade_date": today_date,
+                                    "trade_time": time_str,
+                                    "symbol": trade['symbol'],
+                                    "type": trade['type'],
+                                    "qty": trade['qty'],
+                                    "entry": trade['entry'],
+                                    "exit": ltp,
+                                    "pnl": round(pnl, 2),
+                                    "result": win_text,
+                                    "strategy": self.settings.get('strategy', 'Unknown')
+                                }
+                                save_trade_journal(user_id, journal_entry)
                             else:
-                                if ltp > trade.get('highest_price', trade['entry']):
-                                    trade['highest_price'] = ltp
-                                    if profit > min_profit:
-                                        new_sl = ltp - tsl_pts
-                                        if new_sl > trade['sl']:
-                                            trade['sl'] = new_sl
-                                hit_tp = ltp >= trade['tgt']
-                                hit_sl = ltp <= trade['sl']
-
-                            market_close = current_time >= cutoff_time
-                            if self.state.get("manual_exit"):
-                                hit_tp, market_close = True, True
-                                self.state["manual_exit"] = False
-                                self.log("Manual exit triggered.")
-
-                            if hit_tp or hit_sl or market_close:
-                                if not is_mock_mode and not trade.get("simulated"):
-                                    exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
-                                    self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'])
-                                if hit_tp:
-                                    self.state["sound_queue"].append("tp")
-                                    st.session_state.win_streak += 1
-                                    st.session_state.loss_streak = 0
-                                elif hit_sl:
-                                    self.state["sound_queue"].append("sl")
-                                    st.session_state.loss_streak += 1
-                                    st.session_state.win_streak = 0
-                                win_text = "profit👍" if pnl > 0 else "sl hit 🛑"
-                                if market_close:
-                                    win_text += " (Force Exit)"
-                                self.log(f"🛑 EXIT {trade['symbol']} | PnL: {round(pnl, 2)} [{win_text}]")
-                                self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: {round(pnl, 2)}")
-                                if not self.is_mock:
-                                    user_id = getattr(self, "system_user_id", self.api_key)
-                                    save_trade(user_id, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
-                                    # Save to trade journal
-                                    journal_entry = {
-                                        "user_id": user_id,
-                                        "trade_date": today_date,
-                                        "trade_time": time_str,
-                                        "symbol": trade['symbol'],
-                                        "type": trade['type'],
-                                        "qty": trade['qty'],
-                                        "entry": trade['entry'],
-                                        "exit": ltp,
-                                        "pnl": round(pnl, 2),
-                                        "result": win_text,
-                                        "strategy": self.settings.get('strategy', 'Unknown')
-                                    }
-                                    save_trade_journal(user_id, journal_entry)
+                                if "paper_history" not in self.state:
+                                    self.state["paper_history"] = []
+                                self.state["paper_history"].append({
+                                    "Date": today_date,
+                                    "Time": time_str,
+                                    "Symbol": trade['symbol'],
+                                    "Type": trade['type'],
+                                    "Qty": trade['qty'],
+                                    "Entry Price": trade['entry'],
+                                    "Exit Price": ltp,
+                                    "PnL": round(pnl, 2),
+                                    "Result": win_text
+                                })
+                            if trade.get('is_hz'):
+                                self.state["hz_pnl"] += pnl
+                                if pnl > 0:
+                                    self.state["hz_wins"] += 1
                                 else:
-                                    if "paper_history" not in self.state:
-                                        self.state["paper_history"] = []
-                                    self.state["paper_history"].append({
-                                        "Date": today_date,
-                                        "Time": time_str,
-                                        "Symbol": trade['symbol'],
-                                        "Type": trade['type'],
-                                        "Qty": trade['qty'],
-                                        "Entry Price": trade['entry'],
-                                        "Exit Price": ltp,
-                                        "PnL": round(pnl, 2),
-                                        "Result": win_text
-                                    })
-                                if trade.get('is_hz'):
-                                    self.state["hz_pnl"] += pnl
-                                    if pnl > 0:
-                                        self.state["hz_wins"] += 1
-                                    else:
-                                        self.state["hz_losses"] += 1
-                                self.state["last_trade"] = trade.copy()
-                                self.state["last_trade"].update({"exit_price": ltp, "final_pnl": pnl, "win_text": win_text})
-                                self.state["daily_pnl"] += pnl
-                                self.state["active_trade"] = None
-                                continue  # trade closed, continue loop
+                                    self.state["hz_losses"] += 1
+                            self.state["last_trade"] = trade.copy()
+                            self.state["last_trade"].update({"exit_price": ltp, "final_pnl": pnl, "win_text": win_text})
+                            self.state["daily_pnl"] += pnl
+                            self.state["active_trade"] = None
+                            if self.state.get("stop_after_manual_exit"):
+                                self.state["is_running"] = False
+                                self.state["stop_after_manual_exit"] = False
+                                self.log("Engine stopped after manual exit.")
+                                break
+                            continue  # trade closed, continue loop
 
             except Exception as e:
                 self.log(f"⚠️ Loop Error: {str(e)}")
-            time.sleep(1)  # Reduced from 2 to 1 for faster updates
+            time.sleep(0.5)  # Reduced from 1 to 0.5 for faster updates
 
 # ==========================================
-# LANDING PAGE (ENHANCED – TEXT MODE SELECTION)
+# LANDING PAGE (ORIGINAL – TWO BUTTONS)
 # ==========================================
 if st.session_state.page == "landing":
     # Custom CSS for animations and layout
@@ -5109,49 +5204,26 @@ if st.session_state.page == "landing":
         .landing-hero {
             border: 4px solid #0284c7;
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            max-width: 800px;
+            margin: 0 auto;
         }
-        .mode-selector {
-            display: flex;
-            justify-content: center;
-            gap: 3rem;
-            margin: 2rem 0;
+        .landing-hero h1 {
+            font-size: 2.5rem;
         }
-        .mode-item {
-            font-size: 2rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            color: #333;
-            text-decoration: none;
-            position: relative;
+        .landing-hero p {
+            font-size: 1rem;
         }
-        .mode-item:hover {
-            transform: scale(1.1);
-            color: #0284c7;
-            text-shadow: 0 0 8px rgba(2,132,199,0.3);
-        }
-        .mode-item.disabled {
-            opacity: 0.5;
-            pointer-events: none;
-        }
-        .mode-item.enabled {
-            cursor: pointer;
-        }
-        .mode-item::after {
-            content: '';
-            position: absolute;
-            width: 0;
-            height: 2px;
-            bottom: 0;
-            left: 50%;
-            background-color: #0284c7;
-            transition: all 0.3s ease;
-        }
-        .mode-item.enabled:hover::after {
-            width: 80%;
-            left: 10%;
+        @media (max-width: 850px) {
+            .landing-hero {
+                padding: 2rem 1rem !important;
+                max-width: 100% !important;
+            }
+            .landing-hero h1 {
+                font-size: 2rem !important;
+            }
+            .landing-hero p {
+                font-size: 0.9rem !important;
+            }
         }
         .nav-link {
             margin: 0 15px;
@@ -5240,14 +5312,12 @@ if st.session_state.page == "landing":
     </div>
     """, unsafe_allow_html=True)
 
-    # Hero section with animated logo
+    # Hero section with animated logo – removed "AI-Powered Trading Terminal" text
     st.markdown("""
     <div class="landing-hero" style="text-align: center; padding: 4rem 2rem; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; border-radius: 0 0 2rem 2rem;">
-        <div class="animated-logo">🕉️ SHREE</div>
-        <h1 style="font-size: 3.5rem; font-weight: 900; margin-bottom: 1rem;">AI-Powered Trading Terminal</h1>
-        <p style="font-size: 1.2rem; opacity: 0.9; max-width: 700px; margin: 0 auto 2rem auto;">
-            Connect to multiple brokers, run advanced strategies, and manage risk – all in one place.
-        </p>
+         <div class="animated-logo" style="font-size: 5rem;">🕉️ SHREE</div>
+        
+       
     </div>
     """, unsafe_allow_html=True)
 
@@ -5261,38 +5331,33 @@ if st.session_state.page == "landing":
             By accessing and using this platform, you agree to the following:
 
             - You are solely responsible for all trading decisions and outcomes.
-            
+            - This software is provided "as is" without any warranties.
             - Past performance does not guarantee future results.
             - You acknowledge the high risk of financial loss in trading.
-            
+            - You will not hold the developers liable for any losses.
             - You must comply with all applicable laws and regulations.
             """)
             terms_accepted = st.checkbox("I have read and agree to the Terms and Conditions", key="terms_accepted")
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # Mode selection – three stylized text options (Paper, Real, Backtest)
+    # Mode selection – two stylized text options (Paper, Real)
     st.markdown("### Choose Your Entry Mode")
-    cols = st.columns(3)
+    cols = st.columns(2)
     with cols[0]:
         paper_clicked = st.button(
             "📝 Paper Trading",
             key="paper_btn",
             disabled=not terms_accepted,
-            use_container_width=True
+            use_container_width=True,
+            on_click=lambda: play_sound_now("click")
         )
     with cols[1]:
         real_clicked = st.button(
             "🕉️ Real Trading",
             key="real_btn",
             disabled=not terms_accepted,
-            use_container_width=True
-        )
-    with cols[2]:
-        backtest_clicked = st.button(
-            "📊 Backtesting",
-            key="backtest_btn",
-            disabled=not terms_accepted,
-            use_container_width=True
+            use_container_width=True,
+            on_click=lambda: play_sound_now("click")
         )
 
     # Handle navigation based on clicks
@@ -5302,10 +5367,6 @@ if st.session_state.page == "landing":
         st.rerun()
     if real_clicked:
         st.query_params["mode"] = "real"
-        st.session_state.page = "login"
-        st.rerun()
-    if backtest_clicked:
-        st.query_params["mode"] = "backtest"
         st.session_state.page = "login"
         st.rerun()
 
@@ -5375,7 +5436,7 @@ if st.session_state.page == "landing":
             name = st.text_input("Your Name")
             email = st.text_input("Email Address")
             message = st.text_area("Message (e.g., which plan interests you?)")
-            submitted = st.form_submit_button("Send Inquiry", use_container_width=True)
+            submitted = st.form_submit_button("Send Inquiry", use_container_width=True, on_click=lambda: play_sound_now("click"))
             if submitted:
                 st.success("Thank you! We'll get back to you shortly.")
                 st.balloons()
@@ -5392,9 +5453,10 @@ if st.session_state.page == "landing":
         <p style="font-size: 0.9rem;">Developed by Vijayakumar Suryavanshi</p>
     </div>
     """, unsafe_allow_html=True)
-    
-        
 
+# ==========================================
+# LOGIN PAGE (unchanged – full version)
+# ==========================================
 elif st.session_state.page == "login":
     # ---------- LOGIN PAGE (unchanged, but with broker selection included) ----------
     if not HAS_DB:
@@ -5421,7 +5483,7 @@ elif st.session_state.page == "login":
                 keep_signed = st.checkbox("Keep me signed in (auto‑login using URL)", value=True)
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("👆 Authenticate & Connect", type="primary", use_container_width=True,
-                             on_click=trigger_click_sound):
+                             on_click=lambda: play_sound_now("click")):
                     creds = load_creds(USER_ID)
                     if creds and (creds.get("client_id") or creds.get("zerodha_api") or
                                   creds.get("coindcx_api") or creds.get("delta_api") or
@@ -5593,7 +5655,7 @@ elif st.session_state.page == "login":
                 SAVE_CREDS = st.checkbox("Remember Credentials Securely (Cloud DB)", value=True)
                 keep_signed = st.checkbox("Keep me signed in (auto‑login using URL)", value=True)
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("CONNECT MARKETS 🚀", type="primary", use_container_width=True, on_click=trigger_click_sound):
+                if st.button("CONNECT MARKETS 🚀", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
                     if not USER_ID:
                         st.error("Please enter your System Login ID (Email or Phone) to proceed.")
                     else:
@@ -5639,7 +5701,7 @@ elif st.session_state.page == "login":
             else:  # Paper Trading
                 st.info("📝 Paper Trading simulates live market movement without risking real capital.")
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("START PAPER SESSION 📝", type="primary", use_container_width=True, on_click=trigger_click_sound):
+                if st.button("START PAPER SESSION 📝", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
                     temp_bot = SniperBot(is_mock=True)
                     temp_bot.login()
                     temp_bot.system_user_id = "paper_user"
@@ -5650,21 +5712,32 @@ elif st.session_state.page == "login":
                     st.session_state.page = "splash"
                     st.rerun()
             st.markdown("</div>", unsafe_allow_html=True)
-            if st.button("← Back to Landing", on_click=trigger_click_sound):
+            if st.button("← Back to Landing", on_click=lambda: play_sound_now("click")):
                 st.session_state.page = "landing"
                 st.rerun()
 
+# ==========================================
+# SPLASH SCREEN (FIXED – plays sound before sleep, with animation)
+# ==========================================
 elif st.session_state.page == "splash":
-    # ---------- SPLASH SCREEN ----------
+    # Play login sound immediately
+    if st.session_state.audio_enabled and st.session_state.bot and st.session_state.bot.state.get("sound_queue"):
+        while st.session_state.bot.state["sound_queue"]:
+            latest_sound = st.session_state.bot.state["sound_queue"].popleft()
+            play_sound_ui(latest_sound)
+    st.balloons()
     st.markdown("""
     <div class="splash">
         <h1>🎉 HAPPY TRADING 🎉</h1>
     </div>
     """, unsafe_allow_html=True)
-    time.sleep(2)
+    time.sleep(1.5)
     st.session_state.page = "dashboard"
     st.rerun()
 
+# ==========================================
+# DASHBOARD (with updated tabs and events display)
+# ==========================================
 elif st.session_state.page == "dashboard":
     # ---------- DASHBOARD (with updated tabs) ----------
     bot = st.session_state.bot
@@ -5677,7 +5750,7 @@ elif st.session_state.page == "dashboard":
 
     # Theme toggle in sidebar
     with st.sidebar:
-        theme_choice = st.radio("Theme", ["light", "dark"], index=0 if st.session_state.theme == "light" else 1, horizontal=True)
+        theme_choice = st.radio("Theme", ["light", "dark"], index=0 if st.session_state.theme == "light" else 1, horizontal=True, on_change=lambda: play_sound_now("click"))
         if theme_choice != st.session_state.theme:
             st.session_state.theme = theme_choice
             st.rerun()
@@ -5701,7 +5774,7 @@ elif st.session_state.page == "dashboard":
             st.markdown("**Active Sessions:**")
             for sess in active_sessions:
                 st.markdown(f"- {sess.get('device_name', 'Unknown')} ({sess.get('ip_address', 'Unknown')})")
-            if st.button("🚪 Logout", use_container_width=True, on_click=trigger_click_sound):
+            if st.button("🚪 Logout", use_container_width=True, on_click=lambda: play_sound_now("click")):
                 bot.state["is_running"] = False
                 st.session_state.clear()
                 st.query_params.clear()
@@ -5711,7 +5784,7 @@ elif st.session_state.page == "dashboard":
     with st.sidebar:
         st.header("⚙️ SYSTEM CONFIGURATION")
         if not st.session_state.audio_enabled:
-            if st.button("🔊 Enable Audio", use_container_width=True, on_click=trigger_click_sound):
+            if st.button("🔊 Enable Audio", use_container_width=True, on_click=lambda: play_sound_now("click")):
                 st.session_state.audio_enabled = True
                 unlock_audio()
                 st.success("Audio enabled!")
@@ -5720,14 +5793,14 @@ elif st.session_state.page == "dashboard":
             st.success("🔊 Audio is ON")
 
         st.markdown("**1. Market Setup**")
-        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5", "Fyers", "Upstox", "5paisa", "Binance"], index=0)
+        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5", "Fyers", "Upstox", "5paisa", "Binance"], index=0, on_change=lambda: play_sound_now("click"))
 
         st.divider()
         st.markdown("**📈 High‑Profit Strategies**")
-        martingale_mode = st.selectbox("Martingale Mode", ["Off", "Martingale", "Anti‑Martingale"], index=0)
+        martingale_mode = st.selectbox("Martingale Mode", ["Off", "Martingale", "Anti‑Martingale"], index=0, on_change=lambda: play_sound_now("click"))
 
         st.markdown("**🚀 FOMO Mode**")
-        fomo_enabled = st.toggle("Enable FOMO (Trade Nifty, Bank Nifty, Sensex simultaneously)", value=st.session_state.fomo_mode)
+        fomo_enabled = st.toggle("Enable FOMO (Trade Nifty, Bank Nifty, Sensex simultaneously)", value=st.session_state.fomo_mode, on_change=lambda: play_sound_now("click"))
         if fomo_enabled != st.session_state.fomo_mode:
             st.session_state.fomo_mode = fomo_enabled
             st.rerun()
@@ -5753,9 +5826,9 @@ elif st.session_state.page == "dashboard":
         if st.session_state.sb_index_input not in valid_assets:
             st.session_state.sb_index_input = valid_assets[0]
 
-        INDEX = st.selectbox("Watchlist Asset", valid_assets, index=valid_assets.index(st.session_state.sb_index_input), key="sb_index_input")
-        STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input")
-        TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2)
+        INDEX = st.selectbox("Watchlist Asset", valid_assets, index=valid_assets.index(st.session_state.sb_index_input), key="sb_index_input", on_change=lambda: play_sound_now("click"))
+        STRATEGY = st.selectbox("Trading Strategy", STRAT_LIST, index=STRAT_LIST.index(st.session_state.sb_strat_input), key="sb_strat_input", on_change=lambda: play_sound_now("click"))
+        TIMEFRAME = st.selectbox("Candle Timeframe", ["1m", "3m", "5m", "15m"], index=2, on_change=lambda: play_sound_now("click"))
 
         CUSTOM_CODE = ""
         TV_PASSPHRASE = "SHREE123"
@@ -5782,13 +5855,17 @@ elif st.session_state.page == "dashboard":
             st.divider()
             st.markdown("**🪙 Crypto Setup**")
             col_c1, col_c2 = st.columns(2)
-            with col_c1: CRYPTO_MODE = st.selectbox("Market Type", ["Futures", "Spot", "Options"])
-            with col_c2: LEVERAGE = st.number_input("Leverage (x)", 1, 100, 10, 1)
-            SHOW_INR_CRYPTO = st.toggle("Convert to ₹ INR", True)
+            with col_c1: 
+                CRYPTO_MODE = st.selectbox("Market Type", ["Futures", "Spot", "Options"], on_change=lambda: play_sound_now("click"))
+            with col_c2: 
+                LEVERAGE = st.number_input("Leverage (x)", 1, 100, 10, 1, on_change=lambda: play_sound_now("click"))
+            SHOW_INR_CRYPTO = st.toggle("Convert to ₹ INR", True, on_change=lambda: play_sound_now("click"))
+            USE_LIMIT_ORDERS = st.toggle("Use Limit Orders for Crypto", False, on_change=lambda: play_sound_now("click"))
         else:
             CRYPTO_MODE = "Options"
             LEVERAGE = 1
             SHOW_INR_CRYPTO = False
+            USE_LIMIT_ORDERS = False
 
         st.divider()
         st.markdown("**2. Risk Management**")
@@ -5796,33 +5873,33 @@ elif st.session_state.page == "dashboard":
         st.caption(f"1 lot = {lot_size} units for {INDEX}")
         min_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
         step_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
-        LOTS = st.number_input("Base Lots", min_value=min_val, max_value=10000.0, value=1.0, step=step_val, key=f"lots_input_{INDEX}")
+        LOTS = st.number_input("Base Lots", min_value=min_val, max_value=10000.0, value=1.0, step=step_val, key=f"lots_input_{INDEX}", on_change=lambda: play_sound_now("click"))
         actual_qty = LOTS * lot_size
         st.caption(f"Base quantity: {actual_qty:.2f} units")
 
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            MAX_TRADES = st.number_input("Max Trades/Day", 1, 50, 5)
-            MAX_CAPITAL = st.number_input("Max Cap/Trade (₹/$)", 10.0, 500000.0, 15000.0, step=100.0)
-            SL_PTS = st.number_input("SL Points", 5.0, 500.0, 20.0)
-            TSL_PTS = st.number_input("Trail SL", 5.0, 500.0, 15.0)
+            MAX_TRADES = st.number_input("Max Trades/Day", 1, 50, 5, on_change=lambda: play_sound_now("click"))
+            MAX_CAPITAL = st.number_input("Max Cap/Trade (₹/$)", 10.0, 500000.0, 15000.0, step=100.0, on_change=lambda: play_sound_now("click"))
+            SL_PTS = st.number_input("SL Points", 5.0, 500.0, 20.0, on_change=lambda: play_sound_now("click"))
+            TSL_PTS = st.number_input("Trail SL", 5.0, 500.0, 15.0, on_change=lambda: play_sound_now("click"))
         with col_s2:
-            TGT_PTS = st.number_input("Target Steps", 5.0, 1000.0, 15.0)
-            CAPITAL_PROTECT = st.number_input("Max Loss", 500.0, 500000.0, 2000.0, step=500.0)
+            TGT_PTS = st.number_input("Target Steps", 5.0, 1000.0, 15.0, on_change=lambda: play_sound_now("click"))
+            CAPITAL_PROTECT = st.number_input("Max Loss", 500.0, 500000.0, 2000.0, step=500.0, on_change=lambda: play_sound_now("click"))
 
-        MIN_SIGNAL_STRENGTH = st.slider("Min Signal Strength %", 0, 100, 30, 5)
+        MIN_SIGNAL_STRENGTH = st.slider("Min Signal Strength %", 0, 100, 30, 5, on_change=lambda: play_sound_now("click"))
 
         st.divider()
         st.markdown("**3. Advanced Triggers**")
         col_adv1, col_adv2 = st.columns(2)
         with col_adv1:
-            MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False)
-            HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False)
-            THREE_FIVE_SEVEN = st.toggle("🔢 3-5-7 Rule (ATR based)", False)
+            MTF_CONFIRM = st.toggle("⏱️ Multi-TF Confirmation", False, on_change=lambda: play_sound_now("click"))
+            HERO_ZERO = st.toggle("🚀 Hero/Zero Setup (Gamma Tracker)", False, on_change=lambda: play_sound_now("click"))
+            THREE_FIVE_SEVEN = st.toggle("🔢 3-5-7 Rule (ATR based)", False, on_change=lambda: play_sound_now("click"))
         with col_adv2:
             if STRATEGY == "Machine Learning":
-                ML_PROB_THRESHOLD = st.slider("ML Probability Threshold", 0.1, 0.6, 0.30, 0.05)
-                SIGNAL_PERSISTENCE = st.slider("Signal Persistence (bars)", 1, 3, 1, 1)
+                ML_PROB_THRESHOLD = st.slider("ML Probability Threshold", 0.1, 0.6, 0.30, 0.05, on_change=lambda: play_sound_now("click"))
+                SIGNAL_PERSISTENCE = st.slider("Signal Persistence (bars)", 1, 3, 1, 1, on_change=lambda: play_sound_now("click"))
             else:
                 ML_PROB_THRESHOLD = 0.30
                 SIGNAL_PERSISTENCE = 1
@@ -5832,11 +5909,11 @@ elif st.session_state.page == "dashboard":
             st.markdown("**🎯 Hero/Zero Specific Settings**")
             hz_col1, hz_col2 = st.columns(2)
             with hz_col1:
-                HZ_MAX_RISK = st.number_input("Max Risk per HZ Trade (%)", 0.5, 5.0, 2.0, 0.5) / 100
-                HZ_MIN_PROFIT = st.number_input("Min Profit to Book (%)", 1.0, 10.0, 5.0, 0.5)
+                HZ_MAX_RISK = st.number_input("Max Risk per HZ Trade (%)", 0.5, 5.0, 2.0, 0.5, on_change=lambda: play_sound_now("click")) / 100
+                HZ_MIN_PROFIT = st.number_input("Min Profit to Book (%)", 1.0, 10.0, 5.0, 0.5, on_change=lambda: play_sound_now("click"))
             with hz_col2:
-                HZ_TRAIL_ATR = st.slider("Trail Stop (ATR multiple)", 0.3, 2.0, 0.5, 0.1)
-                HZ_MAX_HOLD = st.number_input("Max Hold Time (minutes)", 15, 120, 60, 15)
+                HZ_TRAIL_ATR = st.slider("Trail Stop (ATR multiple)", 0.3, 2.0, 0.5, 0.1, on_change=lambda: play_sound_now("click"))
+                HZ_MAX_HOLD = st.number_input("Max Hold Time (minutes)", 15, 120, 60, 15, on_change=lambda: play_sound_now("click"))
         else:
             HZ_MAX_RISK = 0.02
             HZ_MIN_PROFIT = 5.0
@@ -5844,9 +5921,9 @@ elif st.session_state.page == "dashboard":
             HZ_MAX_HOLD = 60
 
         st.divider()
-        if st.button("🔄 Refresh Balance", use_container_width=True, on_click=trigger_click_sound):
+        if st.button("🔄 Refresh Balance", use_container_width=True, on_click=lambda: play_sound_now("click")):
             st.rerun()
-        if not bot.is_mock and st.button("🧪 Ping API Connection", use_container_width=True, on_click=trigger_click_sound):
+        if not bot.is_mock and st.button("🧪 Ping API Connection", use_container_width=True, on_click=lambda: play_sound_now("click")):
             st.toast("Testing exact API parameters...", icon="🧪")
             bot.log(f"🧪 User executed manual Ping API Connection for {BROKER}.")
 
@@ -5871,7 +5948,8 @@ elif st.session_state.page == "dashboard":
         "hz_max_risk": HZ_MAX_RISK,
         "hz_min_profit": HZ_MIN_PROFIT,
         "hz_trail_atr": HZ_TRAIL_ATR,
-        "hz_max_hold": HZ_MAX_HOLD
+        "hz_max_hold": HZ_MAX_HOLD,
+        "use_limit_orders": USE_LIMIT_ORDERS
     }
 
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
@@ -5923,28 +6001,27 @@ elif st.session_state.page == "dashboard":
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
     bcol1, bcol2, bcol3, bcol4 = st.columns(4)
     with bcol1:
-        if st.button("▶️ Start", use_container_width=True, disabled=bot.state["is_running"], on_click=trigger_click_sound):
+        if st.button("▶️ Start", use_container_width=True, disabled=bot.state["is_running"], on_click=lambda: play_sound_now("click")):
             bot.state["is_running"] = True
             t = threading.Thread(target=bot.trading_loop, daemon=True)
             add_script_run_ctx(t)
             t.start()
             st.rerun()
     with bcol2:
-        if st.button("⏹️ Stop", use_container_width=True, disabled=not bot.state["is_running"], on_click=trigger_click_sound):
+        if st.button("⏹️ Stop", use_container_width=True, disabled=not bot.state["is_running"], on_click=lambda: play_sound_now("click")):
             bot.state["is_running"] = False
             st.rerun()
     with bcol3:
-        if st.button("🔄 Refresh", use_container_width=True, on_click=trigger_click_sound):
+        if st.button("🔄 Refresh", use_container_width=True, on_click=lambda: play_sound_now("click")):
             st.rerun()
     with bcol4:
-        if st.button("☠️ Exit Engine", use_container_width=True, on_click=trigger_click_sound):
-            def exit_switch():
+        if st.button("☠️ Exit Engine", use_container_width=True, on_click=lambda: play_sound_now("click")):
+            def immediate_exit():
                 if bot.state["active_trade"]:
                     t = bot.state["active_trade"]
-                    # Close trade immediately
                     if not bot.is_mock and not t.get("simulated"):
                         exec_side = "BUY" if t['type'] == "SELL" else "SELL"
-                        order_id, err = bot.place_real_order(t['symbol'], t['token'], t['qty'], exec_side, t['exch'])
+                        order_id, err = bot.place_real_order(t['symbol'], t['token'], t['qty'], exec_side, t['exch'], "MARKET")
                         if order_id:
                             ltp = bot.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
                         else:
@@ -5966,7 +6043,7 @@ elif st.session_state.page == "dashboard":
             exit_switch()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # NEW TAB STRUCTURE
+    # TAB STRUCTURE
     tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
     if st.session_state.is_developer:
         tab_names.append("🛡️ ADMIN")
@@ -5975,7 +6052,7 @@ elif st.session_state.page == "dashboard":
     if st.session_state.is_developer:
         tab8 = tabs[7]
 
-    # ---------- TAB 1: DASHBOARD (unchanged) ----------
+    # ---------- TAB 1: DASHBOARD (with live position tracker in a stable container) ----------
     with tab1:
         kannada_news = st.session_state.kannada_news
         english_news = st.session_state.english_news
@@ -6034,7 +6111,7 @@ elif st.session_state.page == "dashboard":
         st.markdown("### 🎯 Live Position Tracker")
         if bot.state["active_trade"]:
             t = bot.state["active_trade"]
-            # Fetch live price even if engine not running to update PnL
+            # Fetch live price
             ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
             if ltp is not None:
                 t['current_ltp'] = ltp
@@ -6062,7 +6139,7 @@ elif st.session_state.page == "dashboard":
             rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
 
             html_block = (
-                f'<div style="background: #ffffff; border: 2px solid {pnl_color}; border-radius: 4px; padding: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); margin-bottom: 15px;">'
+                f'<div class="live-tracker">'
                 f'<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">'
                 f'<div><span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800;">{t["type"]}</span>'
                 f'{simulated_badge}<strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t["symbol"]}</strong>{rejection_info}</div>'
@@ -6079,17 +6156,17 @@ elif st.session_state.page == "dashboard":
             )
             st.write(html_block, unsafe_allow_html=True)
 
-            if st.button("🛑 EXIT TRADE", type="primary", use_container_width=True, on_click=trigger_click_sound):
+            if st.button("🛑 EXIT TRADE", type="primary", use_container_width=True, on_click=lambda: play_sound_now("exit")):
                 bot.state["manual_exit"] = True
-                st.toast("Exit signal sent – closing trade...", icon="🛑")
+                bot.state["stop_after_manual_exit"] = True
+                st.toast("Exit signal sent – engine will stop after trade closes.", icon="🛑")
                 st.rerun()
         else:
             st.info("⏳ Radar Active: Waiting for High-Probability Setup...")
             if bot.state.get("pending_signal"):
                 sig = bot.state["pending_signal"]
                 st.success(f"🚀 **Signal Detected:** {sig['signal']} on {sig['index']} at {sig['spot']:.2f} (Strength: {sig['strength']}%)")
-                if st.button("✅ Execute This Signal Now", use_container_width=True, on_click=trigger_click_sound):
-                    # Manual execution logic would go here – simplified for brevity
+                if st.button("✅ Execute This Signal Now", use_container_width=True, on_click=lambda: play_sound_now("click")):
                     st.info("Manual execution triggered (logic similar to auto entry).")
 
         # Autorefresh when active trade exists (1 second)
@@ -6178,12 +6255,21 @@ elif st.session_state.page == "dashboard":
             </div>
         """, unsafe_allow_html=True)
 
+        # Display major events (FOMC, RBI)
+        st.markdown("### 📅 Upcoming Major Events (2026)")
+        events = get_major_events_2026()
+        if events:
+            df_events = pd.DataFrame(events)
+            st.dataframe(df_events, use_container_width=True, hide_index=True)
+        else:
+            st.info("No major events in the near future.")
+
         st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
         c_h1, c_h2 = st.columns(2)
         with c_h1:
-            SHOW_CHART = st.toggle("📊 Render Chart", True)
+            SHOW_CHART = st.toggle("📊 Render Chart", True, on_change=lambda: play_sound_now("click"))
         with c_h2:
-            FULL_CHART = st.toggle("⛶ Full Screen", False)
+            FULL_CHART = st.toggle("⛶ Full Screen", False, on_change=lambda: play_sound_now("click"))
 
         if SHOW_CHART and bot.state["latest_data"] is not None:
             chart_df = bot.state["latest_data"].copy()
@@ -6276,7 +6362,7 @@ elif st.session_state.page == "dashboard":
             </div>
             """, unsafe_allow_html=True)
 
-    # ---------- TAB 2: SCANNERS (with Hero/Zero subtab) ----------
+    # ---------- TAB 2: SCANNERS (unchanged) ----------
     with tab2:
         sub_tabs = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "🇺🇸 US Stock Scanner", "🌙 Overnight Profitable", "🎯 Hero/Zero Scanner"])
         with sub_tabs[0]:
@@ -6603,7 +6689,7 @@ elif st.session_state.page == "dashboard":
                     - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                     """)
 
-    # ---------- TAB 3: LOGS (with Tax Report subtab) ----------
+    # ---------- TAB 3: LOGS (unchanged) ----------
     with tab3:
         sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
         with sub_tabs[0]:
@@ -6611,7 +6697,7 @@ elif st.session_state.page == "dashboard":
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 col_clr, _ = st.columns([1,5])
                 with col_clr:
-                    if st.button("🗑️ Clear", use_container_width=True, on_click=trigger_click_sound):
+                    if st.button("🗑️ Clear", use_container_width=True, on_click=lambda: play_sound_now("click")):
                         bot.state["logs"].clear()
                         if "paper_history" in bot.state:
                             bot.state["paper_history"] = []
@@ -6645,7 +6731,7 @@ elif st.session_state.page == "dashboard":
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                             df_report.to_excel(w, index=False)
-                        st.download_button("📥 Export", data=output.getvalue(), file_name="mock_ledger.xlsx", on_click=trigger_click_sound)
+                        st.download_button("📥 Export", data=output.getvalue(), file_name="mock_ledger.xlsx", on_click=lambda: play_sound_now("click"))
                     else:
                         st.info("No paper trades yet.")
                 else:
@@ -6667,7 +6753,7 @@ elif st.session_state.page == "dashboard":
                                 output = io.BytesIO()
                                 with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                                     df_report.to_excel(w, index=False)
-                                st.download_button("📥 Export", data=output.getvalue(), file_name="live_ledger.xlsx", on_click=trigger_click_sound)
+                                st.download_button("📥 Export", data=output.getvalue(), file_name="live_ledger.xlsx", on_click=lambda: play_sound_now("click"))
                             else:
                                 st.info("No live trades.")
                         except Exception as e:
@@ -6681,7 +6767,7 @@ elif st.session_state.page == "dashboard":
                 st.subheader("📄 Tax Report")
                 if st.session_state.user_id and HAS_DB:
                     tax_year = st.selectbox("Financial Year", [2023, 2024, 2025])
-                    if st.button("Generate Report", on_click=trigger_click_sound):
+                    if st.button("Generate Report", on_click=lambda: play_sound_now("click")):
                         summary, df_tax = generate_tax_report(st.session_state.user_id, tax_year)
                         if summary:
                             st.markdown(f"### Summary for FY {tax_year}-{tax_year+1}")
@@ -6691,7 +6777,7 @@ elif st.session_state.page == "dashboard":
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                                 df_tax.to_excel(w, index=False)
-                            st.download_button("📥 Download Tax Report", data=output.getvalue(), file_name=f"tax_report_{tax_year}.xlsx")
+                            st.download_button("📥 Download Tax Report", data=output.getvalue(), file_name=f"tax_report_{tax_year}.xlsx", on_click=lambda: play_sound_now("click"))
                         else:
                             st.info("No trades found for this period.")
                 else:
@@ -6756,7 +6842,7 @@ elif st.session_state.page == "dashboard":
                     source2 = st.radio("Source", ["CoinDCX", "CoinGecko"], horizontal=True, key="web3_source")
                 with col2:
                     limit2 = st.number_input("Show Top", 5, 50, 10, key="web3_limit")
-                if st.button("Fetch Web3 Data", on_click=trigger_click_sound, key="web3_fetch"):
+                if st.button("Fetch Web3 Data", on_click=lambda: play_sound_now("click"), key="web3_fetch"):
                     with st.spinner("Fetching..."):
                         if source2 == "CoinDCX":
                             try:
@@ -6872,14 +6958,14 @@ elif st.session_state.page == "dashboard":
                 st.markdown(f"- Resistance: {res:.2f}")
             trend = "🟢 Bullish" if last['close'] > last.get('ema9', last['close']) else "🔴 Bearish"
             st.markdown(f"**Short-term trend:** {trend}")
-            if st.button("Refresh Analysis", on_click=trigger_click_sound):
+            if st.button("Refresh Analysis", on_click=lambda: play_sound_now("click")):
                 st.rerun()
         if bot.state.get("latest_data") is not None:
             fia_assistant(bot.state["latest_data"], INDEX)
         else:
             st.info("No chart data available yet. Start the engine or refresh.")
 
-    # ---------- TAB 7: BACKTEST (unchanged) ----------
+    # ---------- TAB 7: BACKTEST (improved with trade list) ----------
     with tab7:
         st.subheader("📊 Backtesting Engine")
         st.markdown("Test your strategy on historical data.")
@@ -6887,7 +6973,7 @@ elif st.session_state.page == "dashboard":
         bt_start = st.date_input("Start Date", get_ist().date() - dt.timedelta(days=180))
         bt_end = st.date_input("End Date", get_ist().date())
         bt_initial_cap = st.number_input("Initial Capital (₹)", 10000, 1000000, 100000)
-        if st.button("Run Backtest", on_click=trigger_click_sound):
+        if st.button("Run Backtest", on_click=lambda: play_sound_now("click")):
             with st.spinner("Running backtest..."):
                 df = yf.download(YF_TICKERS.get(bt_symbol, bt_symbol), start=bt_start, end=bt_end, interval="1d")
                 if df.empty:
@@ -6895,8 +6981,16 @@ elif st.session_state.page == "dashboard":
                 else:
                     df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
                     bt = Backtester(bot, bot.analyzer.apply_vwap_ema_strategy, df, bt_initial_cap)
-                    equity, ret = bt.run()
+                    equity, ret, trades = bt.run()
                     st.success(f"Backtest complete! Total Return: {ret:.2f}%")
+                    if trades:
+                        st.markdown("### Trade Log")
+                        trades_df = pd.DataFrame(trades)
+                        trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time']).dt.strftime('%Y-%m-%d')
+                        trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time']).dt.strftime('%Y-%m-%d')
+                        st.dataframe(trades_df, use_container_width=True, hide_index=True)
+                        total_pnl = sum(t['pnl'] for t in trades)
+                        st.metric("Total PnL", f"₹{total_pnl:.2f}")
                     st.line_chart(equity)
 
     # ---------- TAB 8: ADMIN (if developer) ----------
@@ -6918,7 +7012,7 @@ elif st.session_state.page == "dashboard":
 
                 st.markdown("### 🚫 Block User")
                 block_user = st.text_input("Enter User ID to block")
-                if st.button("Block User", on_click=trigger_click_sound):
+                if st.button("Block User", on_click=lambda: play_sound_now("click")):
                     try:
                         supabase.table("blocked_users").upsert({"user_id": block_user}, on_conflict='user_id').execute()
                         st.success(f"User {block_user} blocked.")
@@ -6944,7 +7038,7 @@ elif st.session_state.page == "dashboard":
                 user_id = st.text_input("User Email/Phone for License")
                 plan = st.selectbox("Plan", ["basic", "premium"])
                 days = st.number_input("Validity (days)", 1, 3650, 365)
-                if st.button("Generate License", on_click=trigger_click_sound):
+                if st.button("Generate License", on_click=lambda: play_sound_now("click")):
                     lic = create_license(user_id, plan, days)
                     if lic:
                         st.success(f"License created: `{lic}`")
@@ -6959,22 +7053,22 @@ elif st.session_state.page == "dashboard":
     st.markdown('<div class="bottom-dock">', unsafe_allow_html=True)
     d1, d2, d3 = st.columns(3)
     with d1:
-        if st.button("▶️\nStart", key="dock_start", on_click=trigger_click_sound):
+        if st.button("▶️\nStart", key="dock_start", on_click=lambda: play_sound_now("click")):
             bot.state["is_running"] = True
             t = threading.Thread(target=bot.trading_loop, daemon=True)
             add_script_run_ctx(t)
             t.start()
             st.rerun()
     with d2:
-        if st.button("🔄\nSync", key="dock_refresh", on_click=trigger_click_sound):
+        if st.button("🔄\nSync", key="dock_refresh", on_click=lambda: play_sound_now("click")):
             st.rerun()
     with d3:
-        if st.button("☠️\nExit", key="dock_Exit", on_click=trigger_click_sound):
+        if st.button("☠️\nExit", key="dock_Exit", on_click=lambda: play_sound_now("click")):
             if bot.state["active_trade"]:
                 t = bot.state["active_trade"]
                 if not bot.is_mock and not t.get("simulated"):
                     exec_side = "BUY" if t['type'] == "SELL" else "SELL"
-                    order_id, err = bot.place_real_order(t['symbol'], t['token'], t['qty'], exec_side, t['exch'])
+                    order_id, err = bot.place_real_order(t['symbol'], t['token'], t['qty'], exec_side, t['exch'], "MARKET")
                     if order_id:
                         ltp = bot.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
                     else:
@@ -6996,14 +7090,15 @@ elif st.session_state.page == "dashboard":
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# PROCESS SOUND QUEUES (FIXED)
+# PROCESS SOUND QUEUES – PLAY ALL SOUNDS
 # ==========================================
 # Play sounds from session queue (for landing/login screens)
-if st.session_state.sound_queue:
+while st.session_state.sound_queue:
     latest_sound = st.session_state.sound_queue.popleft()
     play_sound_ui(latest_sound)
 
-# Play sounds from bot queue (after login) – one per rerun, do not clear all
+# Play sounds from bot queue (after login)
 if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("sound_queue"):
-    latest_sound = st.session_state.bot.state["sound_queue"].popleft()
-    play_sound_ui(latest_sound)        
+    while st.session_state.bot.state["sound_queue"]:
+        latest_sound = st.session_state.bot.state["sound_queue"].popleft()
+        play_sound_ui(latest_sound)
