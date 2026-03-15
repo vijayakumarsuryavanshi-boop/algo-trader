@@ -21,6 +21,7 @@ logzero
 websocket
 fyers_apiv3
 qrcode
+streamlit_autorefresh import st_autorefresh
 
 
 
