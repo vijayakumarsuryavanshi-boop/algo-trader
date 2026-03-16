@@ -6610,7 +6610,7 @@ elif st.session_state.page == "dashboard":
                     st.info("No significant overnight movements detected.")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-                with sub_tabs[4]:
+        with sub_tabs[4]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
