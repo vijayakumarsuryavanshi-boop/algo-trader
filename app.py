@@ -3959,16 +3959,20 @@ class SniperBot:
             price = self.binance_bridge.get_live_price(symbol)
 
         if price is None and symbol in YF_TICKERS:
-            try:
-                yf_ticker = YF_TICKERS[symbol]
-                df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-                if not df.empty:
-                    price = float(df['Close'].iloc[-1])
-                    self.log(f"⚠️ Using yfinance fallback for {symbol}: {price}")
-            except:
-                pass
-
-        return price
+            now = time.time()
+            last_call = st.session_state.get(f"yf_last_{symbol}", 0)
+            if now - last_call > 5:   # min 5 seconds between calls
+               try:
+                  yf_ticker = YF_TICKERS[symbol]
+                  df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+                  if not df.empty:
+                     price = float(df['Close'].iloc[-1])
+                     st.session_state[f"yf_last_{symbol}"] = now
+               except:
+                    pass
+        else:
+            # use cached price from session state
+            price = st.session_state.get(f"yf_cached_{symbol}")
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
         if self.is_mock and token == "12345":
