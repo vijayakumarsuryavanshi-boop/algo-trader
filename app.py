@@ -6138,21 +6138,20 @@ elif st.session_state.page == "dashboard":
             simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
             rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
 
-            # FIX: Removed hardcoded dark colors so it respects Dark Mode automatically
             html_block = (
-                f'<div class="live-tracker" style="background: var(--background-color); border: 2px solid #0284c7; border-radius: 8px; padding: 16px;">'
+                f'<div class="live-tracker">'
                 f'<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">'
                 f'<div><span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800;">{t["type"]}</span>'
-                f'{simulated_badge}<strong style="margin-left: 10px; font-size: 1.1rem; color: inherit;">{t["symbol"]}</strong>{rejection_info}</div>'
+                f'{simulated_badge}<strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t["symbol"]}</strong>{rejection_info}</div>'
                 f'<div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">{pnl_display}</div>'
                 f'</div>'
                 f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">'
-                f'<div style="background: rgba(128,128,128,0.1); padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br><b style="font-size: 1.1rem; color: inherit;">{t["entry"]:.4f}</b></div>'
-                f'<div style="background: rgba(128,128,128,0.1); padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br><b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b></div>'
-                f'<div style="background: rgba(128,128,128,0.1); padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br><b style="font-size: 1.1rem; color: inherit;">{t["qty"]}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span></div>'
-                f'<div style="background: rgba(239,68,68,0.1); padding: 10px; border-radius: 4px; border: 1px solid #fecaca;"><span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br><b style="font-size: 1.1rem; color: #ef4444;">{t["sl"]:.4f}</b></div>'
+                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br><b style="font-size: 1.1rem; color: #0f111a;">{t["entry"]:.4f}</b></div>'
+                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br><b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b></div>'
+                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br><b style="font-size: 1.1rem; color: #0f111a;">{t["qty"]}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span></div>'
+                f'<div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;"><span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br><b style="font-size: 1.1rem; color: #ef4444;">{t["sl"]:.4f}</b></div>'
                 f'</div>'
-                f'<div style="background: rgba(2,132,199,0.1); padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700;">🎯 TP1: {t.get("tp1", 0):.2f} &nbsp;|&nbsp; TP2: {t.get("tp2", 0):.2f} &nbsp;|&nbsp; TP3: {t.get("tp3", 0):.2f}</div>'
+                f'<div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700;">🎯 TP1: {t.get("tp1", 0):.2f} &nbsp;|&nbsp; TP2: {t.get("tp2", 0):.2f} &nbsp;|&nbsp; TP3: {t.get("tp3", 0):.2f}</div>'
                 f'</div>'
             )
             st.write(html_block, unsafe_allow_html=True)
