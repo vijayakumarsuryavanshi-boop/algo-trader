@@ -3972,7 +3972,7 @@ class SniperBot:
                   if not df.empty:
                      price = float(df['Close'].iloc[-1])
                      st.session_state[cached_price_key] = price
-              except Exception:
+               except Exception:
                     pass
         else:
             # use cached price from session state
