@@ -3977,13 +3977,13 @@ class SniperBot:
         else:
             # use cached price from session state
             price = st.session_state.get(cached_price_key)
-
+    # --- fallback to last known price for this symbol (persist across reruns)
     if price is not None:
             st.session_state[f"last_price_{symbol}"] = price
-        else:
+         else:
              price = st.session_state.get(f"last_price_{symbol}")
 
-        return price
+         return price
 
             
 
