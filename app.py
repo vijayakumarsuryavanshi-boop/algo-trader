@@ -1108,13 +1108,12 @@ st.markdown(f"""
     }}
     /* Live position tracker container – stable background to reduce flicker */
     .live-tracker {{
-        background: #ffffff !important;
-        border: 3px solid #0284c7 !important;
+        background: {card_bg};
+        border: 2px solid #0284c7;
         border-radius: 8px;
         padding: 16px;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
         margin-bottom: 15px;
-        color: #0f111a !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -3959,37 +3958,17 @@ class SniperBot:
         elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
             price = self.binance_bridge.get_live_price(symbol)
 
-        # --- fallback to yfinance with cooldown (only if symbol is in YF_TICKERS) ---
         if price is None and symbol in YF_TICKERS:
-            now = time.time()
-            last_call_key = f"yf_last_{symbol}"
-            cached_price_key = f"yf_cached_{symbol}"
-            last_call = st.session_state.get(last_call_key, 0)
-
-            if now - last_call > 5:  # at least 5 seconds between calls
-                try:
-                    yf_ticker = YF_TICKERS[symbol]
-                    df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-                    if not df.empty:
-                        price = float(df['Close'].iloc[-1])
-                        st.session_state[last_call_key] = now
-                        st.session_state[cached_price_key] = price
-                except Exception:
-                    pass
-            else:
-                # use cached price (may be stale, but better than None)
-                price = st.session_state.get(cached_price_key)
-
-        # --- fallback to last known price for this symbol (persist across reruns) ---
-        if price is not None:
-            st.session_state[f"last_price_{symbol}"] = price
-        else:
-            price = st.session_state.get(f"last_price_{symbol}")
+            try:
+                yf_ticker = YF_TICKERS[symbol]
+                df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+                if not df.empty:
+                    price = float(df['Close'].iloc[-1])
+                    self.log(f"⚠️ Using yfinance fallback for {symbol}: {price}")
+            except:
+                pass
 
         return price
-
-
-            
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
         if self.is_mock and token == "12345":
@@ -5762,6 +5741,18 @@ elif st.session_state.page == "splash":
 elif st.session_state.page == "dashboard":
     # ---------- DASHBOARD (with updated tabs) ----------
     bot = st.session_state.bot
+    # ---------- PROCESS BACKGROUND QUEUES ----------
+    # Catch and display toasts from the background thread
+    if getattr(bot, "state", None):
+        # 1. Process Toasts
+        while bot.state.get("ui_popups"):
+            popup = bot.state["ui_popups"].popleft()
+            st.toast(f"{popup['title']}: {popup['message']}", icon="🔔")
+        
+        # 2. Process Sounds
+        while bot.state.get("sound_queue"):
+            sound = bot.state["sound_queue"].popleft()
+            play_sound_ui(sound)
 
     # Developer check – replace with your actual developer email
     if st.session_state.user_id in ["developer@example.com", "vijayakumar@example.com"]:
@@ -6130,20 +6121,13 @@ elif st.session_state.page == "dashboard":
         """, unsafe_allow_html=True)
 
         st.markdown("### 🎯 Live Position Tracker")
-        if bot.state["active_trade"]:
+        if bot.state.get("active_trade"):
             t = bot.state["active_trade"]
-            # Fetch live price
-            ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
-            if ltp is not None:
-                t['current_ltp'] = ltp
-                if t['type'] == "SELL":
-                    pnl = (t['entry'] - ltp) * t['qty']
-                else:
-                    pnl = (ltp - t['entry']) * t['qty']
-                t['floating_pnl'] = pnl
-            else:
-                ltp = t.get('current_ltp', t['entry'])
-                pnl = t.get('floating_pnl', 0.0)
+            
+            # FIX: DO NOT call bot.get_live_price() here. 
+            # Just read what the background engine is already calculating!
+            ltp = t.get('current_ltp', t['entry'])
+            pnl = t.get('floating_pnl', 0.0)
 
             pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
             pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
@@ -6159,20 +6143,21 @@ elif st.session_state.page == "dashboard":
             simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
             rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
 
+            # FIX: Removed hardcoded dark colors so it respects Dark Mode automatically
             html_block = (
-                f'<div class="live-tracker">'
+                f'<div class="live-tracker" style="background: var(--background-color); border: 2px solid #0284c7; border-radius: 8px; padding: 16px;">'
                 f'<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #e2e8f0; padding-bottom: 12px; margin-bottom: 12px;">'
                 f'<div><span style="background: {buy_sell_color}; color: white; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 800;">{t["type"]}</span>'
-                f'{simulated_badge}<strong style="margin-left: 10px; font-size: 1.1rem; color: #0f111a;">{t["symbol"]}</strong>{rejection_info}</div>'
+                f'{simulated_badge}<strong style="margin-left: 10px; font-size: 1.1rem; color: inherit;">{t["symbol"]}</strong>{rejection_info}</div>'
                 f'<div style="background: {pnl_bg}; color: {pnl_color}; padding: 6px 12px; border-radius: 4px; font-weight: 900; font-size: 1.4rem; border: 1px solid {pnl_color};">{pnl_display}</div>'
                 f'</div>'
                 f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">'
-                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br><b style="font-size: 1.1rem; color: #0f111a;">{t["entry"]:.4f}</b></div>'
-                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br><b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b></div>'
-                f'<div style="background: #f8fafc; padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br><b style="font-size: 1.1rem; color: #0f111a;">{t["qty"]}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span></div>'
-                f'<div style="background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fecaca;"><span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br><b style="font-size: 1.1rem; color: #ef4444;">{t["sl"]:.4f}</b></div>'
+                f'<div style="background: rgba(128,128,128,0.1); padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Avg Entry</span><br><b style="font-size: 1.1rem; color: inherit;">{t["entry"]:.4f}</b></div>'
+                f'<div style="background: rgba(128,128,128,0.1); padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Live Mark</span><br><b style="font-size: 1.1rem; color: {pnl_color};">{ltp:.4f}</b></div>'
+                f'<div style="background: rgba(128,128,128,0.1); padding: 10px; border-radius: 4px;"><span style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: 700;">Qty</span><br><b style="font-size: 1.1rem; color: inherit;">{t["qty"]}</b> <span style="font-size: 0.8rem; color: #64748b;">({exec_type})</span></div>'
+                f'<div style="background: rgba(239,68,68,0.1); padding: 10px; border-radius: 4px; border: 1px solid #fecaca;"><span style="color: #ef4444; font-size: 0.75rem; text-transform: uppercase; font-weight: 800;">Risk Stop</span><br><b style="font-size: 1.1rem; color: #ef4444;">{t["sl"]:.4f}</b></div>'
                 f'</div>'
-                f'<div style="background: #0f111a; padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700;">🎯 TP1: {t.get("tp1", 0):.2f} &nbsp;|&nbsp; TP2: {t.get("tp2", 0):.2f} &nbsp;|&nbsp; TP3: {t.get("tp3", 0):.2f}</div>'
+                f'<div style="background: rgba(2,132,199,0.1); padding: 10px; border-radius: 4px; font-size: 0.9rem; text-align: center; color: #38bdf8; font-weight: 700;">🎯 TP1: {t.get("tp1", 0):.2f} &nbsp;|&nbsp; TP2: {t.get("tp2", 0):.2f} &nbsp;|&nbsp; TP3: {t.get("tp3", 0):.2f}</div>'
                 f'</div>'
             )
             st.write(html_block, unsafe_allow_html=True)
@@ -6192,7 +6177,7 @@ elif st.session_state.page == "dashboard":
 
         # Autorefresh when active trade exists (1 second)
         if bot.state["active_trade"]:
-            st_autorefresh(interval=3000, key="live_trade_refresh")
+            st_autorefresh(interval=1000, key="live_trade_refresh")
 
         ltp_val = round(bot.state['spot'], 4)
         trend_val = bot.state['current_trend']
