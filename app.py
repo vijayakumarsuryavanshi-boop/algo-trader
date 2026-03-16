@@ -1108,12 +1108,13 @@ st.markdown(f"""
     }}
     /* Live position tracker container – stable background to reduce flicker */
     .live-tracker {{
-        background: {card_bg};
-        border: 2px solid #0284c7;
+        background: #ffffff !important;
+        border: 3px solid #0284c7 !important;
         border-radius: 8px;
         padding: 16px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.15);
         margin-bottom: 15px;
+        color: #0f111a !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -3960,19 +3961,31 @@ class SniperBot:
 
         if price is None and symbol in YF_TICKERS:
             now = time.time()
-            last_call = st.session_state.get(f"yf_last_{symbol}", 0)
+            last_call_key = f"yf_last_{symbol}"
+            cached_price_key = f"yf_cached_{symbol}"
+            last_call = st.session_state.get(last_call_key, 0)
+            
             if now - last_call > 5:   # min 5 seconds between calls
                try:
                   yf_ticker = YF_TICKERS[symbol]
                   df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
                   if not df.empty:
                      price = float(df['Close'].iloc[-1])
-                     st.session_state[f"yf_last_{symbol}"] = now
-               except:
+                      st.session_state[cached_price_key] = price
+              except Exception:
                     pass
         else:
             # use cached price from session state
-            price = st.session_state.get(f"yf_cached_{symbol}")
+            price = st.session_state.get(cached_price_key)
+
+    if price is not None:
+            st.session_state[f"last_price_{symbol}"] = price
+        else:
+             price = st.session_state.get(f"last_price_{symbol}")
+
+        return price
+
+            
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
         if self.is_mock and token == "12345":
