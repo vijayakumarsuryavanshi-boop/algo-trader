@@ -6171,7 +6171,7 @@ elif st.session_state.page == "dashboard":
 
         # Autorefresh when active trade exists (1 second)
         if bot.state["active_trade"]:
-            st_autorefresh(interval=1000, key="live_trade_refresh")
+            st_autorefresh(interval=3000, key="live_trade_refresh")
 
         ltp_val = round(bot.state['spot'], 4)
         trend_val = bot.state['current_trend']
