@@ -3970,8 +3970,10 @@ class SniperBot:
                   yf_ticker = YF_TICKERS[symbol]
                   df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
                   if not df.empty:
-                     price = float(df['Close'].iloc[-1])
-                     st.session_state[cached_price_key] = price
+                    price = float(df['Close'].iloc[-1])
+                    st.session_state[last_call_key] = now
+                    st.session_state[cached_price_key] = price
+                     
                except Exception:
                     pass
         else:
@@ -3980,7 +3982,7 @@ class SniperBot:
     # --- fallback to last known price for this symbol (persist across reruns)
     if price is not None:
             st.session_state[f"last_price_{symbol}"] = price
-         else:
+    else:
              price = st.session_state.get(f"last_price_{symbol}")
 
          return price
