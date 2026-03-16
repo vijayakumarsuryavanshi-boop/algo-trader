@@ -3971,7 +3971,7 @@ class SniperBot:
                   df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
                   if not df.empty:
                      price = float(df['Close'].iloc[-1])
-                      st.session_state[cached_price_key] = price
+                     st.session_state[cached_price_key] = price
               except Exception:
                     pass
         else:
