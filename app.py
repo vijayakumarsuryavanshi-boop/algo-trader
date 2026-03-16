@@ -3985,7 +3985,7 @@ class SniperBot:
     else:
              price = st.session_state.get(f"last_price_{symbol}")
 
-     return price
+    return price
 
             
 
