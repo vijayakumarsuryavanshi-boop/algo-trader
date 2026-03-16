@@ -3959,33 +3959,35 @@ class SniperBot:
         elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
             price = self.binance_bridge.get_live_price(symbol)
 
+        # --- fallback to yfinance with cooldown (only if symbol is in YF_TICKERS) ---
         if price is None and symbol in YF_TICKERS:
             now = time.time()
             last_call_key = f"yf_last_{symbol}"
             cached_price_key = f"yf_cached_{symbol}"
             last_call = st.session_state.get(last_call_key, 0)
-            
-            if now - last_call > 5:   # min 5 seconds between calls
-               try:
-                  yf_ticker = YF_TICKERS[symbol]
-                  df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-                  if not df.empty:
-                    price = float(df['Close'].iloc[-1])
-                    st.session_state[last_call_key] = now
-                    st.session_state[cached_price_key] = price
-                     
-               except Exception:
-                    pass
-        else:
-            # use cached price from session state
-            price = st.session_state.get(cached_price_key)
-    # --- fallback to last known price for this symbol (persist across reruns)
-    if price is not None:
-            st.session_state[f"last_price_{symbol}"] = price
-    else:
-             price = st.session_state.get(f"last_price_{symbol}")
 
-    return price
+            if now - last_call > 5:  # at least 5 seconds between calls
+                try:
+                    yf_ticker = YF_TICKERS[symbol]
+                    df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+                    if not df.empty:
+                        price = float(df['Close'].iloc[-1])
+                        st.session_state[last_call_key] = now
+                        st.session_state[cached_price_key] = price
+                except Exception:
+                    pass
+            else:
+                # use cached price (may be stale, but better than None)
+                price = st.session_state.get(cached_price_key)
+
+        # --- fallback to last known price for this symbol (persist across reruns) ---
+        if price is not None:
+            st.session_state[f"last_price_{symbol}"] = price
+        else:
+            price = st.session_state.get(f"last_price_{symbol}")
+
+        return price
+
 
             
 
