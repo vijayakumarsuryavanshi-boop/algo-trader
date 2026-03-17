@@ -5421,8 +5421,7 @@ elif st.session_state.page == "dashboard":
                     elif STRATEGY == "TradingView Webhook":
                         t, s, v, e, df_c, atr, fib, strength = "Awaiting TradingView Webhook...", "WAIT", df_preload['close'].iloc[-1], df_preload['close'].iloc[-1], df_preload, 0, {}, 50
                     else:
-                        t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_vwap_ema_strategy(df_preload, INDEX)
-
+                        t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_primary_strategy(df_preload, INDEX)
                     df_work = df_c.copy() if df_c is not None else df_preload.copy()
                     temp_df = bot.analyzer.calculate_indicators(df_work, INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"])
                     for col in temp_df.columns:
