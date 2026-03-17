@@ -2835,6 +2835,7 @@ def get_major_events_2026():
 # ==========================================
 # CORE BOT ENGINE (SniperBot) – with MCX option fix and real-time PnL updater
 # ==========================================
+
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", 
                  tg_token="", tg_chat="", wa_phone="", wa_api="", 
@@ -4362,7 +4363,10 @@ class SniperBot:
                             elif "Mean Reversion" in strategy:
                                 trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_mean_reversion_strategy(df_candles, index)
                             else:
+                                # ---------- FIX: Use the new primary strategy ----------
                                 trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_primary_strategy(df_candles, index)
+                                # ------------------------------------------------------
+
                             if strategy == "Machine Learning" and signal != "WAIT" and signal_persistence > 1:
                                 self.state["signal_history"].append(signal)
                                 if len(self.state["signal_history"]) >= signal_persistence:
