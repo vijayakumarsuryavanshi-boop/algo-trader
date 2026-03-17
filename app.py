@@ -2052,16 +2052,85 @@ class ScalpingModule:
 # ==========================================
 # TECHNICAL ANALYZER (Full implementation – abbreviated for space)
 # ==========================================
+# ==========================================
+# TECHNICAL ANALYZER (FULL IMPLEMENTATION)
+# ==========================================
 class TechnicalAnalyzer:
-    def get_atr(self, df, period=14):
+    @staticmethod
+    def calculate_indicators(df, is_index=False):
+        """
+        Add all necessary technical indicators to the DataFrame.
+        """
         df = df.copy()
-        df['tr0'] = abs(df['high'] - df['low'])
-        df['tr1'] = abs(df['high'] - df['close'].shift())
-        df['tr2'] = abs(df['low'] - df['close'].shift())
-        df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
-        return df['tr'].rolling(period).mean()
 
-    def get_support_resistance(self, df, lookback=20):
+        # --- EMAs ---
+        df['ema9'] = df['close'].ewm(span=9, adjust=False).mean()
+        df['ema21'] = df['close'].ewm(span=21, adjust=False).mean()
+
+        # --- RSI (14) ---
+        delta = df['close'].diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
+        rs = avg_gain / avg_loss
+        df['rsi'] = 100 - (100 / (1 + rs))
+
+        # --- MACD (12,26,9) ---
+        exp12 = df['close'].ewm(span=12, adjust=False).mean()
+        exp26 = df['close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = exp12 - exp26
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_hist'] = df['macd'] - df['macd_signal']
+
+        # --- Bollinger Bands (20,2) ---
+        df['bb_mid'] = df['close'].rolling(20).mean()
+        df['bb_std'] = df['close'].rolling(20).std()
+        df['bb_upper'] = df['bb_mid'] + 2 * df['bb_std']
+        df['bb_lower'] = df['bb_mid'] - 2 * df['bb_std']
+
+        # --- ATR (14) ---
+        high_low = df['high'] - df['low']
+        high_close = abs(df['high'] - df['close'].shift())
+        low_close = abs(df['low'] - df['close'].shift())
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        df['atr'] = tr.rolling(14).mean()
+
+        # --- Volume ---
+        df['volume_ma'] = df['volume'].rolling(20).mean()
+        df['volume_ratio'] = df['volume'] / df['volume_ma']
+
+        # --- VWAP (only for non‑index assets) ---
+        if not is_index:
+            df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum()
+
+        # --- Supertrend (optional, helps confirm trend) ---
+        hl2 = (df['high'] + df['low']) / 2
+        df['atr_st'] = tr.rolling(10).mean()
+        df['upper_band'] = hl2 + 3 * df['atr_st']
+        df['lower_band'] = hl2 - 3 * df['atr_st']
+        df['st_direction'] = 1
+        for i in range(1, len(df)):
+            if df['close'].iloc[i] > df['upper_band'].iloc[i-1]:
+                df.loc[df.index[i], 'st_direction'] = 1
+            elif df['close'].iloc[i] < df['lower_band'].iloc[i-1]:
+                df.loc[df.index[i], 'st_direction'] = -1
+            else:
+                df.loc[df.index[i], 'st_direction'] = df['st_direction'].iloc[i-1]
+        df['supertrend'] = df['lower_band'] if df['st_direction'].iloc[-1] == 1 else df['upper_band']
+
+        return df
+
+    @staticmethod
+    def get_atr(df, period=14):
+        high_low = df['high'] - df['low']
+        high_close = abs(df['high'] - df['close'].shift())
+        low_close = abs(df['low'] - df['close'].shift())
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        return tr.rolling(period).mean()
+
+    @staticmethod
+    def get_support_resistance(df, lookback=20):
         highs = df['high']
         lows = df['low']
         peaks = (highs.shift(1) < highs) & (highs.shift(-1) < highs)
@@ -2070,11 +2139,8 @@ class TechnicalAnalyzer:
         recent_low = lows[troughs].iloc[-1] if troughs.any() else None
         return recent_high, recent_low
 
-    def calculate_indicators(self, df, is_index=False):
-        # Full implementation exists in previous answers – abbreviated here
-        return df
-
-    def calculate_fib_zones(self, df, lookback=100):
+    @staticmethod
+    def calculate_fib_zones(df, lookback=100):
         if df is None or len(df) < 10:
             return 0, 0, 0, 0
         actual_lookback = min(lookback, len(df))
@@ -2085,11 +2151,8 @@ class TechnicalAnalyzer:
         fib_650 = major_high - (diff * 0.650)
         return major_high, major_low, min(fib_618, fib_650), max(fib_618, fib_650)
 
-    def detect_order_blocks(self, df):
-        # Simplified
-        return {"bob_high": 0, "bob_low": 0, "beob_high": 0, "beob_low": 0}
-
-    def detect_pin_bar(self, df):
+    @staticmethod
+    def detect_pin_bar(df):
         if df is None or len(df) < 2:
             return "None"
         last = df.iloc[-1]
@@ -2102,7 +2165,8 @@ class TechnicalAnalyzer:
             return "Bearish Pin 📌"
         return "None"
 
-    def analyze_open_interest(self, price_change, oi_change):
+    @staticmethod
+    def analyze_open_interest(price_change, oi_change):
         if price_change > 0.1 and oi_change > 5:
             return "Long Buildup 🟢"
         elif price_change < -0.1 and oi_change > 5:
@@ -2118,66 +2182,80 @@ class TechnicalAnalyzer:
         else:
             return "Neutral OI ⚪"
 
-    def filter_option_by_greeks(self, spot, strike, time_to_expiry, iv, option_type, r=0.05):
-        if iv >= 15:
-            return False
-        greeks = OptionGreeks.black_scholes(spot, strike, time_to_expiry, r, iv/100, option_type)
-        if greeks['delta'] > 0.3 and greeks['gamma'] > 0.0012:
-            return True
-        return False
+    @staticmethod
+    def apply_primary_strategy(df, index_name="NIFTY"):
+        """
+        Core strategy: catches early momentum using:
+        - EMA crossover
+        - RSI crossing 50
+        - Volume spike
+        - MACD histogram turn
+        - Bollinger Band touch
+        Returns (trend_description, signal, vwap, ema9, df_with_indicators, atr, fib_data, signal_strength)
+        """
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
 
-    # ====== STRATEGY METHODS ======
-    def apply_institutional_fvg_strategy(self, df, index_name="NIFTY"):
-        # Simplified
-        return "AWAITING FVG REVERSAL 🟡", "WAIT", 0, 0, df, 0, {}, 50
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
 
-    def apply_vijay_rff_strategy(self, df, index_name="NIFTY"):
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
-
-    def apply_lux_algo_ict_strategy(self, df, index_name="NIFTY"):
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
-
-    def apply_vwap_ema_strategy(self, df, index_name="NIFTY"):
-        if df is None or len(df) < 20: return "WAIT", "WAIT", 0, 0, df, 0, {}, 0
-        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "INDIA VIX"]
-        df = self.calculate_indicators(df, is_index)
-        df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum() if not is_index else df['close']
-        df['ema_short'] = df['close'].ewm(span=9, adjust=False).mean()
-        df['ema_long'] = df['close'].ewm(span=21, adjust=False).mean()
-        atr = self.get_atr(df).iloc[-1]
-        mh, ml, f_low, f_high = self.calculate_fib_zones(df)
-        fib_data = {"major_high": mh, "major_low": ml, "fib_low": f_low, "fib_high": f_high}
         last = df.iloc[-1]
-        signal, trend = "WAIT", "FLAT"
-        signal_strength = 50
-        oi_change = 0
-        if 'oi' in df.columns:
-            oi_change = (df['oi'].iloc[-1] / df['oi'].iloc[-5] - 1) * 100 if df['oi'].iloc[-5] != 0 else 0
-        price_change = (last['close'] / df['close'].iloc[-5] - 1) * 100
-        oi_signal = self.analyze_open_interest(price_change, oi_change)
-        benchmark = last['ema_long'] if is_index else last['vwap']
-        if (last['ema_short'] > last['ema_long']) and (last['close'] > benchmark) and last['rsi'] > 50 and last['volume'] > df['volume'].rolling(20).mean().iloc[-1]:
-            trend, signal = f"BULLISH MOMENTUM {oi_signal} 🟢", "BUY_CE"
-            signal_strength = 70
-        elif (last['ema_short'] < last['ema_long']) and (last['close'] < benchmark) and last['rsi'] < 50 and last['volume'] > df['volume'].rolling(20).mean().iloc[-1]:
-            trend, signal = f"BEARISH MOMENTUM {oi_signal} 🔴", "BUY_PE"
-            signal_strength = 70
+        prev = df.iloc[-2]
+        atr = last['atr'] if not pd.isna(last['atr']) else 0
+
+        # --- Determine trend based on EMAs ---
+        if last['ema9'] > last['ema21']:
+            trend = "BULLISH"
+        elif last['ema9'] < last['ema21']:
+            trend = "BEARISH"
         else:
-            trend = f"RANGING {oi_signal}"
-        return trend, signal, last['vwap'], last['ema_short'], df, atr, fib_data, signal_strength
+            trend = "NEUTRAL"
 
-    def apply_keyword_strategy(self, df, keywords, index_name):
-        # Simplified
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
+        # --- Early confirmation conditions ---
+        volume_ok = last['volume_ratio'] > 1.2 if not pd.isna(last['volume_ratio']) else False
+        rsi_cross_up = prev['rsi'] <= 50 and last['rsi'] > 50
+        rsi_cross_down = prev['rsi'] >= 50 and last['rsi'] < 50
+        macd_hist_up = prev['macd_hist'] <= 0 and last['macd_hist'] > 0
+        macd_hist_down = prev['macd_hist'] >= 0 and last['macd_hist'] < 0
+        bb_bounce_up = last['close'] <= last['bb_lower'] * 1.01 and last['close'] > last['open']
+        bb_bounce_down = last['close'] >= last['bb_upper'] * 0.99 and last['close'] < last['open']
 
-    def apply_ml_strategy(self, df, index_name, prob_threshold=0.3, persistence=1):
-        # Simplified
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
+        # --- Signal Strength Calculation (always set) ---
+        if trend == "BULLISH" and (rsi_cross_up or macd_hist_up or bb_bounce_up) and volume_ok:
+            signal = "BUY_CE"
+            trend_desc = f"🟢 STRONG BULLISH (EMA9>21, RSI>{last['rsi']:.0f}, Vol x{last['volume_ratio']:.1f})"
+            strength = 80
+        elif trend == "BEARISH" and (rsi_cross_down or macd_hist_down or bb_bounce_down) and volume_ok:
+            signal = "BUY_PE"
+            trend_desc = f"🔴 STRONG BEARISH (EMA9<21, RSI<{last['rsi']:.0f}, Vol x{last['volume_ratio']:.1f})"
+            strength = 80
+        elif trend == "BULLISH" and (rsi_cross_up or macd_hist_up or volume_ok):
+            signal = "BUY_CE"
+            trend_desc = f"🟡 BULLISH (EMA9>21, moderate)"
+            strength = 60
+        elif trend == "BEARISH" and (rsi_cross_down or macd_hist_down or volume_ok):
+            signal = "BUY_PE"
+            trend_desc = f"🟡 BEARISH (EMA9<21, moderate)"
+            strength = 60
+        else:
+            if last['macd_hist'] > 0 and last['rsi'] > 50:
+                signal = "BUY_CE"
+                trend_desc = f"⚪ WEAK BULLISH (MACD rising, RSI>{last['rsi']:.0f})"
+                strength = 40
+            elif last['macd_hist'] < 0 and last['rsi'] < 50:
+                signal = "BUY_PE"
+                trend_desc = f"⚪ WEAK BEARISH (MACD falling, RSI<{last['rsi']:.0f})"
+                strength = 40
+            else:
+                signal = "WAIT"
+                trend_desc = f"⚖️ RANGING (RSI {last['rsi']:.0f})"
+                strength = 30
 
-    def apply_mean_reversion_strategy(self, df, index_name="NIFTY"):
-        # Simplified
-        return "WAIT", "WAIT", 0, 0, df, 0, {}, 50
+        vwap = last.get('vwap', 0)
+        ema = last['ema9']
+        fib = {}  # simplified (can be filled later)
 
+        return trend_desc, signal, vwap, ema, df, atr, fib, strength
 # ==========================================
 # MACHINE LEARNING PREDICTOR (abbreviated)
 # ==========================================
@@ -4284,8 +4362,7 @@ class SniperBot:
                             elif "Mean Reversion" in strategy:
                                 trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_mean_reversion_strategy(df_candles, index)
                             else:
-                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_vwap_ema_strategy(df_candles, index)
-
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_primary_strategy(df_candles, index)
                             if strategy == "Machine Learning" and signal != "WAIT" and signal_persistence > 1:
                                 self.state["signal_history"].append(signal)
                                 if len(self.state["signal_history"]) >= signal_persistence:
