@@ -6113,12 +6113,12 @@ elif st.session_state.page == "dashboard":
                     - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                     """)
 
-# ---------- TAB 3: LOGS (FIXED CLEAR BUTTON) ----------
-with tab3:
-    sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
+             # ---------- TAB 3: LOGS (FIXED CLEAR BUTTON) ----------
+    with tab3:
+        sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
     
     # --- Console Tab ---
-    with sub_tabs[0]:
+        with sub_tabs[0]:
         with st.container():
             st.markdown('<div class="modern-card">', unsafe_allow_html=True)
             col_clr, col_msg = st.columns([1, 5])
@@ -6231,7 +6231,7 @@ with tab3:
                         st.info("No trades found for this period.")
             else:
                 st.warning("Login required or database not connected.")
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True) 
     # ---------- TAB 4: CRYPTO/FX (unchanged) ----------
     with tab4:
         sub_crypto = st.tabs(["🪙 CoinDCX Scanner", "⚡ 1-Min Scalper", "🚀 Breakout Scanner", "🪄 Web3 / DeFi"])
