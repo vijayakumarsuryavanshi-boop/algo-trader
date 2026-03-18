@@ -6131,8 +6131,8 @@ elif st.session_state.page == "dashboard":
                             try:
                                 uid = getattr(bot,"system_user_id",bot.api_key)
                                 supabase.table("trade_logs").delete().eq("user_id", uid).execute()
-                             except Exception as e:
-                                st.error(f"DB clear error: {e}")
+                              except: pass
+                               
                         st.rerun()
                 with col_msg:
                     st.caption("Clears the console, paper history, and resets daily P&L (does not stop the engine).")
