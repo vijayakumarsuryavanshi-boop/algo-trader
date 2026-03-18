@@ -5466,7 +5466,7 @@ elif st.session_state.page == "dashboard":
 # ==========================================
 # Get current index and max trades from session state / bot settings
 INDEX = st.session_state.sb_index_input
-MAX_TRADES = bot.settings.get('max_trades', 5) if bot else 5
+ MAX_TRADES = bot.settings.get('max_trades', 5) if bot else 5
 
 tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
 if st.session_state.is_developer:
