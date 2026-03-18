@@ -5460,10 +5460,8 @@ elif st.session_state.page == "dashboard":
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ==========================================
-# TAB DEFINITIONS (DO NOT CHANGE)
-# ==========================================
-tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
+
+    tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
     if st.session_state.is_developer:
         tab_names.append("🛡️ ADMIN")
     tabs = st.tabs(tab_names)
@@ -5784,455 +5782,435 @@ tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX"
             </div>
             """, unsafe_allow_html=True)
 
-# ---------- TAB 2: SCANNERS (unchanged from original) ----------
-with tab2:
-    sub_tabs = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "🇺🇸 US Stock Scanner", "🌙 Overnight Profitable", "🎯 Hero/Zero Scanner"])
-    with sub_tabs[0]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            st.subheader("52‑Week High/Low Scanner")
-            @st.cache_data(ttl=86400)
-            def scan_52w():
-                watch_list = [
-                    "RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS",
-                    "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS", "HINDUNILVR.NS", "KOTAKBANK.NS",
-                    "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "HCLTECH.NS", "ASIANPAINT.NS",
-                    "TITAN.NS", "ULTRACEMCO.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "BPCL.NS",
-                    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT"
-                ]
-                results = []
-                for ticker in watch_list:
-                    try:
-                        tk = yf.Ticker(ticker)
-                        hist = tk.history(period="1y")
-                        if hist.empty: continue
-                        ltp = hist['Close'].iloc[-1]
-                        high_52 = hist['High'].max()
-                        low_52 = hist['Low'].min()
-                        atr = (hist['High'] - hist['Low']).rolling(14).mean().iloc[-1]
-                        midpoint = (high_52 + low_52) / 2
-                        if ltp > midpoint:
-                            direction = "LONG"
-                            entry = ltp
-                            sl = ltp - atr
-                            tp = ltp + atr * 2
-                            signal = "BUY 🟢"
-                        else:
-                            direction = "SHORT"
-                            entry = ltp
-                            sl = ltp + atr
-                            tp = ltp - atr * 2
-                            signal = "SELL 🔴"
-                        if ltp > high_52 * 0.95:
-                            signal = "STRONG BUY 🚀"
-                        elif ltp < low_52 * 1.05:
-                            signal = "STRONG SELL 🔻"
-                        results.append({
-                            "Symbol": ticker,
-                            "LTP": round(ltp, 2),
-                            "52W High": round(high_52, 2),
-                            "52W Low": round(low_52, 2),
-                            "Signal": signal,
-                            "Entry": round(entry, 2),
-                            "SL": round(sl, 2),
-                            "TP": round(tp, 2)
-                        })
-                    except:
-                        continue
-                return results
-            results = scan_52w()
-            if results:
-                df_res = pd.DataFrame(results)
-                def highlight_signal(val):
-                    if "STRONG BUY" in val:
-                        return 'background-color: #22c55e; color: white'
-                    elif "STRONG SELL" in val:
-                        return 'background-color: #ef4444; color: white'
-                    return ''
-                styled = df_res.style.map(highlight_signal, subset=['Signal'])
-                st.dataframe(styled, use_container_width=True, hide_index=True)
-            else:
-                st.info("No data.")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    with sub_tabs[1]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            st.subheader("Multi‑Stock + Pin Bar Scanner")
-            @st.cache_data(ttl=86400)
-            def scan_multistock():
-                symbols = ["NIFTY", "SENSEX", "GOLD", "BTC-USD", "ETH-USD", "SOL-USD"]
-                results = []
-                for sym in symbols:
-                    yf_sym = sym
-                    if sym == "NIFTY": yf_sym = "^NSEI"
-                    elif sym == "SENSEX": yf_sym = "^BSESN"
-                    elif sym == "GOLD": yf_sym = "GC=F"
-                    df = yf.Ticker(yf_sym).history(period="5d", interval="1d")
-                    if not df.empty:
-                        inside = "Yes" if (df['High'].iloc[-1] <= df['High'].iloc[-2] and df['Low'].iloc[-1] >= df['Low'].iloc[-2]) else "No"
-                        last = df.iloc[-1]
-                        body = abs(last['Close'] - last['Open'])
-                        upper = last['High'] - max(last['Close'], last['Open'])
-                        lower = min(last['Close'], last['Open']) - last['Low']
-                        pin = "None"
-                        if lower > body*2 and last['Close'] > last['Open']:
-                            pin = "Bullish Pin"
-                        elif upper > body*2 and last['Close'] < last['Open']:
-                            pin = "Bearish Pin"
-                        results.append({
-                            "Symbol": sym,
-                            "LTP": round(last['Close'], 2),
-                            "Inside Bar": inside,
-                            "Pin Bar": pin
-                        })
-                return results
-            results = scan_multistock()
-            if results:
-                st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-            else:
-                st.info("No data.")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    with sub_tabs[2]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            st.subheader("🇺🇸 US Stock Scanner")
-            us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT", "JNJ", "PG", "UNH", "HD", "DIS", "NFLX", "ADBE", "CRM", "AMD", "INTC"]
-            @st.cache_data(ttl=86400)
-            def scan_us():
-                results = []
-                for ticker in us_list:
-                    try:
-                        tk = yf.Ticker(ticker)
-                        hist = tk.history(period="1mo", interval="1d")
-                        if len(hist) < 20:
-                            continue
-                        hist['ema9'] = hist['Close'].ewm(span=9).mean()
-                        hist['ema21'] = hist['Close'].ewm(span=21).mean()
-                        hist['volume_ma'] = hist['Volume'].rolling(20).mean()
-                        last = hist.iloc[-1]
-                        if (last['Close'] > last['ema9'] and last['ema9'] > last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
-                            signal = "BUY 🟢"
-                            entry = last['Close']
-                            sl = last['Close'] * 0.98
-                            tp = last['Close'] * 1.04
-                        elif (last['Close'] < last['ema9'] and last['ema9'] < last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
-                            signal = "SELL 🔴"
-                            entry = last['Close']
-                            sl = last['Close'] * 1.02
-                            tp = last['Close'] * 0.96
-                        else:
-                            signal = "Neutral"
-                            entry = last['Close']
-                            sl = last['Close'] * 0.98
-                            tp = last['Close'] * 1.02
-                        results.append({
-                            "Symbol": ticker,
-                            "LTP": round(last['Close'], 2),
-                            "Signal": signal,
-                            "Entry": round(entry, 2),
-                            "SL": round(sl, 2),
-                            "TP": round(tp, 2)
-                        })
-                    except:
-                        continue
-                return results
-            results = scan_us()
-            if results:
-                df_us = pd.DataFrame(results)
-                def highlight_signal(val):
-                    if "BUY" in val:
-                        return 'background-color: #22c55e; color: white'
-                    elif "SELL" in val:
-                        return 'background-color: #ef4444; color: white'
-                    return ''
-                styled_us = df_us.style.map(highlight_signal, subset=['Signal'])
-                st.dataframe(styled_us, use_container_width=True, hide_index=True)
-            else:
-                st.info("No signals found.")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    with sub_tabs[3]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            st.subheader("🌙 Overnight Profitable Stocks & Crypto")
-            st.markdown("Stocks that gap up/down significantly pre-market (Indian & US) and crypto with high overnight volatility.")
-            @st.cache_data(ttl=86400)
-            def scan_overnight():
-                results = []
-                indian_list = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS"]
-                for ticker in indian_list:
-                    try:
-                        tk = yf.Ticker(ticker)
-                        hist = tk.history(period="2d", interval="1m")
-                        if len(hist) < 60: continue
-                        yesterday_close = hist['Close'].iloc[-390] if len(hist) > 390 else hist['Close'].iloc[0]
-                        pre_high = hist['High'].iloc[-30:].max()
-                        pre_low = hist['Low'].iloc[-30:].min()
-                        change_high = (pre_high - yesterday_close) / yesterday_close * 100
-                        change_low = (pre_low - yesterday_close) / yesterday_close * 100
-                        if change_high > 1.5:
-                            results.append({
-                                "Symbol": ticker.replace(".NS", ""),
-                                "Type": "Stock",
-                                "Pre-Market High %": f"+{change_high:.2f}%",
-                                "Pre-Market Low %": f"{change_low:.2f}%",
-                                "Signal": "Bullish Gap 🚀"
-                            })
-                        elif change_low < -1.5:
-                            results.append({
-                                "Symbol": ticker.replace(".NS", ""),
-                                "Type": "Stock",
-                                "Pre-Market High %": f"+{change_high:.2f}%",
-                                "Pre-Market Low %": f"{change_low:.2f}%",
-                                "Signal": "Bearish Gap 🔻"
-                            })
-                    except: pass
-                us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META"]
-                for ticker in us_list:
-                    try:
-                        tk = yf.Ticker(ticker)
-                        hist = tk.history(period="2d", interval="1m")
-                        if len(hist) < 60: continue
-                        yesterday_close = hist['Close'].iloc[-390] if len(hist) > 390 else hist['Close'].iloc[0]
-                        pre_high = hist['High'].iloc[-30:].max()
-                        pre_low = hist['Low'].iloc[-30:].min()
-                        change_high = (pre_high - yesterday_close) / yesterday_close * 100
-                        change_low = (pre_low - yesterday_close) / yesterday_close * 100
-                        if change_high > 1.5:
-                            results.append({
-                                "Symbol": ticker,
-                                "Type": "US Stock",
-                                "Pre-Market High %": f"+{change_high:.2f}%",
-                                "Pre-Market Low %": f"{change_low:.2f}%",
-                                "Signal": "Bullish Gap 🚀"
-                            })
-                        elif change_low < -1.5:
-                            results.append({
-                                "Symbol": ticker,
-                                "Type": "US Stock",
-                                "Pre-Market High %": f"+{change_high:.2f}%",
-                                "Pre-Market Low %": f"{change_low:.2f}%",
-                                "Signal": "Bearish Gap 🔻"
-                            })
-                    except: pass
-                try:
-                    resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        for coin in data:
-                            mkt = coin.get('market', '')
-                            if mkt.endswith('USDT'):
-                                chg = float(coin.get('change_24_hour', 0))
-                                if abs(chg) > 3:
-                                    results.append({
-                                        "Symbol": mkt,
-                                        "Type": "Crypto",
-                                        "24h Change": f"{chg:+.2f}%",
-                                        "Pre-Market High %": "-",
-                                        "Pre-Market Low %": "-",
-                                        "Signal": "High Volatility ⚡"
-                                    })
-                except: pass
-                return results
-            results = scan_overnight()
-            if results:
-                df_ov = pd.DataFrame(results)
-                st.dataframe(df_ov, use_container_width=True, hide_index=True)
-            else:
-                st.info("No significant overnight movements detected.")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    with sub_tabs[4]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
-
-            def color_direction(val):
-                if "HERO" in val:
-                    return 'background-color: #22c55e; color: white'
-                elif "ZERO" in val:
-                    return 'background-color: #ef4444; color: white'
-                return ''
-
-            col_hz1, col_hz2 = st.columns(2)
-            with col_hz1:
-                min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
-            with col_hz2:
-                st.info("Auto‑scanning every 10 seconds...")
-            if 'hz_last_scan' not in st.session_state:
-                st.session_state.hz_last_scan = time.time()
-            if time.time() - st.session_state.hz_last_scan > 10:
-                st.session_state.hz_last_scan = time.time()
-                st.rerun()
-            with st.spinner("Scanning for Hero/Zero patterns..."):
-                st.markdown("### Nifty 50 Stocks")
-                nifty_results = bot.scan_hero_zero_indian_stocks()
-                if not nifty_results.empty:
-                    st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
-                    styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
-                    st.dataframe(styled_results, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
-
-                st.markdown("### Penny Stocks")
-                penny_results = bot.scan_penny_stocks()
-                if not penny_results.empty:
-                    st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
-                    penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
-                    st.dataframe(penny_styled, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
-
-                st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
-                pin_results = bot.scan_pin_bars()
-                if pin_results:
-                    pin_df = pd.DataFrame(pin_results)
-                    st.dataframe(pin_df, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No pin bar reversals detected at this moment")
-
-                st.markdown("### 📝 Entry Instructions")
-                st.info("""
-                **For HERO (BUY):**
-                - **Entry:** Current price
-                - **Stop Loss:** 1.5x ATR below entry
-                - **Target 1:** 3x ATR above entry (Book 50%)
-                - **Target 2:** 5x ATR above entry (Book remaining)
-                - **Risk/Reward:** 1:2
-                **For ZERO (SELL):**
-                - **Entry:** Current price
-                - **Stop Loss:** 1.5x ATR above entry
-                - **Target 1:** 3x ATR below entry (Book 50%)
-                - **Target 2:** 5x ATR below entry (Book remaining)
-                - **Risk/Reward:** 1:2
-                """)
-                st.markdown("### ⏰ Best Trading Times (IST)")
-                st.markdown("""
-                - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
-                - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
-                - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
-                - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
-                """)
-
-# ---------- TAB 3: LOGS (FIXED CLEAR BUTTON & INDENTATION) ----------
-with tab3:
-    sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
-
-    # --- Console Tab ---
-    with sub_tabs[0]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            col_clr, col_msg = st.columns([1, 5])
-            with col_clr:
-                if st.button("🗑️ Clear", key="clear_logs_btn", use_container_width=True,
-                             on_click=lambda: play_sound_now("click")):
-                    # Clear logs
-                    bot.state["logs"].clear()
-                    if bot.is_mock and "paper_history" in bot.state:
-                        bot.state["paper_history"] = []
-                    # Reset daily counters
-                    bot.state["daily_pnl"] = 0.0
-                    bot.state["trades_today"] = 0
-                    # Optionally clear DB trades (real mode)
-                    if not bot.is_mock and HAS_DB:
+    # ---------- TAB 2: SCANNERS (unchanged) ----------
+    with tab2:
+        sub_tabs = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "🇺🇸 US Stock Scanner", "🌙 Overnight Profitable", "🎯 Hero/Zero Scanner"])
+        with sub_tabs[0]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                st.subheader("52‑Week High/Low Scanner")
+                @st.cache_data(ttl=86400)
+                def scan_52w():
+                    watch_list = [
+                        "RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS",
+                        "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS", "HINDUNILVR.NS", "KOTAKBANK.NS",
+                        "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "HCLTECH.NS", "ASIANPAINT.NS",
+                        "TITAN.NS", "ULTRACEMCO.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "BPCL.NS",
+                        "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT"
+                    ]
+                    results = []
+                    for ticker in watch_list:
                         try:
-                            uid = getattr(bot, "system_user_id", bot.api_key)
-                            supabase.table("trade_logs").delete().eq("user_id", uid).execute()
-                        except Exception as e:
-                            st.error(f"DB clear error: {e}")
-                    st.rerun()
-            with col_msg:
-                st.caption("Clears console, paper history, and resets daily P&L (does not stop engine).")
-            if len(bot.state["logs"]) == 0:
-                st.info("No logs yet. Start the engine to see activity.")
-            else:
-                for log in bot.state["logs"]:
-                    st.markdown(f"`{log}`")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- Ledger Tab ---
-    with sub_tabs[1]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
-
-            if bot.is_mock:
-                if bot.state.get("paper_history"):
-                    df = pd.DataFrame(bot.state["paper_history"])
-                    st.dataframe(df.iloc[::-1], use_container_width=True)
-                    if report_period == "Daily":
-                        today = get_ist().strftime('%Y-%m-%d')
-                        df_report = df[df['Date'] == today]
-                    elif report_period == "Weekly":
-                        week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
-                        df_report = df[df['Date'] >= week_ago]
-                    else:
-                        df_report = df
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                        df_report.to_excel(w, index=False)
-                    st.download_button("📥 Export", data=output.getvalue(),
-                                       file_name="mock_ledger.xlsx",
-                                       on_click=lambda: play_sound_now("click"))
-                else:
-                    st.info("No paper trades yet.")
-            else:
-                uid = getattr(bot, "system_user_id", bot.api_key)
-                if HAS_DB:
-                    try:
-                        res = supabase.table("trade_logs").select("*").eq("user_id", uid).execute()
-                        if res.data:
-                            df = pd.DataFrame(res.data).drop(columns=["id", "user_id"], errors="ignore")
-                            st.dataframe(df.iloc[::-1], use_container_width=True)
-                            if report_period == "Daily":
-                                today = get_ist().strftime('%Y-%m-%d')
-                                df_report = df[df['trade_date'] == today]
-                            elif report_period == "Weekly":
-                                week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
-                                df_report = df[df['trade_date'] >= week_ago]
+                            tk = yf.Ticker(ticker)
+                            hist = tk.history(period="1y")
+                            if hist.empty: continue
+                            ltp = hist['Close'].iloc[-1]
+                            high_52 = hist['High'].max()
+                            low_52 = hist['Low'].min()
+                            atr = (hist['High'] - hist['Low']).rolling(14).mean().iloc[-1]
+                            midpoint = (high_52 + low_52) / 2
+                            if ltp > midpoint:
+                                direction = "LONG"
+                                entry = ltp
+                                sl = ltp - atr
+                                tp = ltp + atr * 2
+                                signal = "BUY 🟢"
                             else:
-                                df_report = df
-                            output = io.BytesIO()
-                            with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                                df_report.to_excel(w, index=False)
-                            st.download_button("📥 Export", data=output.getvalue(),
-                                               file_name="live_ledger.xlsx",
-                                               on_click=lambda: play_sound_now("click"))
-                        else:
-                            st.info("No live trades.")
-                    except Exception as e:
-                        st.error(f"DB error: {e}")
+                                direction = "SHORT"
+                                entry = ltp
+                                sl = ltp + atr
+                                tp = ltp - atr * 2
+                                signal = "SELL 🔴"
+                            if ltp > high_52 * 0.95:
+                                signal = "STRONG BUY 🚀"
+                            elif ltp < low_52 * 1.05:
+                                signal = "STRONG SELL 🔻"
+                            results.append({
+                                "Symbol": ticker,
+                                "LTP": round(ltp, 2),
+                                "52W High": round(high_52, 2),
+                                "52W Low": round(low_52, 2),
+                                "Signal": signal,
+                                "Entry": round(entry, 2),
+                                "SL": round(sl, 2),
+                                "TP": round(tp, 2)
+                            })
+                        except:
+                            continue
+                    return results
+                results = scan_52w()
+                if results:
+                    df_res = pd.DataFrame(results)
+                    def highlight_signal(val):
+                        if "STRONG BUY" in val:
+                            return 'background-color: #22c55e; color: white'
+                        elif "STRONG SELL" in val:
+                            return 'background-color: #ef4444; color: white'
+                        return ''
+                    styled = df_res.style.map(highlight_signal, subset=['Signal'])
+                    st.dataframe(styled, use_container_width=True, hide_index=True)
                 else:
-                    st.error("DB disconnected.")
-            st.markdown('</div>', unsafe_allow_html=True)
+                    st.info("No data.")
+                st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Tax Report Tab ---
-    with sub_tabs[2]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            st.subheader("📄 Tax Report")
-            if st.session_state.user_id and HAS_DB:
-                tax_year = st.selectbox("Financial Year", [2023, 2024, 2025])
-                if st.button("Generate Report", on_click=lambda: play_sound_now("click")):
-                    summary, df_tax = generate_tax_report(st.session_state.user_id, tax_year)
-                    if summary:
-                        st.markdown(f"### Summary for FY {tax_year}-{tax_year+1}")
-                        for cat, amt in summary.items():
-                            st.metric(cat, f"₹{amt:.2f}")
-                        st.dataframe(df_tax)
+        with sub_tabs[1]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                st.subheader("Multi‑Stock + Pin Bar Scanner")
+                @st.cache_data(ttl=86400)
+                def scan_multistock():
+                    symbols = ["NIFTY", "SENSEX", "GOLD", "BTC-USD", "ETH-USD", "SOL-USD"]
+                    results = []
+                    for sym in symbols:
+                        yf_sym = sym
+                        if sym == "NIFTY": yf_sym = "^NSEI"
+                        elif sym == "SENSEX": yf_sym = "^BSESN"
+                        elif sym == "GOLD": yf_sym = "GC=F"
+                        df = yf.Ticker(yf_sym).history(period="5d", interval="1d")
+                        if not df.empty:
+                            inside = "Yes" if (df['High'].iloc[-1] <= df['High'].iloc[-2] and df['Low'].iloc[-1] >= df['Low'].iloc[-2]) else "No"
+                            last = df.iloc[-1]
+                            body = abs(last['Close'] - last['Open'])
+                            upper = last['High'] - max(last['Close'], last['Open'])
+                            lower = min(last['Close'], last['Open']) - last['Low']
+                            pin = "None"
+                            if lower > body*2 and last['Close'] > last['Open']:
+                                pin = "Bullish Pin"
+                            elif upper > body*2 and last['Close'] < last['Open']:
+                                pin = "Bearish Pin"
+                            results.append({
+                                "Symbol": sym,
+                                "LTP": round(last['Close'], 2),
+                                "Inside Bar": inside,
+                                "Pin Bar": pin
+                            })
+                    return results
+                results = scan_multistock()
+                if results:
+                    st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No data.")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+        with sub_tabs[2]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                st.subheader("🇺🇸 US Stock Scanner")
+                us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT", "JNJ", "PG", "UNH", "HD", "DIS", "NFLX", "ADBE", "CRM", "AMD", "INTC"]
+                @st.cache_data(ttl=86400)
+                def scan_us():
+                    results = []
+                    for ticker in us_list:
+                        try:
+                            tk = yf.Ticker(ticker)
+                            hist = tk.history(period="1mo", interval="1d")
+                            if len(hist) < 20:
+                                continue
+                            hist['ema9'] = hist['Close'].ewm(span=9).mean()
+                            hist['ema21'] = hist['Close'].ewm(span=21).mean()
+                            hist['volume_ma'] = hist['Volume'].rolling(20).mean()
+                            last = hist.iloc[-1]
+                            if (last['Close'] > last['ema9'] and last['ema9'] > last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
+                                signal = "BUY 🟢"
+                                entry = last['Close']
+                                sl = last['Close'] * 0.98
+                                tp = last['Close'] * 1.04
+                            elif (last['Close'] < last['ema9'] and last['ema9'] < last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
+                                signal = "SELL 🔴"
+                                entry = last['Close']
+                                sl = last['Close'] * 1.02
+                                tp = last['Close'] * 0.96
+                            else:
+                                signal = "Neutral"
+                                entry = last['Close']
+                                sl = last['Close'] * 0.98
+                                tp = last['Close'] * 1.02
+                            results.append({
+                                "Symbol": ticker,
+                                "LTP": round(last['Close'], 2),
+                                "Signal": signal,
+                                "Entry": round(entry, 2),
+                                "SL": round(sl, 2),
+                                "TP": round(tp, 2)
+                            })
+                        except:
+                            continue
+                    return results
+                results = scan_us()
+                if results:
+                    df_us = pd.DataFrame(results)
+                    def highlight_signal(val):
+                        if "BUY" in val:
+                            return 'background-color: #22c55e; color: white'
+                        elif "SELL" in val:
+                            return 'background-color: #ef4444; color: white'
+                        return ''
+                    styled_us = df_us.style.map(highlight_signal, subset=['Signal'])
+                    st.dataframe(styled_us, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No signals found.")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+        with sub_tabs[3]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                st.subheader("🌙 Overnight Profitable Stocks & Crypto")
+                st.markdown("Stocks that gap up/down significantly pre-market (Indian & US) and crypto with high overnight volatility.")
+                @st.cache_data(ttl=86400)
+                def scan_overnight():
+                    results = []
+                    indian_list = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS"]
+                    for ticker in indian_list:
+                        try:
+                            tk = yf.Ticker(ticker)
+                            hist = tk.history(period="2d", interval="1m")
+                            if len(hist) < 60: continue
+                            yesterday_close = hist['Close'].iloc[-390] if len(hist) > 390 else hist['Close'].iloc[0]
+                            pre_high = hist['High'].iloc[-30:].max()
+                            pre_low = hist['Low'].iloc[-30:].min()
+                            change_high = (pre_high - yesterday_close) / yesterday_close * 100
+                            change_low = (pre_low - yesterday_close) / yesterday_close * 100
+                            if change_high > 1.5:
+                                results.append({
+                                    "Symbol": ticker.replace(".NS", ""),
+                                    "Type": "Stock",
+                                    "Pre-Market High %": f"+{change_high:.2f}%",
+                                    "Pre-Market Low %": f"{change_low:.2f}%",
+                                    "Signal": "Bullish Gap 🚀"
+                                })
+                            elif change_low < -1.5:
+                                results.append({
+                                    "Symbol": ticker.replace(".NS", ""),
+                                    "Type": "Stock",
+                                    "Pre-Market High %": f"+{change_high:.2f}%",
+                                    "Pre-Market Low %": f"{change_low:.2f}%",
+                                    "Signal": "Bearish Gap 🔻"
+                                })
+                        except: pass
+                    us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META"]
+                    for ticker in us_list:
+                        try:
+                            tk = yf.Ticker(ticker)
+                            hist = tk.history(period="2d", interval="1m")
+                            if len(hist) < 60: continue
+                            yesterday_close = hist['Close'].iloc[-390] if len(hist) > 390 else hist['Close'].iloc[0]
+                            pre_high = hist['High'].iloc[-30:].max()
+                            pre_low = hist['Low'].iloc[-30:].min()
+                            change_high = (pre_high - yesterday_close) / yesterday_close * 100
+                            change_low = (pre_low - yesterday_close) / yesterday_close * 100
+                            if change_high > 1.5:
+                                results.append({
+                                    "Symbol": ticker,
+                                    "Type": "US Stock",
+                                    "Pre-Market High %": f"+{change_high:.2f}%",
+                                    "Pre-Market Low %": f"{change_low:.2f}%",
+                                    "Signal": "Bullish Gap 🚀"
+                                })
+                            elif change_low < -1.5:
+                                results.append({
+                                    "Symbol": ticker,
+                                    "Type": "US Stock",
+                                    "Pre-Market High %": f"+{change_high:.2f}%",
+                                    "Pre-Market Low %": f"{change_low:.2f}%",
+                                    "Signal": "Bearish Gap 🔻"
+                                })
+                        except: pass
+                    try:
+                        resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            for coin in data:
+                                mkt = coin.get('market', '')
+                                if mkt.endswith('USDT'):
+                                    chg = float(coin.get('change_24_hour', 0))
+                                    if abs(chg) > 3:
+                                        results.append({
+                                            "Symbol": mkt,
+                                            "Type": "Crypto",
+                                            "24h Change": f"{chg:+.2f}%",
+                                            "Pre-Market High %": "-",
+                                            "Pre-Market Low %": "-",
+                                            "Signal": "High Volatility ⚡"
+                                        })
+                    except: pass
+                    return results
+                results = scan_overnight()
+                if results:
+                    df_ov = pd.DataFrame(results)
+                    st.dataframe(df_ov, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No significant overnight movements detected.")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+        with sub_tabs[4]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
+                
+                def color_direction(val):
+                    if "HERO" in val:
+                        return 'background-color: #22c55e; color: white'
+                    elif "ZERO" in val:
+                        return 'background-color: #ef4444; color: white'
+                    return ''
+                
+                col_hz1, col_hz2 = st.columns(2)
+                with col_hz1:
+                    min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
+                with col_hz2:
+                    st.info("Auto‑scanning every 10 seconds...")
+                if 'hz_last_scan' not in st.session_state:
+                    st.session_state.hz_last_scan = time.time()
+                if time.time() - st.session_state.hz_last_scan > 10:
+                    st.session_state.hz_last_scan = time.time()
+                    st.rerun()
+                with st.spinner("Scanning for Hero/Zero patterns..."):
+                    st.markdown("### Nifty 50 Stocks")
+                    nifty_results = bot.scan_hero_zero_indian_stocks()
+                    if not nifty_results.empty:
+                        st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
+                        styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
+                        st.dataframe(styled_results, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
+                    
+                    st.markdown("### Penny Stocks")
+                    penny_results = bot.scan_penny_stocks()
+                    if not penny_results.empty:
+                        st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
+                        penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
+                        st.dataframe(penny_styled, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
+                    
+                    st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
+                    pin_results = bot.scan_pin_bars()
+                    if pin_results:
+                        pin_df = pd.DataFrame(pin_results)
+                        st.dataframe(pin_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No pin bar reversals detected at this moment")
+                    
+                    st.markdown("### 📝 Entry Instructions")
+                    st.info("""
+                    **For HERO (BUY):**
+                    - **Entry:** Current price
+                    - **Stop Loss:** 1.5x ATR below entry
+                    - **Target 1:** 3x ATR above entry (Book 50%)
+                    - **Target 2:** 5x ATR above entry (Book remaining)
+                    - **Risk/Reward:** 1:2
+                    **For ZERO (SELL):**
+                    - **Entry:** Current price
+                    - **Stop Loss:** 1.5x ATR above entry
+                    - **Target 1:** 3x ATR below entry (Book 50%)
+                    - **Target 2:** 5x ATR below entry (Book remaining)
+                    - **Risk/Reward:** 1:2
+                    """)
+                    st.markdown("### ⏰ Best Trading Times (IST)")
+                    st.markdown("""
+                    - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
+                    - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
+                    - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
+                    - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
+                    """)
+
+    # ---------- TAB 3: LOGS (unchanged) ----------
+    with tab3:
+        sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
+        with sub_tabs[0]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                col_clr, _ = st.columns([1,5])
+                with col_clr:
+                    if st.button("🗑️ Clear", use_container_width=True, on_click=lambda: play_sound_now("click")):
+                        bot.state["logs"].clear()
+                        if "paper_history" in bot.state:
+                            bot.state["paper_history"] = []
+                        bot.state["daily_pnl"] = 0.0
+                        bot.state["trades_today"] = 0
+                        if not bot.is_mock and HAS_DB:
+                            try:
+                                uid = getattr(bot,"system_user_id",bot.api_key)
+                                supabase.table("trade_logs").delete().eq("user_id", uid).execute()
+                            except: pass
+                        st.rerun()
+                if len(bot.state["logs"]) == 0:
+                    st.info("No logs yet. Start the engine to see activity.")
+                else:
+                    for l in bot.state["logs"]:
+                        st.markdown(f"`{l}`")
+                st.markdown('</div>', unsafe_allow_html=True)
+        with sub_tabs[1]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
+                if bot.is_mock:
+                    if bot.state.get("paper_history"):
+                        df = pd.DataFrame(bot.state["paper_history"])
+                        st.dataframe(df.iloc[::-1], use_container_width=True)
+                        if report_period == "Daily":
+                            today = get_ist().strftime('%Y-%m-%d')
+                            df_report = df[df['Date'] == today]
+                        elif report_period == "Weekly":
+                            week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
+                            df_report = df[df['Date'] >= week_ago]
+                        else:
+                            df_report = df
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                            df_tax.to_excel(w, index=False)
-                        st.download_button("📥 Download Tax Report", data=output.getvalue(),
-                                           file_name=f"tax_report_{tax_year}.xlsx",
-                                           on_click=lambda: play_sound_now("click"))
+                            df_report.to_excel(w, index=False)
+                        st.download_button("📥 Export", data=output.getvalue(), file_name="mock_ledger.xlsx", on_click=lambda: play_sound_now("click"))
                     else:
-                        st.info("No trades found for this period.")
-            else:
-                st.warning("Login required or database not connected.")
-            st.markdown('</div>', unsafe_allow_html=True)
+                        st.info("No paper trades yet.")
+                else:
+                    uid = getattr(bot,"system_user_id",bot.api_key)
+                    if HAS_DB:
+                        try:
+                            res = supabase.table("trade_logs").select("*").eq("user_id", uid).execute()
+                            if res.data:
+                                df = pd.DataFrame(res.data).drop(columns=["id","user_id"], errors="ignore")
+                                st.dataframe(df.iloc[::-1], use_container_width=True)
+                                if report_period == "Daily":
+                                    today = get_ist().strftime('%Y-%m-%d')
+                                    df_report = df[df['trade_date'] == today]
+                                elif report_period == "Weekly":
+                                    week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
+                                    df_report = df[df['trade_date'] >= week_ago]
+                                else:
+                                    df_report = df
+                                output = io.BytesIO()
+                                with pd.ExcelWriter(output, engine='xlsxwriter') as w:
+                                    df_report.to_excel(w, index=False)
+                                st.download_button("📥 Export", data=output.getvalue(), file_name="live_ledger.xlsx", on_click=lambda: play_sound_now("click"))
+                            else:
+                                st.info("No live trades.")
+                        except Exception as e:
+                            st.error(f"DB error: {e}")
+                    else:
+                        st.error("DB disconnected.")
+                st.markdown('</div>', unsafe_allow_html=True)
+        with sub_tabs[2]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                st.subheader("📄 Tax Report")
+                if st.session_state.user_id and HAS_DB:
+                    tax_year = st.selectbox("Financial Year", [2023, 2024, 2025])
+                    if st.button("Generate Report", on_click=lambda: play_sound_now("click")):
+                        summary, df_tax = generate_tax_report(st.session_state.user_id, tax_year)
+                        if summary:
+                            st.markdown(f"### Summary for FY {tax_year}-{tax_year+1}")
+                            for cat, amt in summary.items():
+                                st.metric(cat, f"₹{amt:.2f}")
+                            st.dataframe(df_tax)
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine='xlsxwriter') as w:
+                                df_tax.to_excel(w, index=False)
+                            st.download_button("📥 Download Tax Report", data=output.getvalue(), file_name=f"tax_report_{tax_year}.xlsx", on_click=lambda: play_sound_now("click"))
+                        else:
+                            st.info("No trades found for this period.")
+                else:
+                    st.warning("Login required or database not connected.")
+                st.markdown('</div>', unsafe_allow_html=True)
 
     # ---------- TAB 4: CRYPTO/FX (unchanged) ----------
     with tab4:
