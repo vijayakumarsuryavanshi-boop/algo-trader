@@ -5461,1032 +5461,1108 @@ elif st.session_state.page == "dashboard":
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-    tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
-    if st.session_state.is_developer:
-        tab_names.append("🛡️ ADMIN")
-    tabs = st.tabs(tab_names)
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = tabs[:7]
-    if st.session_state.is_developer:
-        tab8 = tabs[7]
+# ==========================================
+# TAB DEFINITIONS
+# ==========================================
+# Get current index and max trades from session state / bot settings
+INDEX = st.session_state.sb_index_input
+MAX_TRADES = bot.settings.get('max_trades', 5) if bot else 5
 
-    # ---------- TAB 1: DASHBOARD ----------
-    with tab1:
-        kannada_news = st.session_state.kannada_news
-        english_news = st.session_state.english_news
-        if not kannada_news:
-            kannada_news = [generate_market_prediction(INDEX)]
-        ticker_text = " 🔹 ".join(kannada_news)
-        st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-        if not english_news:
-            english_news = [generate_market_prediction(INDEX)]
-        ticker_text = " 🔹 ".join(english_news)
-        st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-        exch, token = bot.get_token_info(INDEX)
+tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
+if st.session_state.is_developer:
+    tab_names.append("🛡️ ADMIN")
+tabs = st.tabs(tab_names)
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = tabs[:7]
+if st.session_state.is_developer:
+    tab8 = tabs[7]
 
-        daily_pnl = bot.state.get("daily_pnl", 0.0)
-        pnl_color = "#22c55e" if daily_pnl >= 0 else "#ef4444"
-        pnl_sign = "+" if daily_pnl > 0 else ""
+# ---------- TAB 1: DASHBOARD (unchanged from original) ----------
+with tab1:
+    kannada_news = st.session_state.kannada_news
+    english_news = st.session_state.english_news
+    if not kannada_news:
+        kannada_news = [generate_market_prediction(INDEX)]
+    ticker_text = " 🔹 ".join(kannada_news)
+    st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+    if not english_news:
+        english_news = [generate_market_prediction(INDEX)]
+    ticker_text = " 🔹 ".join(english_news)
+    st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+    exch, token = bot.get_token_info(INDEX)
 
-        if exch == "MT5": term_type = "🌍 MT5 Forex Terminal (Web Bridge)"
-        elif exch == "COINDCX": term_type = f"🕉️ CoinDCX {bot.settings.get('crypto_mode', 'Spot')}"
-        elif exch == "DELTA": term_type = f"🔺 Delta Exchange {bot.settings.get('crypto_mode', 'Spot')}"
-        elif exch == "FYERS": term_type = f"📈 Fyers"
-        elif exch == "UPSTOX": term_type = f"📊 Upstox"
-        elif exch == "5PAISA": term_type = f"💰 5paisa"
-        elif exch == "BINANCE": term_type = f"🪙 Binance"
-        else: term_type = f"🇮🇳 {bot.settings.get('primary_broker', 'Angel One')} NSE/NFO"
+    daily_pnl = bot.state.get("daily_pnl", 0.0)
+    pnl_color = "#22c55e" if daily_pnl >= 0 else "#ef4444"
+    pnl_sign = "+" if daily_pnl > 0 else ""
 
-        st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
-                <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
-                    <div style="display: flex; justify-content: space-between;">
-                        <div>
-                            <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
-                            <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
-                        </div>
-                        <div style="text-align: right;">
-                            <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
-                            <span style="font-size: 2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+    if exch == "MT5": term_type = "🌍 MT5 Forex Terminal (Web Bridge)"
+    elif exch == "COINDCX": term_type = f"🕉️ CoinDCX {bot.settings.get('crypto_mode', 'Spot')}"
+    elif exch == "DELTA": term_type = f"🔺 Delta Exchange {bot.settings.get('crypto_mode', 'Spot')}"
+    elif exch == "FYERS": term_type = f"📈 Fyers"
+    elif exch == "UPSTOX": term_type = f"📊 Upstox"
+    elif exch == "5PAISA": term_type = f"💰 5paisa"
+    elif exch == "BINANCE": term_type = f"🪙 Binance"
+    else: term_type = f"🇮🇳 {bot.settings.get('primary_broker', 'Angel One')} NSE/NFO"
 
-        is_running = bot.state["is_running"]
-        status_color = "#22c55e" if is_running else "#ef4444"
-        status_bg = "#f0fdf4" if is_running else "#fef2f2"
-        status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
-        st.markdown(f"""
-            <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px;">
-                {status_text}
-            </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("### 🎯 Live Position Tracker")
-        tracker_placeholder = st.empty()
-
-        if bot.state.get("active_trade"):
-            t = bot.state["active_trade"]
-            ltp = t.get('current_ltp', t['entry'])
-            pnl = t.get('floating_pnl', 0.0)
-
-            pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
-            pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
-            pnl_sign = "+" if pnl >= 0 else ""
-            exec_type = t.get('exch', 'NFO')
-            buy_sell_color = "#22c55e" if t['type'] in ["CE", "BUY"] else "#ef4444"
-
-            pnl_display = round(pnl, 2)
-            if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                inr_pnl = pnl * get_usdt_inr_rate()
-                pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
-
-            simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
-            rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
-
-            html_block = f'''
-            <div class="live-tracker">
-                <div class="header">
+    st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
+            <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
+                <div style="display: flex; justify-content: space-between;">
                     <div>
-                        <span class="symbol-badge">{t["type"]}</span>
-                        {simulated_badge}
-                        <strong style="margin-left: 15px; font-size: 1.3rem; color: white;">{t["symbol"]}</strong>
-                        {rejection_info}
+                        <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
+                        <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
                     </div>
-                    <div class="pnl-badge" style="color: {pnl_color}; border-color: {pnl_color};">{pnl_display}</div>
-                </div>
-                <div class="grid">
-                    <div class="info-box">
-                        <div class="label">Avg Entry</div>
-                        <div class="value">{t["entry"]:.4f}</div>
+                    <div style="text-align: right;">
+                        <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
+                        <span style="font-size: 2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
                     </div>
-                    <div class="info-box">
-                        <div class="label">Live Mark</div>
-                        <div class="value {'green' if pnl >= 0 else 'red'}">{ltp:.4f}</div>
-                    </div>
-                    <div class="info-box">
-                        <div class="label">Qty</div>
-                        <div class="value">{t["qty"]}</div>
-                        <div style="color: #94a3b8; font-size:0.8rem;">({exec_type})</div>
-                    </div>
-                    <div class="info-box">
-                        <div class="label">Risk Stop</div>
-                        <div class="value red">{t["sl"]:.4f}</div>
-                    </div>
-                </div>
-                <div class="targets">
-                    🎯 TP1: <span>{t.get("tp1",0):.2f}</span>  |  TP2: <span>{t.get("tp2",0):.2f}</span>  |  TP3: <span>{t.get("tp3",0):.2f}</span>
                 </div>
             </div>
-            '''
-            tracker_placeholder.markdown(html_block, unsafe_allow_html=True)
+        </div>
+    """, unsafe_allow_html=True)
 
-            if st.button("🛑 EXIT TRADE", type="primary", use_container_width=True, on_click=lambda: play_sound_now("exit")):
-                bot.force_exit()
-                st.rerun()
-        else:
-            tracker_placeholder.info("⏳ Radar Active: Waiting for High-Probability Setup...")
+    is_running = bot.state["is_running"]
+    status_color = "#22c55e" if is_running else "#ef4444"
+    status_bg = "#f0fdf4" if is_running else "#fef2f2"
+    status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
+    st.markdown(f"""
+        <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px;">
+            {status_text}
+        </div>
+    """, unsafe_allow_html=True)
 
-        if st.session_state.get("tracker_updated"):
-            st.session_state.tracker_updated = False
+    st.markdown("### 🎯 Live Position Tracker")
+    tracker_placeholder = st.empty()
+
+    if bot.state.get("active_trade"):
+        t = bot.state["active_trade"]
+        ltp = t.get('current_ltp', t['entry'])
+        pnl = t.get('floating_pnl', 0.0)
+
+        pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+        pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
+        pnl_sign = "+" if pnl >= 0 else ""
+        exec_type = t.get('exch', 'NFO')
+        buy_sell_color = "#22c55e" if t['type'] in ["CE", "BUY"] else "#ef4444"
+
+        pnl_display = round(pnl, 2)
+        if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+            inr_pnl = pnl * get_usdt_inr_rate()
+            pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+
+        simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
+        rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
+
+        html_block = f'''
+        <div class="live-tracker">
+            <div class="header">
+                <div>
+                    <span class="symbol-badge">{t["type"]}</span>
+                    {simulated_badge}
+                    <strong style="margin-left: 15px; font-size: 1.3rem; color: white;">{t["symbol"]}</strong>
+                    {rejection_info}
+                </div>
+                <div class="pnl-badge" style="color: {pnl_color}; border-color: {pnl_color};">{pnl_display}</div>
+            </div>
+            <div class="grid">
+                <div class="info-box">
+                    <div class="label">Avg Entry</div>
+                    <div class="value">{t["entry"]:.4f}</div>
+                </div>
+                <div class="info-box">
+                    <div class="label">Live Mark</div>
+                    <div class="value {'green' if pnl >= 0 else 'red'}">{ltp:.4f}</div>
+                </div>
+                <div class="info-box">
+                    <div class="label">Qty</div>
+                    <div class="value">{t["qty"]}</div>
+                    <div style="color: #94a3b8; font-size:0.8rem;">({exec_type})</div>
+                </div>
+                <div class="info-box">
+                    <div class="label">Risk Stop</div>
+                    <div class="value red">{t["sl"]:.4f}</div>
+                </div>
+            </div>
+            <div class="targets">
+                🎯 TP1: <span>{t.get("tp1",0):.2f}</span>  |  TP2: <span>{t.get("tp2",0):.2f}</span>  |  TP3: <span>{t.get("tp3",0):.2f}</span>
+            </div>
+        </div>
+        '''
+        tracker_placeholder.markdown(html_block, unsafe_allow_html=True)
+
+        if st.button("🛑 EXIT TRADE", type="primary", use_container_width=True, on_click=lambda: play_sound_now("exit")):
+            bot.force_exit()
             st.rerun()
+    else:
+        tracker_placeholder.info("⏳ Radar Active: Waiting for High-Probability Setup...")
 
-        ltp_val = round(bot.state['spot'], 4)
-        trend_val = bot.state['current_trend']
-        signal_strength = bot.state.get('signal_strength', 0)
+    if st.session_state.get("tracker_updated"):
+        st.session_state.tracker_updated = False
+        st.rerun()
 
-        if bot.state.get('latest_data') is not None and len(bot.state['latest_data']) >= 10:
-            mh, ml, f_low, f_high = bot.analyzer.calculate_fib_zones(bot.state['latest_data'])
-            gz_display = f"{round(f_low, 2)} - {round(f_high, 2)}" if f_low > 0 else "Calculating..."
+    ltp_val = round(bot.state['spot'], 4)
+    trend_val = bot.state['current_trend']
+    signal_strength = bot.state.get('signal_strength', 0)
+
+    if bot.state.get('latest_data') is not None and len(bot.state['latest_data']) >= 10:
+        mh, ml, f_low, f_high = bot.analyzer.calculate_fib_zones(bot.state['latest_data'])
+        gz_display = f"{round(f_low, 2)} - {round(f_high, 2)}" if f_low > 0 else "Calculating..."
+    else:
+        gz_display = "Calculating..."
+
+    currency_sym = "$" if exch in ["MT5", "DELTA", "COINDCX", "BINANCE"] else "₹"
+    if exch in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+        inr_val = ltp_val * get_usdt_inr_rate()
+        ltp_display = f"{currency_sym}{ltp_val} (₹ {round(inr_val, 2)})"
+    else:
+        ltp_display = f"{currency_sym}{ltp_val}"
+
+    last_candle = bot.state.get("latest_candle")
+    if last_candle is not None:
+        o_val = last_candle.get('open', 0.0)
+        h_val = last_candle.get('high', 0.0)
+        l_val = last_candle.get('low', 0.0)
+        c_val = last_candle.get('close', 0.0)
+        v_val = last_candle.get('volume', 0.0)
+        if c_val > o_val:
+            vol_dom = "Buy Volume Dominant 🟢"
+        elif c_val < o_val:
+            vol_dom = "Sell Volume Dominant 🔴"
         else:
-            gz_display = "Calculating..."
+            vol_dom = "Neutral Volume ⚪"
+        v_display = f"{round(v_val, 2)} ({vol_dom})"
+    else:
+        o_val, h_val, l_val, c_val, v_display = 0.0, 0.0, 0.0, 0.0, "N/A"
 
-        currency_sym = "$" if exch in ["MT5", "DELTA", "COINDCX", "BINANCE"] else "₹"
-        if exch in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-            inr_val = ltp_val * get_usdt_inr_rate()
-            ltp_display = f"{currency_sym}{ltp_val} (₹ {round(inr_val, 2)})"
-        else:
-            ltp_display = f"{currency_sym}{ltp_val}"
+    day_high = "N/A"
+    day_low = "N/A"
+    try:
+        yf_ticker = YF_TICKERS.get(INDEX, INDEX)
+        df_day = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+        if not df_day.empty:
+            day_high = df_day['High'].max()
+            day_low = df_day['Low'].min()
+    except:
+        pass
 
-        last_candle = bot.state.get("latest_candle")
-        if last_candle is not None:
-            o_val = last_candle.get('open', 0.0)
-            h_val = last_candle.get('high', 0.0)
-            l_val = last_candle.get('low', 0.0)
-            c_val = last_candle.get('close', 0.0)
-            v_val = last_candle.get('volume', 0.0)
-            if c_val > o_val:
-                vol_dom = "Buy Volume Dominant 🟢"
-            elif c_val < o_val:
-                vol_dom = "Sell Volume Dominant 🔴"
-            else:
-                vol_dom = "Neutral Volume ⚪"
-            v_display = f"{round(v_val, 2)} ({vol_dom})"
-        else:
-            o_val, h_val, l_val, c_val, v_display = 0.0, 0.0, 0.0, 0.0, "N/A"
-
-        day_high = "N/A"
-        day_low = "N/A"
-        try:
-            yf_ticker = YF_TICKERS.get(INDEX, INDEX)
-            df_day = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-            if not df_day.empty:
-                day_high = df_day['High'].max()
-                day_low = df_day['Low'].min()
-        except:
-            pass
-
-        st.markdown(f"""
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live Spot</div>
-                    <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
+    st.markdown(f"""
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
+            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live Spot</div>
+                <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
+            </div>
+            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Fib Golden Zone</div>
+                <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{gz_display}</div>
+            </div>
+            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Algorithm Sentiment</div>
+                <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
+            </div>
+            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Signal Strength</div>
+                <div style="width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 5px;">
+                    <div style="width: {signal_strength}%; height: 10px; background: #0284c7; border-radius: 5px;"></div>
                 </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Fib Golden Zone</div>
-                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{gz_display}</div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Algorithm Sentiment</div>
-                    <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Signal Strength</div>
-                    <div style="width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 5px;">
-                        <div style="width: {signal_strength}%; height: 10px; background: #0284c7; border-radius: 5px;"></div>
-                    </div>
-                    <div style="text-align: right; font-size: 0.8rem; color: #64748b; margin-top: 2px;">{signal_strength}%</div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live OHLCV</div>
-                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
-                        O: {round(o_val, 4)} &nbsp;|&nbsp; H: {round(h_val, 4)} &nbsp;|&nbsp; L: {round(l_val, 4)} &nbsp;|&nbsp; C: {round(c_val, 4)}<br>
-                        <span style="font-size: 0.95rem; color: #0284c7;">V: {v_display}</span>
-                    </div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Day's Range</div>
-                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
-                        H: {round(day_high, 4) if day_high != "N/A" else "N/A"} &nbsp;|&nbsp; L: {round(day_low, 4) if day_low != "N/A" else "N/A"}
-                    </div>
+                <div style="text-align: right; font-size: 0.8rem; color: #64748b; margin-top: 2px;">{signal_strength}%</div>
+            </div>
+            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live OHLCV</div>
+                <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
+                    O: {round(o_val, 4)} &nbsp;|&nbsp; H: {round(h_val, 4)} &nbsp;|&nbsp; L: {round(l_val, 4)} &nbsp;|&nbsp; C: {round(c_val, 4)}<br>
+                    <span style="font-size: 0.95rem; color: #0284c7;">V: {v_display}</span>
                 </div>
             </div>
+            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
+                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Day's Range</div>
+                <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
+                    H: {round(day_high, 4) if day_high != "N/A" else "N/A"} &nbsp;|&nbsp; L: {round(day_low, 4) if day_low != "N/A" else "N/A"}
+                </div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("### 📅 Upcoming Major Events (2026)")
+    events = get_major_events_2026()
+    if events:
+        df_events = pd.DataFrame(events)
+        st.dataframe(df_events, use_container_width=True, hide_index=True)
+    else:
+        st.info("No major events in the near future.")
+
+    st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
+    c_h1, c_h2 = st.columns(2)
+    with c_h1:
+        SHOW_CHART = st.toggle("📊 Render Chart", True, on_change=lambda: play_sound_now("click"))
+    with c_h2:
+        FULL_CHART = st.toggle("⛶ Full Screen", False, on_change=lambda: play_sound_now("click"))
+
+    if SHOW_CHART and bot.state["latest_data"] is not None:
+        chart_df = bot.state["latest_data"].copy()
+        if not isinstance(chart_df.index, pd.DatetimeIndex):
+            if 'timestamp' in chart_df.columns:
+                chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
+                chart_df.set_index('timestamp', inplace=True)
+            else:
+                chart_df.index = pd.date_range(end=get_ist(), periods=len(chart_df), freq='T')
+        try:
+            if chart_df.index.tz is not None:
+                chart_df.index = chart_df.index.tz_localize(None)
+        except AttributeError:
+            pass
+        chart_df['time'] = chart_df.index.astype('int64') // 10**9
+        candles = chart_df[['time', 'open', 'high', 'low', 'close']].dropna().to_dict('records')
+        if len(candles) == 0:
+            st.warning("No candle data available for chart.")
+        else:
+            fib_lines = []
+            if not bot.state["active_trade"] and bot.state.get('fib_data'):
+                fib = bot.state['fib_data']
+                fib_lines = [
+                    {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
+                    {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
+                    {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
+                    {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
+                ]
+            chartOptions = {
+                "height": 700 if FULL_CHART else 400,
+                "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
+                "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
+                "crosshair": {"mode": 0},
+                "timeScale": {"timeVisible": True, "secondsVisible": False}
+            }
+            chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
+
+            if 'anchored_vwap' in chart_df.columns:
+                avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
+                if avwap_data:
+                    chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
+            if 'vwap' in chart_df.columns:
+                vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
+                if vwap_data:
+                    chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
+            ema_col = None
+            if 'ema_fast' in chart_df.columns:
+                ema_col = 'ema_fast'
+            elif 'ema_short' in chart_df.columns:
+                ema_col = 'ema_short'
+            elif 'ema9' in chart_df.columns:
+                ema_col = 'ema9'
+            if ema_col:
+                ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
+                if ema_data:
+                    chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
+            if 'supertrend' in chart_df.columns:
+                st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
+                if st_data:
+                    chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
+
+            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
+    elif not SHOW_CHART:
+        st.info("Chart is hidden. Enable 'Render Chart' to view.")
+
+    st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
+    fomo_signals = fomo_scanner.scan()
+    if fomo_signals:
+        df_fomo = pd.DataFrame(fomo_signals)
+        st.dataframe(df_fomo, use_container_width=True, hide_index=True)
+    else:
+        st.info("No volume spike alerts at the moment.")
+
+    total_trades = len(bot.state.get("paper_history", [])) if bot.is_mock else bot.state.get("trades_today", 0)
+    wins = bot.state.get("hz_wins", 0) + (st.session_state.win_streak if st.session_state.win_streak > 0 else 0)
+    win_pct = (wins / total_trades * 100) if total_trades > 0 else 0
+    st.metric("Win Percentage", f"{win_pct:.1f}%")
+
+    if bot.settings.get('hero_zero', False) and bot.state.get("hz_trades"):
+        hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
+        st.markdown(f"""
+        <div class="hz-stats">
+            <h4 style="color: white; margin:0 0 10px 0;">🎯 Hero/Zero Performance</h4>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+                <div>Total Trades: {len(bot.state['hz_trades'])}</div>
+                <div>Win Rate: {hz_win_rate:.1f}%</div>
+                <div>Total P&L: {'🟢' if bot.state['hz_pnl'] > 0 else '🔴'} ₹{bot.state['hz_pnl']:.2f}</div>
+                <div>Wins: {bot.state['hz_wins']} | Losses: {bot.state['hz_losses']}</div>
+            </div>
+        </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("### 📅 Upcoming Major Events (2026)")
-        events = get_major_events_2026()
-        if events:
-            df_events = pd.DataFrame(events)
-            st.dataframe(df_events, use_container_width=True, hide_index=True)
-        else:
-            st.info("No major events in the near future.")
-
-        st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
-        c_h1, c_h2 = st.columns(2)
-        with c_h1:
-            SHOW_CHART = st.toggle("📊 Render Chart", True, on_change=lambda: play_sound_now("click"))
-        with c_h2:
-            FULL_CHART = st.toggle("⛶ Full Screen", False, on_change=lambda: play_sound_now("click"))
-
-        if SHOW_CHART and bot.state["latest_data"] is not None:
-            chart_df = bot.state["latest_data"].copy()
-            if not isinstance(chart_df.index, pd.DatetimeIndex):
-                if 'timestamp' in chart_df.columns:
-                    chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
-                    chart_df.set_index('timestamp', inplace=True)
-                else:
-                    chart_df.index = pd.date_range(end=get_ist(), periods=len(chart_df), freq='T')
-            try:
-                if chart_df.index.tz is not None:
-                    chart_df.index = chart_df.index.tz_localize(None)
-            except AttributeError:
-                pass
-            chart_df['time'] = chart_df.index.astype('int64') // 10**9
-            candles = chart_df[['time', 'open', 'high', 'low', 'close']].dropna().to_dict('records')
-            if len(candles) == 0:
-                st.warning("No candle data available for chart.")
-            else:
-                fib_lines = []
-                if not bot.state["active_trade"] and bot.state.get('fib_data'):
-                    fib = bot.state['fib_data']
-                    fib_lines = [
-                        {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
-                        {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
-                        {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
-                        {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
-                    ]
-                chartOptions = {
-                    "height": 700 if FULL_CHART else 400,
-                    "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
-                    "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
-                    "crosshair": {"mode": 0},
-                    "timeScale": {"timeVisible": True, "secondsVisible": False}
-                }
-                chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
-
-                if 'anchored_vwap' in chart_df.columns:
-                    avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
-                    if avwap_data:
-                        chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
-                if 'vwap' in chart_df.columns:
-                    vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
-                    if vwap_data:
-                        chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
-                ema_col = None
-                if 'ema_fast' in chart_df.columns:
-                    ema_col = 'ema_fast'
-                elif 'ema_short' in chart_df.columns:
-                    ema_col = 'ema_short'
-                elif 'ema9' in chart_df.columns:
-                    ema_col = 'ema9'
-                if ema_col:
-                    ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
-                    if ema_data:
-                        chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
-                if 'supertrend' in chart_df.columns:
-                    st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
-                    if st_data:
-                        chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
-
-                renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
-        elif not SHOW_CHART:
-            st.info("Chart is hidden. Enable 'Render Chart' to view.")
-
-        st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
-        fomo_signals = fomo_scanner.scan()
-        if fomo_signals:
-            df_fomo = pd.DataFrame(fomo_signals)
-            st.dataframe(df_fomo, use_container_width=True, hide_index=True)
-        else:
-            st.info("No volume spike alerts at the moment.")
-
-        total_trades = len(bot.state.get("paper_history", [])) if bot.is_mock else bot.state.get("trades_today", 0)
-        wins = bot.state.get("hz_wins", 0) + (st.session_state.win_streak if st.session_state.win_streak > 0 else 0)
-        win_pct = (wins / total_trades * 100) if total_trades > 0 else 0
-        st.metric("Win Percentage", f"{win_pct:.1f}%")
-
-        if bot.settings.get('hero_zero', False) and bot.state.get("hz_trades"):
-            hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
-            st.markdown(f"""
-            <div class="hz-stats">
-                <h4 style="color: white; margin:0 0 10px 0;">🎯 Hero/Zero Performance</h4>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-                    <div>Total Trades: {len(bot.state['hz_trades'])}</div>
-                    <div>Win Rate: {hz_win_rate:.1f}%</div>
-                    <div>Total P&L: {'🟢' if bot.state['hz_pnl'] > 0 else '🔴'} ₹{bot.state['hz_pnl']:.2f}</div>
-                    <div>Wins: {bot.state['hz_wins']} | Losses: {bot.state['hz_losses']}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # ---------- TAB 2: SCANNERS (unchanged) ----------
-    with tab2:
-        sub_tabs = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "🇺🇸 US Stock Scanner", "🌙 Overnight Profitable", "🎯 Hero/Zero Scanner"])
-        with sub_tabs[0]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("52‑Week High/Low Scanner")
-                @st.cache_data(ttl=86400)
-                def scan_52w():
-                    watch_list = [
-                        "RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS",
-                        "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS", "HINDUNILVR.NS", "KOTAKBANK.NS",
-                        "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "HCLTECH.NS", "ASIANPAINT.NS",
-                        "TITAN.NS", "ULTRACEMCO.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "BPCL.NS",
-                        "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT"
-                    ]
-                    results = []
-                    for ticker in watch_list:
-                        try:
-                            tk = yf.Ticker(ticker)
-                            hist = tk.history(period="1y")
-                            if hist.empty: continue
-                            ltp = hist['Close'].iloc[-1]
-                            high_52 = hist['High'].max()
-                            low_52 = hist['Low'].min()
-                            atr = (hist['High'] - hist['Low']).rolling(14).mean().iloc[-1]
-                            midpoint = (high_52 + low_52) / 2
-                            if ltp > midpoint:
-                                direction = "LONG"
-                                entry = ltp
-                                sl = ltp - atr
-                                tp = ltp + atr * 2
-                                signal = "BUY 🟢"
-                            else:
-                                direction = "SHORT"
-                                entry = ltp
-                                sl = ltp + atr
-                                tp = ltp - atr * 2
-                                signal = "SELL 🔴"
-                            if ltp > high_52 * 0.95:
-                                signal = "STRONG BUY 🚀"
-                            elif ltp < low_52 * 1.05:
-                                signal = "STRONG SELL 🔻"
-                            results.append({
-                                "Symbol": ticker,
-                                "LTP": round(ltp, 2),
-                                "52W High": round(high_52, 2),
-                                "52W Low": round(low_52, 2),
-                                "Signal": signal,
-                                "Entry": round(entry, 2),
-                                "SL": round(sl, 2),
-                                "TP": round(tp, 2)
-                            })
-                        except:
-                            continue
-                    return results
-                results = scan_52w()
-                if results:
-                    df_res = pd.DataFrame(results)
-                    def highlight_signal(val):
-                        if "STRONG BUY" in val:
-                            return 'background-color: #22c55e; color: white'
-                        elif "STRONG SELL" in val:
-                            return 'background-color: #ef4444; color: white'
-                        return ''
-                    styled = df_res.style.map(highlight_signal, subset=['Signal'])
-                    st.dataframe(styled, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No data.")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-        with sub_tabs[1]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("Multi‑Stock + Pin Bar Scanner")
-                @st.cache_data(ttl=86400)
-                def scan_multistock():
-                    symbols = ["NIFTY", "SENSEX", "GOLD", "BTC-USD", "ETH-USD", "SOL-USD"]
-                    results = []
-                    for sym in symbols:
-                        yf_sym = sym
-                        if sym == "NIFTY": yf_sym = "^NSEI"
-                        elif sym == "SENSEX": yf_sym = "^BSESN"
-                        elif sym == "GOLD": yf_sym = "GC=F"
-                        df = yf.Ticker(yf_sym).history(period="5d", interval="1d")
-                        if not df.empty:
-                            inside = "Yes" if (df['High'].iloc[-1] <= df['High'].iloc[-2] and df['Low'].iloc[-1] >= df['Low'].iloc[-2]) else "No"
-                            last = df.iloc[-1]
-                            body = abs(last['Close'] - last['Open'])
-                            upper = last['High'] - max(last['Close'], last['Open'])
-                            lower = min(last['Close'], last['Open']) - last['Low']
-                            pin = "None"
-                            if lower > body*2 and last['Close'] > last['Open']:
-                                pin = "Bullish Pin"
-                            elif upper > body*2 and last['Close'] < last['Open']:
-                                pin = "Bearish Pin"
-                            results.append({
-                                "Symbol": sym,
-                                "LTP": round(last['Close'], 2),
-                                "Inside Bar": inside,
-                                "Pin Bar": pin
-                            })
-                    return results
-                results = scan_multistock()
-                if results:
-                    st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-                else:
-                    st.info("No data.")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-        with sub_tabs[2]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("🇺🇸 US Stock Scanner")
-                us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT", "JNJ", "PG", "UNH", "HD", "DIS", "NFLX", "ADBE", "CRM", "AMD", "INTC"]
-                @st.cache_data(ttl=86400)
-                def scan_us():
-                    results = []
-                    for ticker in us_list:
-                        try:
-                            tk = yf.Ticker(ticker)
-                            hist = tk.history(period="1mo", interval="1d")
-                            if len(hist) < 20:
-                                continue
-                            hist['ema9'] = hist['Close'].ewm(span=9).mean()
-                            hist['ema21'] = hist['Close'].ewm(span=21).mean()
-                            hist['volume_ma'] = hist['Volume'].rolling(20).mean()
-                            last = hist.iloc[-1]
-                            if (last['Close'] > last['ema9'] and last['ema9'] > last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
-                                signal = "BUY 🟢"
-                                entry = last['Close']
-                                sl = last['Close'] * 0.98
-                                tp = last['Close'] * 1.04
-                            elif (last['Close'] < last['ema9'] and last['ema9'] < last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
-                                signal = "SELL 🔴"
-                                entry = last['Close']
-                                sl = last['Close'] * 1.02
-                                tp = last['Close'] * 0.96
-                            else:
-                                signal = "Neutral"
-                                entry = last['Close']
-                                sl = last['Close'] * 0.98
-                                tp = last['Close'] * 1.02
-                            results.append({
-                                "Symbol": ticker,
-                                "LTP": round(last['Close'], 2),
-                                "Signal": signal,
-                                "Entry": round(entry, 2),
-                                "SL": round(sl, 2),
-                                "TP": round(tp, 2)
-                            })
-                        except:
-                            continue
-                    return results
-                results = scan_us()
-                if results:
-                    df_us = pd.DataFrame(results)
-                    def highlight_signal(val):
-                        if "BUY" in val:
-                            return 'background-color: #22c55e; color: white'
-                        elif "SELL" in val:
-                            return 'background-color: #ef4444; color: white'
-                        return ''
-                    styled_us = df_us.style.map(highlight_signal, subset=['Signal'])
-                    st.dataframe(styled_us, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No signals found.")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-        with sub_tabs[3]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("🌙 Overnight Profitable Stocks & Crypto")
-                st.markdown("Stocks that gap up/down significantly pre-market (Indian & US) and crypto with high overnight volatility.")
-                @st.cache_data(ttl=86400)
-                def scan_overnight():
-                    results = []
-                    indian_list = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS"]
-                    for ticker in indian_list:
-                        try:
-                            tk = yf.Ticker(ticker)
-                            hist = tk.history(period="2d", interval="1m")
-                            if len(hist) < 60: continue
-                            yesterday_close = hist['Close'].iloc[-390] if len(hist) > 390 else hist['Close'].iloc[0]
-                            pre_high = hist['High'].iloc[-30:].max()
-                            pre_low = hist['Low'].iloc[-30:].min()
-                            change_high = (pre_high - yesterday_close) / yesterday_close * 100
-                            change_low = (pre_low - yesterday_close) / yesterday_close * 100
-                            if change_high > 1.5:
-                                results.append({
-                                    "Symbol": ticker.replace(".NS", ""),
-                                    "Type": "Stock",
-                                    "Pre-Market High %": f"+{change_high:.2f}%",
-                                    "Pre-Market Low %": f"{change_low:.2f}%",
-                                    "Signal": "Bullish Gap 🚀"
-                                })
-                            elif change_low < -1.5:
-                                results.append({
-                                    "Symbol": ticker.replace(".NS", ""),
-                                    "Type": "Stock",
-                                    "Pre-Market High %": f"+{change_high:.2f}%",
-                                    "Pre-Market Low %": f"{change_low:.2f}%",
-                                    "Signal": "Bearish Gap 🔻"
-                                })
-                        except: pass
-                    us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META"]
-                    for ticker in us_list:
-                        try:
-                            tk = yf.Ticker(ticker)
-                            hist = tk.history(period="2d", interval="1m")
-                            if len(hist) < 60: continue
-                            yesterday_close = hist['Close'].iloc[-390] if len(hist) > 390 else hist['Close'].iloc[0]
-                            pre_high = hist['High'].iloc[-30:].max()
-                            pre_low = hist['Low'].iloc[-30:].min()
-                            change_high = (pre_high - yesterday_close) / yesterday_close * 100
-                            change_low = (pre_low - yesterday_close) / yesterday_close * 100
-                            if change_high > 1.5:
-                                results.append({
-                                    "Symbol": ticker,
-                                    "Type": "US Stock",
-                                    "Pre-Market High %": f"+{change_high:.2f}%",
-                                    "Pre-Market Low %": f"{change_low:.2f}%",
-                                    "Signal": "Bullish Gap 🚀"
-                                })
-                            elif change_low < -1.5:
-                                results.append({
-                                    "Symbol": ticker,
-                                    "Type": "US Stock",
-                                    "Pre-Market High %": f"+{change_high:.2f}%",
-                                    "Pre-Market Low %": f"{change_low:.2f}%",
-                                    "Signal": "Bearish Gap 🔻"
-                                })
-                        except: pass
+# ---------- TAB 2: SCANNERS (unchanged from original) ----------
+with tab2:
+    sub_tabs = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "🇺🇸 US Stock Scanner", "🌙 Overnight Profitable", "🎯 Hero/Zero Scanner"])
+    with sub_tabs[0]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            st.subheader("52‑Week High/Low Scanner")
+            @st.cache_data(ttl=86400)
+            def scan_52w():
+                watch_list = [
+                    "RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS",
+                    "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS", "HINDUNILVR.NS", "KOTAKBANK.NS",
+                    "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "HCLTECH.NS", "ASIANPAINT.NS",
+                    "TITAN.NS", "ULTRACEMCO.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "BPCL.NS",
+                    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT"
+                ]
+                results = []
+                for ticker in watch_list:
                     try:
-                        resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            for coin in data:
-                                mkt = coin.get('market', '')
-                                if mkt.endswith('USDT'):
-                                    chg = float(coin.get('change_24_hour', 0))
-                                    if abs(chg) > 3:
-                                        results.append({
-                                            "Symbol": mkt,
-                                            "Type": "Crypto",
-                                            "24h Change": f"{chg:+.2f}%",
-                                            "Pre-Market High %": "-",
-                                            "Pre-Market Low %": "-",
-                                            "Signal": "High Volatility ⚡"
-                                        })
-                    except: pass
-                    return results
-                results = scan_overnight()
-                if results:
-                    df_ov = pd.DataFrame(results)
-                    st.dataframe(df_ov, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No significant overnight movements detected.")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-        with sub_tabs[4]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
-                
-                def color_direction(val):
-                    if "HERO" in val:
+                        tk = yf.Ticker(ticker)
+                        hist = tk.history(period="1y")
+                        if hist.empty: continue
+                        ltp = hist['Close'].iloc[-1]
+                        high_52 = hist['High'].max()
+                        low_52 = hist['Low'].min()
+                        atr = (hist['High'] - hist['Low']).rolling(14).mean().iloc[-1]
+                        midpoint = (high_52 + low_52) / 2
+                        if ltp > midpoint:
+                            direction = "LONG"
+                            entry = ltp
+                            sl = ltp - atr
+                            tp = ltp + atr * 2
+                            signal = "BUY 🟢"
+                        else:
+                            direction = "SHORT"
+                            entry = ltp
+                            sl = ltp + atr
+                            tp = ltp - atr * 2
+                            signal = "SELL 🔴"
+                        if ltp > high_52 * 0.95:
+                            signal = "STRONG BUY 🚀"
+                        elif ltp < low_52 * 1.05:
+                            signal = "STRONG SELL 🔻"
+                        results.append({
+                            "Symbol": ticker,
+                            "LTP": round(ltp, 2),
+                            "52W High": round(high_52, 2),
+                            "52W Low": round(low_52, 2),
+                            "Signal": signal,
+                            "Entry": round(entry, 2),
+                            "SL": round(sl, 2),
+                            "TP": round(tp, 2)
+                        })
+                    except:
+                        continue
+                return results
+            results = scan_52w()
+            if results:
+                df_res = pd.DataFrame(results)
+                def highlight_signal(val):
+                    if "STRONG BUY" in val:
                         return 'background-color: #22c55e; color: white'
-                    elif "ZERO" in val:
+                    elif "STRONG SELL" in val:
                         return 'background-color: #ef4444; color: white'
                     return ''
-                
-                col_hz1, col_hz2 = st.columns(2)
-                with col_hz1:
-                    min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
-                with col_hz2:
-                    st.info("Auto‑scanning every 10 seconds...")
-                if 'hz_last_scan' not in st.session_state:
-                    st.session_state.hz_last_scan = time.time()
-                if time.time() - st.session_state.hz_last_scan > 10:
-                    st.session_state.hz_last_scan = time.time()
-                    st.rerun()
-                with st.spinner("Scanning for Hero/Zero patterns..."):
-                    st.markdown("### Nifty 50 Stocks")
-                    nifty_results = bot.scan_hero_zero_indian_stocks()
-                    if not nifty_results.empty:
-                        st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
-                        styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
-                        st.dataframe(styled_results, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
-                    
-                    st.markdown("### Penny Stocks")
-                    penny_results = bot.scan_penny_stocks()
-                    if not penny_results.empty:
-                        st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
-                        penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
-                        st.dataframe(penny_styled, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
-                    
-                    st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
-                    pin_results = bot.scan_pin_bars()
-                    if pin_results:
-                        pin_df = pd.DataFrame(pin_results)
-                        st.dataframe(pin_df, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No pin bar reversals detected at this moment")
-                    
-                    st.markdown("### 📝 Entry Instructions")
-                    st.info("""
-                    **For HERO (BUY):**
-                    - **Entry:** Current price
-                    - **Stop Loss:** 1.5x ATR below entry
-                    - **Target 1:** 3x ATR above entry (Book 50%)
-                    - **Target 2:** 5x ATR above entry (Book remaining)
-                    - **Risk/Reward:** 1:2
-                    **For ZERO (SELL):**
-                    - **Entry:** Current price
-                    - **Stop Loss:** 1.5x ATR above entry
-                    - **Target 1:** 3x ATR below entry (Book 50%)
-                    - **Target 2:** 5x ATR below entry (Book remaining)
-                    - **Risk/Reward:** 1:2
-                    """)
-                    st.markdown("### ⏰ Best Trading Times (IST)")
-                    st.markdown("""
-                    - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
-                    - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
-                    - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
-                    - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
-                    """)
+                styled = df_res.style.map(highlight_signal, subset=['Signal'])
+                st.dataframe(styled, use_container_width=True, hide_index=True)
+            else:
+                st.info("No data.")
+            st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- TAB 3: LOGS (unchanged) ----------
-    with tab3:
-        sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
-        with sub_tabs[0]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                col_clr, _ = st.columns([1,5])
-                with col_clr:
-                    if st.button("🗑️ Clear", use_container_width=True, on_click=lambda: play_sound_now("click")):
-                        bot.state["logs"].clear()
-                        if "paper_history" in bot.state:
-                            bot.state["paper_history"] = []
-                        bot.state["daily_pnl"] = 0.0
-                        bot.state["trades_today"] = 0
-                        if not bot.is_mock and HAS_DB:
-                            try:
-                                uid = getattr(bot,"system_user_id",bot.api_key)
-                                supabase.table("trade_logs").delete().eq("user_id", uid).execute()
-                            except: pass
-                        st.rerun()
-                if len(bot.state["logs"]) == 0:
-                    st.info("No logs yet. Start the engine to see activity.")
-                else:
-                    for l in bot.state["logs"]:
-                        st.markdown(f"`{l}`")
-                st.markdown('</div>', unsafe_allow_html=True)
-        with sub_tabs[1]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
-                if bot.is_mock:
-                    if bot.state.get("paper_history"):
-                        df = pd.DataFrame(bot.state["paper_history"])
-                        st.dataframe(df.iloc[::-1], use_container_width=True)
-                        if report_period == "Daily":
-                            today = get_ist().strftime('%Y-%m-%d')
-                            df_report = df[df['Date'] == today]
-                        elif report_period == "Weekly":
-                            week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
-                            df_report = df[df['Date'] >= week_ago]
+    with sub_tabs[1]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            st.subheader("Multi‑Stock + Pin Bar Scanner")
+            @st.cache_data(ttl=86400)
+            def scan_multistock():
+                symbols = ["NIFTY", "SENSEX", "GOLD", "BTC-USD", "ETH-USD", "SOL-USD"]
+                results = []
+                for sym in symbols:
+                    yf_sym = sym
+                    if sym == "NIFTY": yf_sym = "^NSEI"
+                    elif sym == "SENSEX": yf_sym = "^BSESN"
+                    elif sym == "GOLD": yf_sym = "GC=F"
+                    df = yf.Ticker(yf_sym).history(period="5d", interval="1d")
+                    if not df.empty:
+                        inside = "Yes" if (df['High'].iloc[-1] <= df['High'].iloc[-2] and df['Low'].iloc[-1] >= df['Low'].iloc[-2]) else "No"
+                        last = df.iloc[-1]
+                        body = abs(last['Close'] - last['Open'])
+                        upper = last['High'] - max(last['Close'], last['Open'])
+                        lower = min(last['Close'], last['Open']) - last['Low']
+                        pin = "None"
+                        if lower > body*2 and last['Close'] > last['Open']:
+                            pin = "Bullish Pin"
+                        elif upper > body*2 and last['Close'] < last['Open']:
+                            pin = "Bearish Pin"
+                        results.append({
+                            "Symbol": sym,
+                            "LTP": round(last['Close'], 2),
+                            "Inside Bar": inside,
+                            "Pin Bar": pin
+                        })
+                return results
+            results = scan_multistock()
+            if results:
+                st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            else:
+                st.info("No data.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    with sub_tabs[2]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            st.subheader("🇺🇸 US Stock Scanner")
+            us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT", "JNJ", "PG", "UNH", "HD", "DIS", "NFLX", "ADBE", "CRM", "AMD", "INTC"]
+            @st.cache_data(ttl=86400)
+            def scan_us():
+                results = []
+                for ticker in us_list:
+                    try:
+                        tk = yf.Ticker(ticker)
+                        hist = tk.history(period="1mo", interval="1d")
+                        if len(hist) < 20:
+                            continue
+                        hist['ema9'] = hist['Close'].ewm(span=9).mean()
+                        hist['ema21'] = hist['Close'].ewm(span=21).mean()
+                        hist['volume_ma'] = hist['Volume'].rolling(20).mean()
+                        last = hist.iloc[-1]
+                        if (last['Close'] > last['ema9'] and last['ema9'] > last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
+                            signal = "BUY 🟢"
+                            entry = last['Close']
+                            sl = last['Close'] * 0.98
+                            tp = last['Close'] * 1.04
+                        elif (last['Close'] < last['ema9'] and last['ema9'] < last['ema21'] and last['Volume'] > last['volume_ma'] * 1.1):
+                            signal = "SELL 🔴"
+                            entry = last['Close']
+                            sl = last['Close'] * 1.02
+                            tp = last['Close'] * 0.96
                         else:
-                            df_report = df
-                        output = io.BytesIO()
-                        with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                            df_report.to_excel(w, index=False)
-                        st.download_button("📥 Export", data=output.getvalue(), file_name="mock_ledger.xlsx", on_click=lambda: play_sound_now("click"))
-                    else:
-                        st.info("No paper trades yet.")
+                            signal = "Neutral"
+                            entry = last['Close']
+                            sl = last['Close'] * 0.98
+                            tp = last['Close'] * 1.02
+                        results.append({
+                            "Symbol": ticker,
+                            "LTP": round(last['Close'], 2),
+                            "Signal": signal,
+                            "Entry": round(entry, 2),
+                            "SL": round(sl, 2),
+                            "TP": round(tp, 2)
+                        })
+                    except:
+                        continue
+                return results
+            results = scan_us()
+            if results:
+                df_us = pd.DataFrame(results)
+                def highlight_signal(val):
+                    if "BUY" in val:
+                        return 'background-color: #22c55e; color: white'
+                    elif "SELL" in val:
+                        return 'background-color: #ef4444; color: white'
+                    return ''
+                styled_us = df_us.style.map(highlight_signal, subset=['Signal'])
+                st.dataframe(styled_us, use_container_width=True, hide_index=True)
+            else:
+                st.info("No signals found.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    with sub_tabs[3]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            st.subheader("🌙 Overnight Profitable Stocks & Crypto")
+            st.markdown("Stocks that gap up/down significantly pre-market (Indian & US) and crypto with high overnight volatility.")
+            @st.cache_data(ttl=86400)
+            def scan_overnight():
+                results = []
+                indian_list = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS"]
+                for ticker in indian_list:
+                    try:
+                        tk = yf.Ticker(ticker)
+                        hist = tk.history(period="2d", interval="1m")
+                        if len(hist) < 60: continue
+                        yesterday_close = hist['Close'].iloc[-390] if len(hist) > 390 else hist['Close'].iloc[0]
+                        pre_high = hist['High'].iloc[-30:].max()
+                        pre_low = hist['Low'].iloc[-30:].min()
+                        change_high = (pre_high - yesterday_close) / yesterday_close * 100
+                        change_low = (pre_low - yesterday_close) / yesterday_close * 100
+                        if change_high > 1.5:
+                            results.append({
+                                "Symbol": ticker.replace(".NS", ""),
+                                "Type": "Stock",
+                                "Pre-Market High %": f"+{change_high:.2f}%",
+                                "Pre-Market Low %": f"{change_low:.2f}%",
+                                "Signal": "Bullish Gap 🚀"
+                            })
+                        elif change_low < -1.5:
+                            results.append({
+                                "Symbol": ticker.replace(".NS", ""),
+                                "Type": "Stock",
+                                "Pre-Market High %": f"+{change_high:.2f}%",
+                                "Pre-Market Low %": f"{change_low:.2f}%",
+                                "Signal": "Bearish Gap 🔻"
+                            })
+                    except: pass
+                us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META"]
+                for ticker in us_list:
+                    try:
+                        tk = yf.Ticker(ticker)
+                        hist = tk.history(period="2d", interval="1m")
+                        if len(hist) < 60: continue
+                        yesterday_close = hist['Close'].iloc[-390] if len(hist) > 390 else hist['Close'].iloc[0]
+                        pre_high = hist['High'].iloc[-30:].max()
+                        pre_low = hist['Low'].iloc[-30:].min()
+                        change_high = (pre_high - yesterday_close) / yesterday_close * 100
+                        change_low = (pre_low - yesterday_close) / yesterday_close * 100
+                        if change_high > 1.5:
+                            results.append({
+                                "Symbol": ticker,
+                                "Type": "US Stock",
+                                "Pre-Market High %": f"+{change_high:.2f}%",
+                                "Pre-Market Low %": f"{change_low:.2f}%",
+                                "Signal": "Bullish Gap 🚀"
+                            })
+                        elif change_low < -1.5:
+                            results.append({
+                                "Symbol": ticker,
+                                "Type": "US Stock",
+                                "Pre-Market High %": f"+{change_high:.2f}%",
+                                "Pre-Market Low %": f"{change_low:.2f}%",
+                                "Signal": "Bearish Gap 🔻"
+                            })
+                    except: pass
+                try:
+                    resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        for coin in data:
+                            mkt = coin.get('market', '')
+                            if mkt.endswith('USDT'):
+                                chg = float(coin.get('change_24_hour', 0))
+                                if abs(chg) > 3:
+                                    results.append({
+                                        "Symbol": mkt,
+                                        "Type": "Crypto",
+                                        "24h Change": f"{chg:+.2f}%",
+                                        "Pre-Market High %": "-",
+                                        "Pre-Market Low %": "-",
+                                        "Signal": "High Volatility ⚡"
+                                    })
+                except: pass
+                return results
+            results = scan_overnight()
+            if results:
+                df_ov = pd.DataFrame(results)
+                st.dataframe(df_ov, use_container_width=True, hide_index=True)
+            else:
+                st.info("No significant overnight movements detected.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    with sub_tabs[4]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
+
+            def color_direction(val):
+                if "HERO" in val:
+                    return 'background-color: #22c55e; color: white'
+                elif "ZERO" in val:
+                    return 'background-color: #ef4444; color: white'
+                return ''
+
+            col_hz1, col_hz2 = st.columns(2)
+            with col_hz1:
+                min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
+            with col_hz2:
+                st.info("Auto‑scanning every 10 seconds...")
+            if 'hz_last_scan' not in st.session_state:
+                st.session_state.hz_last_scan = time.time()
+            if time.time() - st.session_state.hz_last_scan > 10:
+                st.session_state.hz_last_scan = time.time()
+                st.rerun()
+            with st.spinner("Scanning for Hero/Zero patterns..."):
+                st.markdown("### Nifty 50 Stocks")
+                nifty_results = bot.scan_hero_zero_indian_stocks()
+                if not nifty_results.empty:
+                    st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
+                    styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
+                    st.dataframe(styled_results, use_container_width=True, hide_index=True)
                 else:
-                    uid = getattr(bot,"system_user_id",bot.api_key)
-                    if HAS_DB:
+                    st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
+
+                st.markdown("### Penny Stocks")
+                penny_results = bot.scan_penny_stocks()
+                if not penny_results.empty:
+                    st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
+                    penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
+                    st.dataframe(penny_styled, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
+
+                st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
+                pin_results = bot.scan_pin_bars()
+                if pin_results:
+                    pin_df = pd.DataFrame(pin_results)
+                    st.dataframe(pin_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No pin bar reversals detected at this moment")
+
+                st.markdown("### 📝 Entry Instructions")
+                st.info("""
+                **For HERO (BUY):**
+                - **Entry:** Current price
+                - **Stop Loss:** 1.5x ATR below entry
+                - **Target 1:** 3x ATR above entry (Book 50%)
+                - **Target 2:** 5x ATR above entry (Book remaining)
+                - **Risk/Reward:** 1:2
+                **For ZERO (SELL):**
+                - **Entry:** Current price
+                - **Stop Loss:** 1.5x ATR above entry
+                - **Target 1:** 3x ATR below entry (Book 50%)
+                - **Target 2:** 5x ATR below entry (Book remaining)
+                - **Risk/Reward:** 1:2
+                """)
+                st.markdown("### ⏰ Best Trading Times (IST)")
+                st.markdown("""
+                - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
+                - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
+                - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
+                - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
+                """)
+
+# ---------- TAB 3: LOGS (FIXED CLEAR BUTTON & IMPROVED LEDGER/TAX) ----------
+with tab3:
+    sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
+
+    # --- Console Tab (clear button fixed) ---
+    with sub_tabs[0]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            col_clr, col_msg = st.columns([1, 5])
+            with col_clr:
+                if st.button("🗑️ Clear", key="clear_logs_btn", use_container_width=True,
+                             on_click=lambda: play_sound_now("click")):
+                    bot.state["logs"].clear()
+                    if bot.is_mock and "paper_history" in bot.state:
+                        bot.state["paper_history"] = []
+                    bot.state["daily_pnl"] = 0.0
+                    bot.state["trades_today"] = 0
+                    if not bot.is_mock and HAS_DB:
                         try:
-                            res = supabase.table("trade_logs").select("*").eq("user_id", uid).execute()
-                            if res.data:
-                                df = pd.DataFrame(res.data).drop(columns=["id","user_id"], errors="ignore")
-                                st.dataframe(df.iloc[::-1], use_container_width=True)
-                                if report_period == "Daily":
-                                    today = get_ist().strftime('%Y-%m-%d')
-                                    df_report = df[df['trade_date'] == today]
-                                elif report_period == "Weekly":
-                                    week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
-                                    df_report = df[df['trade_date'] >= week_ago]
-                                else:
-                                    df_report = df
-                                output = io.BytesIO()
-                                with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                                    df_report.to_excel(w, index=False)
-                                st.download_button("📥 Export", data=output.getvalue(), file_name="live_ledger.xlsx", on_click=lambda: play_sound_now("click"))
-                            else:
-                                st.info("No live trades.")
+                            uid = getattr(bot, "system_user_id", bot.api_key)
+                            supabase.table("trade_logs").delete().eq("user_id", uid).execute()
                         except Exception as e:
-                            st.error(f"DB error: {e}")
+                            st.error(f"DB clear error: {e}")
+                    st.rerun()
+            with col_msg:
+                st.caption("Clears console, paper history, and resets daily P&L (does not stop engine).")
+            if len(bot.state["logs"]) == 0:
+                st.info("No logs yet. Start the engine to see activity.")
+            else:
+                for log in bot.state["logs"]:
+                    st.markdown(f"`{log}`")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Improved Ledger Tab ---
+    with sub_tabs[1]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
+
+            if bot.is_mock:
+                if bot.state.get("paper_history"):
+                    df = pd.DataFrame(bot.state["paper_history"])
+                    # Add summary metrics
+                    total_pnl = df['PnL'].sum()
+                    wins = len(df[df['PnL'] > 0])
+                    losses = len(df[df['PnL'] <= 0])
+                    win_rate = (wins / len(df) * 100) if len(df) > 0 else 0
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Total Trades", len(df))
+                    col2.metric("Win Rate", f"{win_rate:.1f}%")
+                    col3.metric("Total PnL", f"₹{total_pnl:.2f}")
+                    st.dataframe(df.iloc[::-1], use_container_width=True)
+
+                    # Filter by period
+                    if report_period == "Daily":
+                        today = get_ist().strftime('%Y-%m-%d')
+                        df_report = df[df['Date'] == today]
+                    elif report_period == "Weekly":
+                        week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
+                        df_report = df[df['Date'] >= week_ago]
                     else:
-                        st.error("DB disconnected.")
-                st.markdown('</div>', unsafe_allow_html=True)
-        with sub_tabs[2]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("📄 Tax Report")
-                if st.session_state.user_id and HAS_DB:
-                    tax_year = st.selectbox("Financial Year", [2023, 2024, 2025])
-                    if st.button("Generate Report", on_click=lambda: play_sound_now("click")):
+                        df_report = df
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as w:
+                        df_report.to_excel(w, index=False)
+                    st.download_button("📥 Export", data=output.getvalue(),
+                                       file_name="mock_ledger.xlsx",
+                                       on_click=lambda: play_sound_now("click"))
+                else:
+                    st.info("No paper trades yet.")
+            else:
+                uid = getattr(bot, "system_user_id", bot.api_key)
+                if HAS_DB:
+                    try:
+                        res = supabase.table("trade_logs").select("*").eq("user_id", uid).execute()
+                        if res.data:
+                            df = pd.DataFrame(res.data).drop(columns=["id", "user_id"], errors="ignore")
+                            # Convert date strings to datetime for filtering
+                            df['trade_date'] = pd.to_datetime(df['trade_date'])
+                            # Summary metrics
+                            total_pnl = df['pnl'].sum()
+                            wins = len(df[df['pnl'] > 0])
+                            losses = len(df[df['pnl'] <= 0])
+                            win_rate = (wins / len(df) * 100) if len(df) > 0 else 0
+                            col1, col2, col3 = st.columns(3)
+                            col1.metric("Total Trades", len(df))
+                            col2.metric("Win Rate", f"{win_rate:.1f}%")
+                            col3.metric("Total PnL", f"₹{total_pnl:.2f}")
+                            st.dataframe(df.sort_values('trade_time', ascending=False), use_container_width=True)
+
+                            # Filter by period
+                            if report_period == "Daily":
+                                today = get_ist().date()
+                                df_report = df[df['trade_date'].dt.date == today]
+                            elif report_period == "Weekly":
+                                week_ago = get_ist().date() - dt.timedelta(days=7)
+                                df_report = df[df['trade_date'].dt.date >= week_ago]
+                            else:
+                                df_report = df
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine='xlsxwriter') as w:
+                                df_report.to_excel(w, index=False)
+                            st.download_button("📥 Export", data=output.getvalue(),
+                                               file_name="live_ledger.xlsx",
+                                               on_click=lambda: play_sound_now("click"))
+                        else:
+                            st.info("No live trades.")
+                    except Exception as e:
+                        st.error(f"DB error: {e}")
+                else:
+                    st.error("DB disconnected.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Improved Tax Report Tab ---
+    with sub_tabs[2]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            st.subheader("📄 Tax Report")
+            if st.session_state.user_id and HAS_DB:
+                tax_year = st.selectbox("Financial Year", [2023, 2024, 2025])
+                if st.button("Generate Report", on_click=lambda: play_sound_now("click")):
+                    with st.spinner("Generating report..."):
                         summary, df_tax = generate_tax_report(st.session_state.user_id, tax_year)
                         if summary:
                             st.markdown(f"### Summary for FY {tax_year}-{tax_year+1}")
-                            for cat, amt in summary.items():
-                                st.metric(cat, f"₹{amt:.2f}")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("STCG", f"₹{summary.get('STCG', 0):.2f}")
+                            with col2:
+                                st.metric("LTCG", f"₹{summary.get('LTCG', 0):.2f}")
                             st.dataframe(df_tax)
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                                 df_tax.to_excel(w, index=False)
-                            st.download_button("📥 Download Tax Report", data=output.getvalue(), file_name=f"tax_report_{tax_year}.xlsx", on_click=lambda: play_sound_now("click"))
+                            st.download_button("📥 Download Tax Report", data=output.getvalue(),
+                                               file_name=f"tax_report_{tax_year}.xlsx",
+                                               on_click=lambda: play_sound_now("click"))
                         else:
                             st.info("No trades found for this period.")
-                else:
-                    st.warning("Login required or database not connected.")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-    # ---------- TAB 4: CRYPTO/FX (unchanged) ----------
-    with tab4:
-        sub_crypto = st.tabs(["🪙 CoinDCX Scanner", "⚡ 1-Min Scalper", "🚀 Breakout Scanner", "🪄 Web3 / DeFi"])
-        with sub_crypto[0]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("🕉️ CoinDCX Momentum")
-                @st.cache_data(ttl=30)
-                def scan_coindcx():
-                    try:
-                        resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=10)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            coins = []
-                            for coin in data:
-                                mkt = coin.get('market','')
-                                if mkt.endswith('USDT') or mkt.endswith('INR'):
-                                    try:
-                                        chg = float(coin.get('change_24_hour',0))
-                                        price = float(coin.get('last_price',0))
-                                        if price>0:
-                                            coins.append({"Pair":mkt, "LTP":price, "24h %":chg})
-                                    except: pass
-                            if coins:
-                                df = pd.DataFrame(coins).sort_values("24h %", ascending=False).head(15)
-                                df['24h %'] = df['24h %'].apply(lambda x: f"+{x}%" if x>0 else f"{x}%")
-                                return df
-                    except:
-                        pass
-                    return None
-                df_c = scan_coindcx()
-                if df_c is not None:
-                    st.dataframe(df_c, use_container_width=True, hide_index=True)
-                else:
-                    st.info("Unable to fetch CoinDCX data.")
-                st.markdown('</div>', unsafe_allow_html=True)
-        with sub_crypto[1]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                scalper_asset = st.selectbox("Select Asset", ["XAUUSD (Gold)", "BTCUSD", "ETHUSD", "SOLUSD"], index=0)
-                asset_map = {"XAUUSD (Gold)": "XAUUSD", "BTCUSD": "BTCUSD", "ETHUSD": "ETHUSD", "SOLUSD": "SOLUSD"}
-                symbol = asset_map[scalper_asset]
-                gold_crypto_scalper(symbol)
-                st.markdown('</div>', unsafe_allow_html=True)
-        with sub_crypto[2]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                add_breakout_scalper()
-                st.markdown('</div>', unsafe_allow_html=True)
-        with sub_crypto[3]:
-            with st.container():
-                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                st.subheader("🪄 Web3 / DeFi Top Movers")
-                col1, col2 = st.columns(2)
-                with col1:
-                    source2 = st.radio("Source", ["CoinDCX", "CoinGecko"], horizontal=True, key="web3_source")
-                with col2:
-                    limit2 = st.number_input("Show Top", 5, 50, 10, key="web3_limit")
-                if st.button("Fetch Web3 Data", on_click=lambda: play_sound_now("click"), key="web3_fetch"):
-                    with st.spinner("Fetching..."):
-                        if source2 == "CoinDCX":
-                            try:
-                                resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5)
-                                if resp.status_code == 200:
-                                    data = resp.json()
-                                    pairs = []
-                                    for coin in data:
-                                        mkt = coin.get('market', '')
-                                        if mkt.endswith('USDT'):
-                                            try:
-                                                chg = float(coin.get('change_24_hour', 0))
-                                                price = float(coin.get('last_price', 0))
-                                                vol = float(coin.get('volume', 0))
-                                                pairs.append({
-                                                    "Pair": mkt,
-                                                    "Price": price,
-                                                    "24h Change %": chg,
-                                                    "Volume": vol
-                                                })
-                                            except: pass
-                                    df = pd.DataFrame(pairs).sort_values("24h Change %", ascending=False)
-                                    st.markdown("#### 🟢 Top Gainers")
-                                    st.dataframe(df.head(limit2)[["Pair", "Price", "24h Change %", "Volume"]], use_container_width=True, hide_index=True)
-                                    st.markdown("#### 🔴 Top Losers")
-                                    st.dataframe(df.tail(limit2).sort_values("24h Change %")[["Pair", "Price", "24h Change %", "Volume"]], use_container_width=True, hide_index=True)
-                                else:
-                                    st.error("Failed")
-                            except Exception as e:
-                                st.error(f"Error: {e}")
-                        else:
-                            try:
-                                resp = requests.get("https://api.coingecko.com/api/v3/coins/markets", params={
-                                    "vs_currency": "usd",
-                                    "order": "market_cap_desc",
-                                    "per_page": 100,
-                                    "page": 1,
-                                    "sparkline": "false"
-                                }, timeout=10)
-                                if resp.status_code == 200:
-                                    data = resp.json()
-                                    df = pd.DataFrame(data)
-                                    df = df[["symbol", "current_price", "price_change_percentage_24h", "total_volume"]].rename(columns={
-                                        "symbol": "Coin",
-                                        "current_price": "Price (USD)",
-                                        "price_change_percentage_24h": "24h Change %",
-                                        "total_volume": "Volume"
-                                    })
-                                    df = df.sort_values("24h Change %", ascending=False)
-                                    st.markdown("#### 🟢 Top Gainers")
-                                    st.dataframe(df.head(limit2), use_container_width=True, hide_index=True)
-                                    st.markdown("#### 🔴 Top Losers")
-                                    st.dataframe(df.tail(limit2).sort_values("24h Change %"), use_container_width=True, hide_index=True)
-                                else:
-                                    st.error("Failed")
-                            except Exception as e:
-                                st.error(f"Error: {e}")
-                st.markdown('</div>', unsafe_allow_html=True)
-
-    # ---------- TAB 5: SAFE INVESTMENTS (unchanged) ----------
-    with tab5:
-        def safe_investment_suggestions():
-            st.markdown("### 💰 Safe Investment Suggestions")
-            st.markdown("These are conservative, low-risk ideas suitable for long-term wealth building.")
-            with st.expander("📈 **Index ETFs**"):
-                st.markdown("""
-                - **Nippon India ETF Nifty50** (JUNIORBEES): Low expense ratio, tracks Nifty50.
-                - **HDFC Sensex ETF**: Tracks BSE Sensex, good for long-term.
-                - **ICICI Prudential Nifty Next 50**: Captures emerging bluechips.
-                """)
-            with st.expander("🏦 **Fixed Income**"):
-                st.markdown("""
-                - **RBI Floating Rate Savings Bonds** – Interest rate reset every 6 months.
-                - **Corporate Bonds** (AAA rated) – e.g., NTPC, Power Finance Corp.
-                - **SGB (Sovereign Gold Bonds)** – Govt gold bonds with 2.5% interest.
-                """)
-            with st.expander("🌍 **International ETFs**"):
-                st.markdown("""
-                - **MOTILAL OSWAL S&P500 Index Fund** – US exposure.
-                - **Hang Seng Index ETF** – Hong Kong market.
-                - **iShares MSCI World ETF** (via international brokerage).
-                """)
-            with st.expander("💎 **Commodity ETFs**"):
-                st.markdown("""
-                - **Gold ETFs** – HDFC Gold, SBI Gold.
-                - **Silver ETFs** – ICICI Prudential Silver ETF.
-                """)
-            st.markdown("---")
-            st.subheader("📊 Compounding Calculator")
-            compounding_calculator()
-            st.info("💡 *Past performance does not guarantee future results. Always consult a financial advisor.*")
-        safe_investment_suggestions()
-
-    # ---------- TAB 6: FIA ASSISTANT (unchanged) ----------
-    with tab6:
-        st.subheader("🤖 FIA Assistant – Market Analysis")
-        def fia_assistant(df, index):
-            if df is None:
-                st.info("No data available.")
-                return
-            st.markdown(f"### 📊 Analysis for {index}")
-            last = df.iloc[-1]
-            prev = df.iloc[-2]
-            change = (last['close'] - prev['close']) / prev['close'] * 100
-            st.metric("Last Close", f"{last['close']:.2f}", f"{change:.2f}%")
-            rsi = last.get('rsi', 50)
-            st.metric("RSI (14)", f"{rsi:.1f}", "Overbought" if rsi > 70 else ("Oversold" if rsi < 30 else "Neutral"))
-            st.markdown("**Key Levels:**")
-            sup, res = bot.analyzer.get_support_resistance(df)
-            if sup:
-                st.markdown(f"- Support: {sup:.2f}")
-            if res:
-                st.markdown(f"- Resistance: {res:.2f}")
-            trend = "🟢 Bullish" if last['close'] > last.get('ema9', last['close']) else "🔴 Bearish"
-            st.markdown(f"**Short-term trend:** {trend}")
-            if st.button("Refresh Analysis", on_click=lambda: play_sound_now("click")):
-                st.rerun()
-        if bot.state.get("latest_data") is not None:
-            fia_assistant(bot.state["latest_data"], INDEX)
-        else:
-            st.info("No chart data available yet. Start the engine or refresh.")
-
-    # ---------- TAB 7: BACKTEST (improved) ----------
-    with tab7:
-        st.subheader("📊 Backtesting Engine")
-        st.markdown("Test your strategy on historical data.")
-        bt_symbol = st.selectbox("Symbol", ["NIFTY", "BANKNIFTY", "BTCUSD", "ETHUSD"])
-        bt_start = st.date_input("Start Date", get_ist().date() - dt.timedelta(days=180))
-        bt_end = st.date_input("End Date", get_ist().date())
-        bt_initial_cap = st.number_input("Initial Capital (₹)", 10000, 1000000, 100000)
-        if st.button("Run Backtest", on_click=lambda: play_sound_now("click")):
-            with st.spinner("Running backtest..."):
-                df = yf.download(YF_TICKERS.get(bt_symbol, bt_symbol), start=bt_start, end=bt_end, interval="1d")
-                if df.empty:
-                    st.error("No data fetched.")
-                else:
-                    df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
-                    bt = Backtester(bot, bot.analyzer.apply_vwap_ema_strategy, df, bt_initial_cap)
-                    equity, ret, trades = bt.run()
-                    st.success(f"Backtest complete! Total Return: {ret:.2f}%")
-                    if trades:
-                        st.markdown("### Trade Log")
-                        trades_df = pd.DataFrame(trades)
-                        trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time']).dt.strftime('%Y-%m-%d')
-                        trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time']).dt.strftime('%Y-%m-%d')
-                        st.dataframe(trades_df, use_container_width=True, hide_index=True)
-                        total_pnl = sum(t['pnl'] for t in trades)
-                        st.metric("Total PnL", f"₹{total_pnl:.2f}")
-                        st.metric("Sharpe Ratio", f"{bt.sharpe_ratio:.2f}")
-                        st.metric("Max Drawdown", f"{bt.max_drawdown:.2f}%")
-                        if trades:
-                            wins = [t for t in trades if t['pnl'] > 0]
-                            losses = [t for t in trades if t['pnl'] <= 0]
-                            win_rate = len(wins) / len(trades) * 100
-                            avg_win = np.mean([t['pnl'] for t in wins]) if wins else 0
-                            avg_loss = np.mean([t['pnl'] for t in losses]) if losses else 0
-                            st.metric("Win Rate", f"{win_rate:.2f}%")
-                            st.metric("Avg Win", f"₹{avg_win:.2f}")
-                            st.metric("Avg Loss", f"₹{avg_loss:.2f}")
-                    st.line_chart(equity)
-
-    # ---------- TAB 8: ADMIN (if developer) ----------
-    if st.session_state.is_developer:
-        with tab8:
-            st.subheader("🛡️ Admin Control Panel")
-            st.markdown("### 👥 Active User Sessions")
-            if HAS_DB:
-                try:
-                    res = supabase.table("user_sessions").select("*").execute()
-                    if res.data:
-                        df_sessions = pd.DataFrame(res.data)
-                        df_sessions['last_seen'] = pd.to_datetime(df_sessions['last_seen']).dt.tz_convert('Asia/Kolkata').dt.strftime('%Y-%m-%d %H:%M:%S')
-                        st.dataframe(df_sessions[['user_id', 'device_name', 'ip_address', 'last_seen', 'session_id']], use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No active sessions.")
-                except Exception as e:
-                    st.error(f"Error fetching sessions: {e}")
-
-                st.markdown("### 🚫 Block User")
-                block_user = st.text_input("Enter User ID to block")
-                if st.button("Block User", on_click=lambda: play_sound_now("click")):
-                    try:
-                        supabase.table("blocked_users").upsert({"user_id": block_user}, on_conflict='user_id').execute()
-                        st.success(f"User {block_user} blocked.")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-
-                st.markdown("### 📊 Daily PnL Summary")
-                date_summary = st.date_input("Select Date", get_ist().date())
-                try:
-                    res = supabase.table("trade_logs").select("user_id, pnl").eq("trade_date", date_summary.strftime('%Y-%m-%d')).execute()
-                    if res.data:
-                        df_pnl = pd.DataFrame(res.data).groupby('user_id')['pnl'].sum().reset_index()
-                        st.dataframe(df_pnl, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No trades on this date.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
-
-                st.markdown("### 🔧 Developer Settings")
-                st.text("Developer email for access: developer@example.com (change in code)")
-
-                st.markdown("### 🔑 License Generator")
-                user_id = st.text_input("User Email/Phone for License")
-                plan = st.selectbox("Plan", ["basic", "premium"])
-                days = st.number_input("Validity (days)", 1, 3650, 365)
-                if st.button("Generate License", on_click=lambda: play_sound_now("click")):
-                    lic = create_license(user_id, plan, days)
-                    if lic:
-                        st.success(f"License created: `{lic}`")
-                        qr = qrcode.make(lic)
-                        buf = BytesIO()
-                        qr.save(buf, format="PNG")
-                        st.image(buf, caption="Scan to login")
             else:
-                st.warning("Database not connected.")
+                st.warning("Login required or database not connected.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------- TAB 4: CRYPTO/FX (unchanged) ----------
+with tab4:
+    sub_crypto = st.tabs(["🪙 CoinDCX Scanner", "⚡ 1-Min Scalper", "🚀 Breakout Scanner", "🪄 Web3 / DeFi"])
+    with sub_crypto[0]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            st.subheader("🕉️ CoinDCX Momentum")
+            @st.cache_data(ttl=30)
+            def scan_coindcx():
+                try:
+                    resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=10)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        coins = []
+                        for coin in data:
+                            mkt = coin.get('market','')
+                            if mkt.endswith('USDT') or mkt.endswith('INR'):
+                                try:
+                                    chg = float(coin.get('change_24_hour',0))
+                                    price = float(coin.get('last_price',0))
+                                    if price>0:
+                                        coins.append({"Pair":mkt, "LTP":price, "24h %":chg})
+                                except: pass
+                        if coins:
+                            df = pd.DataFrame(coins).sort_values("24h %", ascending=False).head(15)
+                            df['24h %'] = df['24h %'].apply(lambda x: f"+{x}%" if x>0 else f"{x}%")
+                            return df
+                except:
+                    pass
+                return None
+            df_c = scan_coindcx()
+            if df_c is not None:
+                st.dataframe(df_c, use_container_width=True, hide_index=True)
+            else:
+                st.info("Unable to fetch CoinDCX data.")
+            st.markdown('</div>', unsafe_allow_html=True)
+    with sub_crypto[1]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            scalper_asset = st.selectbox("Select Asset", ["XAUUSD (Gold)", "BTCUSD", "ETHUSD", "SOLUSD"], index=0)
+            asset_map = {"XAUUSD (Gold)": "XAUUSD", "BTCUSD": "BTCUSD", "ETHUSD": "ETHUSD", "SOLUSD": "SOLUSD"}
+            symbol = asset_map[scalper_asset]
+            gold_crypto_scalper(symbol)
+            st.markdown('</div>', unsafe_allow_html=True)
+    with sub_crypto[2]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            add_breakout_scalper()
+            st.markdown('</div>', unsafe_allow_html=True)
+    with sub_crypto[3]:
+        with st.container():
+            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+            st.subheader("🪄 Web3 / DeFi Top Movers")
+            col1, col2 = st.columns(2)
+            with col1:
+                source2 = st.radio("Source", ["CoinDCX", "CoinGecko"], horizontal=True, key="web3_source")
+            with col2:
+                limit2 = st.number_input("Show Top", 5, 50, 10, key="web3_limit")
+            if st.button("Fetch Web3 Data", on_click=lambda: play_sound_now("click"), key="web3_fetch"):
+                with st.spinner("Fetching..."):
+                    if source2 == "CoinDCX":
+                        try:
+                            resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                pairs = []
+                                for coin in data:
+                                    mkt = coin.get('market', '')
+                                    if mkt.endswith('USDT'):
+                                        try:
+                                            chg = float(coin.get('change_24_hour', 0))
+                                            price = float(coin.get('last_price', 0))
+                                            vol = float(coin.get('volume', 0))
+                                            pairs.append({
+                                                "Pair": mkt,
+                                                "Price": price,
+                                                "24h Change %": chg,
+                                                "Volume": vol
+                                            })
+                                        except: pass
+                                df = pd.DataFrame(pairs).sort_values("24h Change %", ascending=False)
+                                st.markdown("#### 🟢 Top Gainers")
+                                st.dataframe(df.head(limit2)[["Pair", "Price", "24h Change %", "Volume"]], use_container_width=True, hide_index=True)
+                                st.markdown("#### 🔴 Top Losers")
+                                st.dataframe(df.tail(limit2).sort_values("24h Change %")[["Pair", "Price", "24h Change %", "Volume"]], use_container_width=True, hide_index=True)
+                            else:
+                                st.error("Failed")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                    else:
+                        try:
+                            resp = requests.get("https://api.coingecko.com/api/v3/coins/markets", params={
+                                "vs_currency": "usd",
+                                "order": "market_cap_desc",
+                                "per_page": 100,
+                                "page": 1,
+                                "sparkline": "false"
+                            }, timeout=10)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                df = pd.DataFrame(data)
+                                df = df[["symbol", "current_price", "price_change_percentage_24h", "total_volume"]].rename(columns={
+                                    "symbol": "Coin",
+                                    "current_price": "Price (USD)",
+                                    "price_change_percentage_24h": "24h Change %",
+                                    "total_volume": "Volume"
+                                })
+                                df = df.sort_values("24h Change %", ascending=False)
+                                st.markdown("#### 🟢 Top Gainers")
+                                st.dataframe(df.head(limit2), use_container_width=True, hide_index=True)
+                                st.markdown("#### 🔴 Top Losers")
+                                st.dataframe(df.tail(limit2).sort_values("24h Change %"), use_container_width=True, hide_index=True)
+                            else:
+                                st.error("Failed")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------- TAB 5: SAFE INVESTMENTS (unchanged) ----------
+with tab5:
+    def safe_investment_suggestions():
+        st.markdown("### 💰 Safe Investment Suggestions")
+        st.markdown("These are conservative, low-risk ideas suitable for long-term wealth building.")
+        with st.expander("📈 **Index ETFs**"):
+            st.markdown("""
+            - **Nippon India ETF Nifty50** (JUNIORBEES): Low expense ratio, tracks Nifty50.
+            - **HDFC Sensex ETF**: Tracks BSE Sensex, good for long-term.
+            - **ICICI Prudential Nifty Next 50**: Captures emerging bluechips.
+            """)
+        with st.expander("🏦 **Fixed Income**"):
+            st.markdown("""
+            - **RBI Floating Rate Savings Bonds** – Interest rate reset every 6 months.
+            - **Corporate Bonds** (AAA rated) – e.g., NTPC, Power Finance Corp.
+            - **SGB (Sovereign Gold Bonds)** – Govt gold bonds with 2.5% interest.
+            """)
+        with st.expander("🌍 **International ETFs**"):
+            st.markdown("""
+            - **MOTILAL OSWAL S&P500 Index Fund** – US exposure.
+            - **Hang Seng Index ETF** – Hong Kong market.
+            - **iShares MSCI World ETF** (via international brokerage).
+            """)
+        with st.expander("💎 **Commodity ETFs**"):
+            st.markdown("""
+            - **Gold ETFs** – HDFC Gold, SBI Gold.
+            - **Silver ETFs** – ICICI Prudential Silver ETF.
+            """)
+        st.markdown("---")
+        st.subheader("📊 Compounding Calculator")
+        compounding_calculator()
+        st.info("💡 *Past performance does not guarantee future results. Always consult a financial advisor.*")
+    safe_investment_suggestions()
+
+# ---------- TAB 6: FIA ASSISTANT (unchanged) ----------
+with tab6:
+    st.subheader("🤖 FIA Assistant – Market Analysis")
+    def fia_assistant(df, index):
+        if df is None:
+            st.info("No data available.")
+            return
+        st.markdown(f"### 📊 Analysis for {index}")
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        change = (last['close'] - prev['close']) / prev['close'] * 100
+        st.metric("Last Close", f"{last['close']:.2f}", f"{change:.2f}%")
+        rsi = last.get('rsi', 50)
+        st.metric("RSI (14)", f"{rsi:.1f}", "Overbought" if rsi > 70 else ("Oversold" if rsi < 30 else "Neutral"))
+        st.markdown("**Key Levels:**")
+        sup, res = bot.analyzer.get_support_resistance(df)
+        if sup:
+            st.markdown(f"- Support: {sup:.2f}")
+        if res:
+            st.markdown(f"- Resistance: {res:.2f}")
+        trend = "🟢 Bullish" if last['close'] > last.get('ema9', last['close']) else "🔴 Bearish"
+        st.markdown(f"**Short-term trend:** {trend}")
+        if st.button("Refresh Analysis", on_click=lambda: play_sound_now("click")):
+            st.rerun()
+    if bot.state.get("latest_data") is not None:
+        fia_assistant(bot.state["latest_data"], INDEX)
+    else:
+        st.info("No chart data available yet. Start the engine or refresh.")
+
+# ---------- TAB 7: BACKTEST (IMPROVED) ----------
+with tab7:
+    st.subheader("📊 Backtesting Engine")
+    st.markdown("Test your strategy on historical data (runs in background).")
+
+    # Strategy selection (same as live)
+    bt_strategy = st.selectbox("Select Strategy", STRAT_LIST, index=0)
+    bt_symbol = st.selectbox("Symbol", ["NIFTY", "BANKNIFTY", "BTCUSD", "ETHUSD", "XAUUSD"])
+    bt_start = st.date_input("Start Date", get_ist().date() - dt.timedelta(days=180))
+    bt_end = st.date_input("End Date", get_ist().date())
+    bt_initial_cap = st.number_input("Initial Capital (₹)", 10000, 1000000, 100000)
+    bt_lot_size = st.number_input("Lot Size", 1, 100, 1)
+
+    # Store results in session state to persist across reruns
+    if 'backtest_result' not in st.session_state:
+        st.session_state.backtest_result = None
+    if 'backtest_running' not in st.session_state:
+        st.session_state.backtest_running = False
+
+    # Button to run backtest
+    col_bt1, col_bt2 = st.columns(2)
+    with col_bt1:
+        run_bt = st.button("🚀 Run Backtest", use_container_width=True, on_click=lambda: play_sound_now("click"))
+    with col_bt2:
+        if st.button("🔄 Clear Results", use_container_width=True, on_click=lambda: play_sound_now("click")):
+            st.session_state.backtest_result = None
+            st.rerun()
+
+    if run_bt:
+        st.session_state.backtest_running = True
+        # Define a function to run backtest in a separate thread
+        def run_backtest_thread():
+            try:
+                # Fetch data
+                ticker = YF_TICKERS.get(bt_symbol, bt_symbol)
+                if bt_symbol == "XAUUSD":
+                    ticker = "GC=F"
+                df = yf.download(ticker, start=bt_start, end=bt_end, interval="1d")
+                if df.empty:
+                    st.session_state.backtest_result = {"error": "No data fetched"}
+                    st.session_state.backtest_running = False
+                    return
+                df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
+
+                # Select strategy function
+                if bt_strategy == "Momentum Breakout + S&R":
+                    strategy_func = TechnicalAnalyzer.apply_primary_strategy
+                elif bt_strategy == "Machine Learning":
+                    # For ML, we need a placeholder; use primary for now
+                    strategy_func = TechnicalAnalyzer.apply_primary_strategy
+                elif bt_strategy == "VIJAY & RFF All-In-One":
+                    strategy_func = TechnicalAnalyzer.apply_vijay_rff_strategy
+                elif bt_strategy == "Institutional FVG + SMC":
+                    strategy_func = TechnicalAnalyzer.apply_institutional_fvg_strategy
+                elif bt_strategy == "Lux Algo Institutional ICT":
+                    strategy_func = TechnicalAnalyzer.apply_lux_algo_ict_strategy
+                elif bt_strategy == "Mean Reversion (BB/RSI)":
+                    strategy_func = TechnicalAnalyzer.apply_mean_reversion_strategy
+                else:
+                    # Default to primary
+                    strategy_func = TechnicalAnalyzer.apply_primary_strategy
+
+                # Run backtest
+                bt = Backtester(strategy_func, df, bt_initial_cap, bt_lot_size)
+                equity, trades = bt.run()
+
+                result = {
+                    "equity": equity,
+                    "trades": trades,
+                    "total_return": bt.total_return,
+                    "sharpe": bt.sharpe,
+                    "max_dd": bt.max_dd,
+                    "win_rate": bt.win_rate,
+                    "avg_win": bt.avg_win,
+                    "avg_loss": bt.avg_loss,
+                }
+                st.session_state.backtest_result = result
+            except Exception as e:
+                st.session_state.backtest_result = {"error": str(e)}
+            finally:
+                st.session_state.backtest_running = False
+
+        # Start thread
+        thread = threading.Thread(target=run_backtest_thread, daemon=True)
+        add_script_run_ctx(thread)
+        thread.start()
+        st.rerun()
+
+    # Display results if available
+    if st.session_state.backtest_running:
+        st.info("⏳ Backtest running in background...")
+        st.spinner("Please wait")
+    elif st.session_state.backtest_result:
+        res = st.session_state.backtest_result
+        if "error" in res:
+            st.error(f"Backtest failed: {res['error']}")
+        else:
+            st.success(f"Backtest complete! Total Return: {res['total_return']:.2f}%")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Sharpe Ratio", f"{res['sharpe']:.2f}")
+            col2.metric("Max Drawdown", f"{res['max_dd']:.2f}%")
+            col3.metric("Win Rate", f"{res['win_rate']:.1f}%")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Avg Win", f"₹{res['avg_win']:.2f}")
+            col2.metric("Avg Loss", f"₹{res['avg_loss']:.2f}")
+            col3.metric("Total Trades", len(res['trades']))
+
+            if res['trades']:
+                st.markdown("### Trade Log")
+                trades_df = pd.DataFrame(res['trades'])
+                trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time']).dt.strftime('%Y-%m-%d')
+                trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time']).dt.strftime('%Y-%m-%d')
+                st.dataframe(trades_df, use_container_width=True, hide_index=True)
+
+            st.markdown("### Equity Curve")
+            st.line_chart(res['equity'])
+    else:
+        st.info("Click 'Run Backtest' to start.")
 
 
     # ---------- BOTTOM DOCK ----------
