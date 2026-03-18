@@ -6121,9 +6121,9 @@ elif st.session_state.page == "dashboard":
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 col_clr, _ = st.columns([1,5])
                 with col_clr:
-                    if st.button("🗑️ Clear", use_container_width=True, on_click=lambda: play_sound_now("click")):
+                    if st.button("🗑️ Clear", key="clear_logs_btn", use_container_width=True, on_click=lambda: play_sound_now("click")):
                         bot.state["logs"].clear()
-                        if "paper_history" in bot.state:
+                        if bot.is_mock and "paper_history" in bot.state:
                             bot.state["paper_history"] = []
                         bot.state["daily_pnl"] = 0.0
                         bot.state["trades_today"] = 0
@@ -6131,8 +6131,11 @@ elif st.session_state.page == "dashboard":
                             try:
                                 uid = getattr(bot,"system_user_id",bot.api_key)
                                 supabase.table("trade_logs").delete().eq("user_id", uid).execute()
-                            except: pass
+                             except Exception as e:
+                                st.error(f"DB clear error: {e}")
                         st.rerun()
+                with col_msg:
+                    st.caption("Clears the console, paper history, and resets daily P&L (does not stop the engine).")
                 if len(bot.state["logs"]) == 0:
                     st.info("No logs yet. Start the engine to see activity.")
                 else:
