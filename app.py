@@ -5362,10 +5362,24 @@ elif st.session_state.page == "dashboard":
             st.markdown(f"**This device:** {st.session_state.device_name}")
             st.markdown(f"**IP:** {st.session_state.ip_address}")
             st.markdown("**Active Sessions:**")
-            for sess in active_sessions:
+            for sess in active_sessions[:5]:
                 st.markdown(f"- {sess.get('device_name', 'Unknown')} ({sess.get('ip_address', 'Unknown')})")
+           if session_count > 5:
+                st.markdown(f"*(+{session_count - 5} more ghost sessions)*")
+           st.divider()
+          # NEW: Button to wipe all old sessions
+            if st.button("🧹 Clear Ghost Sessions", use_container_width=True):
+                if HAS_DB:
+                    # Delete all sessions for this user
+                    supabase.table("user_sessions").delete().eq("user_id", st.session_state.user_id).execute()
+                    # Re-save only the current active one
+                    save_device_session(st.session_state.user_id, st.session_state.device_name, st.session_state.ip_address, st.session_state.session_id)
+                st.rerun()
+          # UPDATED: Logout button that actually deletes the DB record
             if st.button("🚪 Logout", use_container_width=True, on_click=lambda: play_sound_now("click")):
                 bot.state["is_running"] = False
+                if HAS_DB:
+                    supabase.table("user_sessions").delete().eq("session_id", st.session_state.session_id).execute()
                 st.session_state.clear()
                 st.query_params.clear()
                 st.rerun()
