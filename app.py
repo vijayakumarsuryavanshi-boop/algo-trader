@@ -6113,125 +6113,104 @@ elif st.session_state.page == "dashboard":
                     - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                     """)
 
-             # ---------- TAB 3: LOGS (FIXED CLEAR BUTTON) ----------
+    # ---------- TAB 3: LOGS (unchanged) ----------
     with tab3:
         sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
-    
-    # --- Console Tab ---
         with sub_tabs[0]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            col_clr, col_msg = st.columns([1, 5])
-            with col_clr:
-                # Clear button with sound and guaranteed functionality
-                if st.button("🗑️ Clear", key="clear_logs_btn", use_container_width=True,
-                             on_click=lambda: play_sound_now("click")):
-                    # Clear in-memory logs
-                    bot.state["logs"].clear()
-                    # Clear paper history if in mock mode
-                    if bot.is_mock and "paper_history" in bot.state:
-                        bot.state["paper_history"] = []
-                    # Reset daily counters (optional – remove if you don't want this)
-                    bot.state["daily_pnl"] = 0.0
-                    bot.state["trades_today"] = 0
-                    # If real trading and DB connected, delete today's trades from DB
-                    if not bot.is_mock and HAS_DB:
-                        try:
-                            uid = getattr(bot, "system_user_id", bot.api_key)
-                            supabase.table("trade_logs").delete().eq("user_id", uid).execute()
-                        except Exception as e:
-                            st.error(f"DB clear error: {e}")
-                    # Force a full rerun to refresh the UI
-                    st.rerun()
-            with col_msg:
-                st.caption("Clears the console, paper history, and resets daily P&L (does not stop the engine).")
-            
-            # Display logs
-            if len(bot.state["logs"]) == 0:
-                st.info("No logs yet. Start the engine to see activity.")
-            else:
-                for log in bot.state["logs"]:
-                    st.markdown(f"`{log}`")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- Ledger Tab (unchanged) ---
-    with sub_tabs[1]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
-            if bot.is_mock:
-                if bot.state.get("paper_history"):
-                    df = pd.DataFrame(bot.state["paper_history"])
-                    st.dataframe(df.iloc[::-1], use_container_width=True)
-                    if report_period == "Daily":
-                        today = get_ist().strftime('%Y-%m-%d')
-                        df_report = df[df['Date'] == today]
-                    elif report_period == "Weekly":
-                        week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
-                        df_report = df[df['Date'] >= week_ago]
-                    else:
-                        df_report = df
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                        df_report.to_excel(w, index=False)
-                    st.download_button("📥 Export", data=output.getvalue(), file_name="mock_ledger.xlsx",
-                                       on_click=lambda: play_sound_now("click"))
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                col_clr, _ = st.columns([1,5])
+                with col_clr:
+                    if st.button("🗑️ Clear", use_container_width=True, on_click=lambda: play_sound_now("click")):
+                        bot.state["logs"].clear()
+                        if "paper_history" in bot.state:
+                            bot.state["paper_history"] = []
+                        bot.state["daily_pnl"] = 0.0
+                        bot.state["trades_today"] = 0
+                        if not bot.is_mock and HAS_DB:
+                            try:
+                                uid = getattr(bot,"system_user_id",bot.api_key)
+                                supabase.table("trade_logs").delete().eq("user_id", uid).execute()
+                            except: pass
+                        st.rerun()
+                if len(bot.state["logs"]) == 0:
+                    st.info("No logs yet. Start the engine to see activity.")
                 else:
-                    st.info("No paper trades yet.")
-            else:
-                uid = getattr(bot, "system_user_id", bot.api_key)
-                if HAS_DB:
-                    try:
-                        res = supabase.table("trade_logs").select("*").eq("user_id", uid).execute()
-                        if res.data:
-                            df = pd.DataFrame(res.data).drop(columns=["id", "user_id"], errors="ignore")
-                            st.dataframe(df.iloc[::-1], use_container_width=True)
-                            if report_period == "Daily":
-                                today = get_ist().strftime('%Y-%m-%d')
-                                df_report = df[df['trade_date'] == today]
-                            elif report_period == "Weekly":
-                                week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
-                                df_report = df[df['trade_date'] >= week_ago]
-                            else:
-                                df_report = df
-                            output = io.BytesIO()
-                            with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                                df_report.to_excel(w, index=False)
-                            st.download_button("📥 Export", data=output.getvalue(), file_name="live_ledger.xlsx",
-                                               on_click=lambda: play_sound_now("click"))
+                    for l in bot.state["logs"]:
+                        st.markdown(f"`{l}`")
+                st.markdown('</div>', unsafe_allow_html=True)
+        with sub_tabs[1]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
+                if bot.is_mock:
+                    if bot.state.get("paper_history"):
+                        df = pd.DataFrame(bot.state["paper_history"])
+                        st.dataframe(df.iloc[::-1], use_container_width=True)
+                        if report_period == "Daily":
+                            today = get_ist().strftime('%Y-%m-%d')
+                            df_report = df[df['Date'] == today]
+                        elif report_period == "Weekly":
+                            week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
+                            df_report = df[df['Date'] >= week_ago]
                         else:
-                            st.info("No live trades.")
-                    except Exception as e:
-                        st.error(f"DB error: {e}")
-                else:
-                    st.error("DB disconnected.")
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- Tax Report Tab (unchanged) ---
-    with sub_tabs[2]:
-        with st.container():
-            st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-            st.subheader("📄 Tax Report")
-            if st.session_state.user_id and HAS_DB:
-                tax_year = st.selectbox("Financial Year", [2023, 2024, 2025])
-                if st.button("Generate Report", on_click=lambda: play_sound_now("click")):
-                    summary, df_tax = generate_tax_report(st.session_state.user_id, tax_year)
-                    if summary:
-                        st.markdown(f"### Summary for FY {tax_year}-{tax_year+1}")
-                        for cat, amt in summary.items():
-                            st.metric(cat, f"₹{amt:.2f}")
-                        st.dataframe(df_tax)
+                            df_report = df
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='xlsxwriter') as w:
-                            df_tax.to_excel(w, index=False)
-                        st.download_button("📥 Download Tax Report", data=output.getvalue(),
-                                           file_name=f"tax_report_{tax_year}.xlsx",
-                                           on_click=lambda: play_sound_now("click"))
+                            df_report.to_excel(w, index=False)
+                        st.download_button("📥 Export", data=output.getvalue(), file_name="mock_ledger.xlsx", on_click=lambda: play_sound_now("click"))
                     else:
-                        st.info("No trades found for this period.")
-            else:
-                st.warning("Login required or database not connected.")
-            st.markdown('</div>', unsafe_allow_html=True) 
+                        st.info("No paper trades yet.")
+                else:
+                    uid = getattr(bot,"system_user_id",bot.api_key)
+                    if HAS_DB:
+                        try:
+                            res = supabase.table("trade_logs").select("*").eq("user_id", uid).execute()
+                            if res.data:
+                                df = pd.DataFrame(res.data).drop(columns=["id","user_id"], errors="ignore")
+                                st.dataframe(df.iloc[::-1], use_container_width=True)
+                                if report_period == "Daily":
+                                    today = get_ist().strftime('%Y-%m-%d')
+                                    df_report = df[df['trade_date'] == today]
+                                elif report_period == "Weekly":
+                                    week_ago = (get_ist() - dt.timedelta(days=7)).strftime('%Y-%m-%d')
+                                    df_report = df[df['trade_date'] >= week_ago]
+                                else:
+                                    df_report = df
+                                output = io.BytesIO()
+                                with pd.ExcelWriter(output, engine='xlsxwriter') as w:
+                                    df_report.to_excel(w, index=False)
+                                st.download_button("📥 Export", data=output.getvalue(), file_name="live_ledger.xlsx", on_click=lambda: play_sound_now("click"))
+                            else:
+                                st.info("No live trades.")
+                        except Exception as e:
+                            st.error(f"DB error: {e}")
+                    else:
+                        st.error("DB disconnected.")
+                st.markdown('</div>', unsafe_allow_html=True)
+        with sub_tabs[2]:
+            with st.container():
+                st.markdown('<div class="modern-card">', unsafe_allow_html=True)
+                st.subheader("📄 Tax Report")
+                if st.session_state.user_id and HAS_DB:
+                    tax_year = st.selectbox("Financial Year", [2023, 2024, 2025])
+                    if st.button("Generate Report", on_click=lambda: play_sound_now("click")):
+                        summary, df_tax = generate_tax_report(st.session_state.user_id, tax_year)
+                        if summary:
+                            st.markdown(f"### Summary for FY {tax_year}-{tax_year+1}")
+                            for cat, amt in summary.items():
+                                st.metric(cat, f"₹{amt:.2f}")
+                            st.dataframe(df_tax)
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine='xlsxwriter') as w:
+                                df_tax.to_excel(w, index=False)
+                            st.download_button("📥 Download Tax Report", data=output.getvalue(), file_name=f"tax_report_{tax_year}.xlsx", on_click=lambda: play_sound_now("click"))
+                        else:
+                            st.info("No trades found for this period.")
+                else:
+                    st.warning("Login required or database not connected.")
+                st.markdown('</div>', unsafe_allow_html=True)
+
     # ---------- TAB 4: CRYPTO/FX (unchanged) ----------
     with tab4:
         sub_crypto = st.tabs(["🪙 CoinDCX Scanner", "⚡ 1-Min Scalper", "🚀 Breakout Scanner", "🪄 Web3 / DeFi"])
@@ -6507,6 +6486,7 @@ elif st.session_state.page == "dashboard":
                         st.image(buf, caption="Scan to login")
             else:
                 st.warning("Database not connected.")
+
 
     # ---------- BOTTOM DOCK ----------
     st.markdown('<div class="bottom-dock">', unsafe_allow_html=True)
