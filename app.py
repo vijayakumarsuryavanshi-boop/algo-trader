@@ -5354,7 +5354,7 @@ elif st.session_state.page == "dashboard":
             f"<span class='broker-badge'>{broker_name}</span> | **IP:** `{bot.client_ip}` | **Device:** {st.session_state.device_name}",
             unsafe_allow_html=True
         )
-   with col2:
+    with col2:
         active_sessions = get_active_sessions(st.session_state.user_id) if st.session_state.user_id else []
         session_count = len(active_sessions)
         with st.popover(f"👤 {session_count}"):
