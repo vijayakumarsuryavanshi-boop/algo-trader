@@ -5552,49 +5552,40 @@ elif st.session_state.page == "dashboard":
             simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
             rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
 
-            html_block = f'''
-            <div class="live-tracker">
-                <div class="header">
-                    <div>
-                        <span class="symbol-badge">{t["type"]}</span>
-                        {simulated_badge}
-                        <strong style="margin-left: 15px; font-size: 1.3rem; color: white;">{t["symbol"]}</strong>
-                        {rejection_info}
-                    </div>
-                    <div class="pnl-badge" style="color: {pnl_color}; border-color: {pnl_color};">{pnl_display}</div>
-                </div>
-                <div class="grid">
-                    <div class="info-box">
-                        <div class="label">Avg Entry</div>
-                        <div class="value">{t["entry"]:.4f}</div>
-                    </div>
-                    <div class="info-box">
-                        <div class="label">Live Mark</div>
-                        <div class="value {'green' if pnl >= 0 else 'red'}">{ltp:.4f}</div>
-                    </div>
-                    <div class="info-box">
-                        <div class="label">Qty</div>
-                        <div class="value">{t["qty"]}</div>
-                        <div style="color: #94a3b8; font-size:0.8rem;">({exec_type})</div>
-                    </div>
-                    <div class="info-box">
-                        <div class="label">Risk Stop</div>
-                        <div class="value red">{t["sl"]:.4f}</div>
-                    </div>
-                </div>
-                <div class="targets">
-                    🎯 TP1: <span>{t.get("tp1",0):.2f}</span>  |  TP2: <span>{t.get("tp2",0):.2f}</span>  |  TP3: <span>{t.get("tp3",0):.2f}</span>
-                </div>
-            </div>
-            '''
+            html_block = f'''<div class="live-tracker">
+<div class="header">
+    <div>
+        <span class="symbol-badge">{t["type"]}</span>
+        {simulated_badge}
+        <strong style="margin-left: 15px; font-size: 1.3rem; color: white;">{t["symbol"]}</strong>
+        {rejection_info}
+    </div>
+    <div class="pnl-badge" style="color: {pnl_color}; border-color: {pnl_color};">{pnl_display}</div>
+</div>
+<div class="grid">
+    <div class="info-box">
+        <div class="label">Avg Entry</div>
+        <div class="value">{t["entry"]:.4f}</div>
+    </div>
+    <div class="info-box">
+        <div class="label">Live Mark</div>
+        <div class="value {'green' if pnl >= 0 else 'red'}">{ltp:.4f}</div>
+    </div>
+    <div class="info-box">
+        <div class="label">Qty</div>
+        <div class="value">{t["qty"]}</div>
+        <div style="color: #94a3b8; font-size:0.8rem;">({exec_type})</div>
+    </div>
+    <div class="info-box">
+        <div class="label">Risk Stop</div>
+        <div class="value red">{t["sl"]:.4f}</div>
+    </div>
+</div>
+<div class="targets">
+    🎯 TP1: <span>{t.get("tp1",0):.2f}</span>  |  TP2: <span>{t.get("tp2",0):.2f}</span>  |  TP3: <span>{t.get("tp3",0):.2f}</span>
+</div>
+</div>'''
             tracker_placeholder.markdown(html_block, unsafe_allow_html=True)
-
-            if st.button("🛑 EXIT TRADE", type="primary", use_container_width=True, on_click=lambda: play_sound_now("exit")):
-                bot.force_exit()
-                st.rerun()
-        else:
-            tracker_placeholder.info("⏳ Radar Active: Waiting for High-Probability Setup...")
-
         if st.session_state.get("tracker_updated"):
             st.session_state.tracker_updated = False
             st.rerun()
