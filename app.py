@@ -5464,325 +5464,325 @@ elif st.session_state.page == "dashboard":
 # TAB DEFINITIONS (DO NOT CHANGE)
 # ==========================================
 tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
-if st.session_state.is_developer:
-    tab_names.append("🛡️ ADMIN")
-tabs = st.tabs(tab_names)
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = tabs[:7]
-if st.session_state.is_developer:
-    tab8 = tabs[7]
+    if st.session_state.is_developer:
+        tab_names.append("🛡️ ADMIN")
+    tabs = st.tabs(tab_names)
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = tabs[:7]
+    if st.session_state.is_developer:
+        tab8 = tabs[7]
 
-# ---------- TAB 1: DASHBOARD (unchanged from original) ----------
-with tab1:
-    kannada_news = st.session_state.kannada_news
-    english_news = st.session_state.english_news
-    if not kannada_news:
-        kannada_news = [generate_market_prediction(INDEX)]
-    ticker_text = " 🔹 ".join(kannada_news)
-    st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-    if not english_news:
-        english_news = [generate_market_prediction(INDEX)]
-    ticker_text = " 🔹 ".join(english_news)
-    st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-    exch, token = bot.get_token_info(INDEX)
+    # ---------- TAB 1: DASHBOARD ----------
+    with tab1:
+        kannada_news = st.session_state.kannada_news
+        english_news = st.session_state.english_news
+        if not kannada_news:
+            kannada_news = [generate_market_prediction(INDEX)]
+        ticker_text = " 🔹 ".join(kannada_news)
+        st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+        if not english_news:
+            english_news = [generate_market_prediction(INDEX)]
+        ticker_text = " 🔹 ".join(english_news)
+        st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+        exch, token = bot.get_token_info(INDEX)
 
-    daily_pnl = bot.state.get("daily_pnl", 0.0)
-    pnl_color = "#22c55e" if daily_pnl >= 0 else "#ef4444"
-    pnl_sign = "+" if daily_pnl > 0 else ""
+        daily_pnl = bot.state.get("daily_pnl", 0.0)
+        pnl_color = "#22c55e" if daily_pnl >= 0 else "#ef4444"
+        pnl_sign = "+" if daily_pnl > 0 else ""
 
-    if exch == "MT5": term_type = "🌍 MT5 Forex Terminal (Web Bridge)"
-    elif exch == "COINDCX": term_type = f"🕉️ CoinDCX {bot.settings.get('crypto_mode', 'Spot')}"
-    elif exch == "DELTA": term_type = f"🔺 Delta Exchange {bot.settings.get('crypto_mode', 'Spot')}"
-    elif exch == "FYERS": term_type = f"📈 Fyers"
-    elif exch == "UPSTOX": term_type = f"📊 Upstox"
-    elif exch == "5PAISA": term_type = f"💰 5paisa"
-    elif exch == "BINANCE": term_type = f"🪙 Binance"
-    else: term_type = f"🇮🇳 {bot.settings.get('primary_broker', 'Angel One')} NSE/NFO"
+        if exch == "MT5": term_type = "🌍 MT5 Forex Terminal (Web Bridge)"
+        elif exch == "COINDCX": term_type = f"🕉️ CoinDCX {bot.settings.get('crypto_mode', 'Spot')}"
+        elif exch == "DELTA": term_type = f"🔺 Delta Exchange {bot.settings.get('crypto_mode', 'Spot')}"
+        elif exch == "FYERS": term_type = f"📈 Fyers"
+        elif exch == "UPSTOX": term_type = f"📊 Upstox"
+        elif exch == "5PAISA": term_type = f"💰 5paisa"
+        elif exch == "BINANCE": term_type = f"🪙 Binance"
+        else: term_type = f"🇮🇳 {bot.settings.get('primary_broker', 'Angel One')} NSE/NFO"
 
-    st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
-            <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
-                <div style="display: flex; justify-content: space-between;">
-                    <div>
-                        <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
-                        <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
-                    </div>
-                    <div style="text-align: right;">
-                        <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
-                        <span style="font-size: 2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-
-    is_running = bot.state["is_running"]
-    status_color = "#22c55e" if is_running else "#ef4444"
-    status_bg = "#f0fdf4" if is_running else "#fef2f2"
-    status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
-    st.markdown(f"""
-        <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px;">
-            {status_text}
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("### 🎯 Live Position Tracker")
-    tracker_placeholder = st.empty()
-
-    if bot.state.get("active_trade"):
-        t = bot.state["active_trade"]
-        ltp = t.get('current_ltp', t['entry'])
-        pnl = t.get('floating_pnl', 0.0)
-
-        pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
-        pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
-        pnl_sign = "+" if pnl >= 0 else ""
-        exec_type = t.get('exch', 'NFO')
-        buy_sell_color = "#22c55e" if t['type'] in ["CE", "BUY"] else "#ef4444"
-
-        pnl_display = round(pnl, 2)
-        if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-            inr_pnl = pnl * get_usdt_inr_rate()
-            pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
-
-        simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
-        rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
-
-        html_block = f'''
-        <div class="live-tracker">
-            <div class="header">
-                <div>
-                    <span class="symbol-badge">{t["type"]}</span>
-                    {simulated_badge}
-                    <strong style="margin-left: 15px; font-size: 1.3rem; color: white;">{t["symbol"]}</strong>
-                    {rejection_info}
-                </div>
-                <div class="pnl-badge" style="color: {pnl_color}; border-color: {pnl_color};">{pnl_display}</div>
-            </div>
-            <div class="grid">
-                <div class="info-box">
-                    <div class="label">Avg Entry</div>
-                    <div class="value">{t["entry"]:.4f}</div>
-                </div>
-                <div class="info-box">
-                    <div class="label">Live Mark</div>
-                    <div class="value {'green' if pnl >= 0 else 'red'}">{ltp:.4f}</div>
-                </div>
-                <div class="info-box">
-                    <div class="label">Qty</div>
-                    <div class="value">{t["qty"]}</div>
-                    <div style="color: #94a3b8; font-size:0.8rem;">({exec_type})</div>
-                </div>
-                <div class="info-box">
-                    <div class="label">Risk Stop</div>
-                    <div class="value red">{t["sl"]:.4f}</div>
-                </div>
-            </div>
-            <div class="targets">
-                🎯 TP1: <span>{t.get("tp1",0):.2f}</span>  |  TP2: <span>{t.get("tp2",0):.2f}</span>  |  TP3: <span>{t.get("tp3",0):.2f}</span>
-            </div>
-        </div>
-        '''
-        tracker_placeholder.markdown(html_block, unsafe_allow_html=True)
-
-        if st.button("🛑 EXIT TRADE", type="primary", use_container_width=True, on_click=lambda: play_sound_now("exit")):
-            bot.force_exit()
-            st.rerun()
-    else:
-        tracker_placeholder.info("⏳ Radar Active: Waiting for High-Probability Setup...")
-
-    if st.session_state.get("tracker_updated"):
-        st.session_state.tracker_updated = False
-        st.rerun()
-
-    ltp_val = round(bot.state['spot'], 4)
-    trend_val = bot.state['current_trend']
-    signal_strength = bot.state.get('signal_strength', 0)
-
-    if bot.state.get('latest_data') is not None and len(bot.state['latest_data']) >= 10:
-        mh, ml, f_low, f_high = bot.analyzer.calculate_fib_zones(bot.state['latest_data'])
-        gz_display = f"{round(f_low, 2)} - {round(f_high, 2)}" if f_low > 0 else "Calculating..."
-    else:
-        gz_display = "Calculating..."
-
-    currency_sym = "$" if exch in ["MT5", "DELTA", "COINDCX", "BINANCE"] else "₹"
-    if exch in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-        inr_val = ltp_val * get_usdt_inr_rate()
-        ltp_display = f"{currency_sym}{ltp_val} (₹ {round(inr_val, 2)})"
-    else:
-        ltp_display = f"{currency_sym}{ltp_val}"
-
-    last_candle = bot.state.get("latest_candle")
-    if last_candle is not None:
-        o_val = last_candle.get('open', 0.0)
-        h_val = last_candle.get('high', 0.0)
-        l_val = last_candle.get('low', 0.0)
-        c_val = last_candle.get('close', 0.0)
-        v_val = last_candle.get('volume', 0.0)
-        if c_val > o_val:
-            vol_dom = "Buy Volume Dominant 🟢"
-        elif c_val < o_val:
-            vol_dom = "Sell Volume Dominant 🔴"
-        else:
-            vol_dom = "Neutral Volume ⚪"
-        v_display = f"{round(v_val, 2)} ({vol_dom})"
-    else:
-        o_val, h_val, l_val, c_val, v_display = 0.0, 0.0, 0.0, 0.0, "N/A"
-
-    day_high = "N/A"
-    day_low = "N/A"
-    try:
-        yf_ticker = YF_TICKERS.get(INDEX, INDEX)
-        df_day = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-        if not df_day.empty:
-            day_high = df_day['High'].max()
-            day_low = df_day['Low'].min()
-    except:
-        pass
-
-    st.markdown(f"""
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
-            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
-                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live Spot</div>
-                <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
-            </div>
-            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
-                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Fib Golden Zone</div>
-                <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{gz_display}</div>
-            </div>
-            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Algorithm Sentiment</div>
-                <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
-            </div>
-            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Signal Strength</div>
-                <div style="width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 5px;">
-                    <div style="width: {signal_strength}%; height: 10px; background: #0284c7; border-radius: 5px;"></div>
-                </div>
-                <div style="text-align: right; font-size: 0.8rem; color: #64748b; margin-top: 2px;">{signal_strength}%</div>
-            </div>
-            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live OHLCV</div>
-                <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
-                    O: {round(o_val, 4)} &nbsp;|&nbsp; H: {round(h_val, 4)} &nbsp;|&nbsp; L: {round(l_val, 4)} &nbsp;|&nbsp; C: {round(c_val, 4)}<br>
-                    <span style="font-size: 0.95rem; color: #0284c7;">V: {v_display}</span>
-                </div>
-            </div>
-            <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Day's Range</div>
-                <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
-                    H: {round(day_high, 4) if day_high != "N/A" else "N/A"} &nbsp;|&nbsp; L: {round(day_low, 4) if day_low != "N/A" else "N/A"}
-                </div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("### 📅 Upcoming Major Events (2026)")
-    events = get_major_events_2026()
-    if events:
-        df_events = pd.DataFrame(events)
-        st.dataframe(df_events, use_container_width=True, hide_index=True)
-    else:
-        st.info("No major events in the near future.")
-
-    st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
-    c_h1, c_h2 = st.columns(2)
-    with c_h1:
-        SHOW_CHART = st.toggle("📊 Render Chart", True, on_change=lambda: play_sound_now("click"))
-    with c_h2:
-        FULL_CHART = st.toggle("⛶ Full Screen", False, on_change=lambda: play_sound_now("click"))
-
-    if SHOW_CHART and bot.state["latest_data"] is not None:
-        chart_df = bot.state["latest_data"].copy()
-        if not isinstance(chart_df.index, pd.DatetimeIndex):
-            if 'timestamp' in chart_df.columns:
-                chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
-                chart_df.set_index('timestamp', inplace=True)
-            else:
-                chart_df.index = pd.date_range(end=get_ist(), periods=len(chart_df), freq='T')
-        try:
-            if chart_df.index.tz is not None:
-                chart_df.index = chart_df.index.tz_localize(None)
-        except AttributeError:
-            pass
-        chart_df['time'] = chart_df.index.astype('int64') // 10**9
-        candles = chart_df[['time', 'open', 'high', 'low', 'close']].dropna().to_dict('records')
-        if len(candles) == 0:
-            st.warning("No candle data available for chart.")
-        else:
-            fib_lines = []
-            if not bot.state["active_trade"] and bot.state.get('fib_data'):
-                fib = bot.state['fib_data']
-                fib_lines = [
-                    {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
-                    {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
-                    {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
-                    {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
-                ]
-            chartOptions = {
-                "height": 700 if FULL_CHART else 400,
-                "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
-                "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
-                "crosshair": {"mode": 0},
-                "timeScale": {"timeVisible": True, "secondsVisible": False}
-            }
-            chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
-
-            if 'anchored_vwap' in chart_df.columns:
-                avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
-                if avwap_data:
-                    chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
-            if 'vwap' in chart_df.columns:
-                vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
-                if vwap_data:
-                    chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
-            ema_col = None
-            if 'ema_fast' in chart_df.columns:
-                ema_col = 'ema_fast'
-            elif 'ema_short' in chart_df.columns:
-                ema_col = 'ema_short'
-            elif 'ema9' in chart_df.columns:
-                ema_col = 'ema9'
-            if ema_col:
-                ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
-                if ema_data:
-                    chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
-            if 'supertrend' in chart_df.columns:
-                st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
-                if st_data:
-                    chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
-
-            renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
-    elif not SHOW_CHART:
-        st.info("Chart is hidden. Enable 'Render Chart' to view.")
-
-    st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
-    fomo_signals = fomo_scanner.scan()
-    if fomo_signals:
-        df_fomo = pd.DataFrame(fomo_signals)
-        st.dataframe(df_fomo, use_container_width=True, hide_index=True)
-    else:
-        st.info("No volume spike alerts at the moment.")
-
-    total_trades = len(bot.state.get("paper_history", [])) if bot.is_mock else bot.state.get("trades_today", 0)
-    wins = bot.state.get("hz_wins", 0) + (st.session_state.win_streak if st.session_state.win_streak > 0 else 0)
-    win_pct = (wins / total_trades * 100) if total_trades > 0 else 0
-    st.metric("Win Percentage", f"{win_pct:.1f}%")
-
-    if bot.settings.get('hero_zero', False) and bot.state.get("hz_trades"):
-        hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
         st.markdown(f"""
-        <div class="hz-stats">
-            <h4 style="color: white; margin:0 0 10px 0;">🎯 Hero/Zero Performance</h4>
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-                <div>Total Trades: {len(bot.state['hz_trades'])}</div>
-                <div>Win Rate: {hz_win_rate:.1f}%</div>
-                <div>Total P&L: {'🟢' if bot.state['hz_pnl'] > 0 else '🔴'} ₹{bot.state['hz_pnl']:.2f}</div>
-                <div>Wins: {bot.state['hz_wins']} | Losses: {bot.state['hz_losses']}</div>
+            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
+                <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
+                    <div style="display: flex; justify-content: space-between;">
+                        <div>
+                            <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
+                            <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
+                            <span style="font-size: 2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
         """, unsafe_allow_html=True)
+
+        is_running = bot.state["is_running"]
+        status_color = "#22c55e" if is_running else "#ef4444"
+        status_bg = "#f0fdf4" if is_running else "#fef2f2"
+        status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
+        st.markdown(f"""
+            <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px;">
+                {status_text}
+            </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 🎯 Live Position Tracker")
+        tracker_placeholder = st.empty()
+
+        if bot.state.get("active_trade"):
+            t = bot.state["active_trade"]
+            ltp = t.get('current_ltp', t['entry'])
+            pnl = t.get('floating_pnl', 0.0)
+
+            pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+            pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
+            pnl_sign = "+" if pnl >= 0 else ""
+            exec_type = t.get('exch', 'NFO')
+            buy_sell_color = "#22c55e" if t['type'] in ["CE", "BUY"] else "#ef4444"
+
+            pnl_display = round(pnl, 2)
+            if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+                inr_pnl = pnl * get_usdt_inr_rate()
+                pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+
+            simulated_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
+            rejection_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
+
+            html_block = f'''
+            <div class="live-tracker">
+                <div class="header">
+                    <div>
+                        <span class="symbol-badge">{t["type"]}</span>
+                        {simulated_badge}
+                        <strong style="margin-left: 15px; font-size: 1.3rem; color: white;">{t["symbol"]}</strong>
+                        {rejection_info}
+                    </div>
+                    <div class="pnl-badge" style="color: {pnl_color}; border-color: {pnl_color};">{pnl_display}</div>
+                </div>
+                <div class="grid">
+                    <div class="info-box">
+                        <div class="label">Avg Entry</div>
+                        <div class="value">{t["entry"]:.4f}</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">Live Mark</div>
+                        <div class="value {'green' if pnl >= 0 else 'red'}">{ltp:.4f}</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">Qty</div>
+                        <div class="value">{t["qty"]}</div>
+                        <div style="color: #94a3b8; font-size:0.8rem;">({exec_type})</div>
+                    </div>
+                    <div class="info-box">
+                        <div class="label">Risk Stop</div>
+                        <div class="value red">{t["sl"]:.4f}</div>
+                    </div>
+                </div>
+                <div class="targets">
+                    🎯 TP1: <span>{t.get("tp1",0):.2f}</span>  |  TP2: <span>{t.get("tp2",0):.2f}</span>  |  TP3: <span>{t.get("tp3",0):.2f}</span>
+                </div>
+            </div>
+            '''
+            tracker_placeholder.markdown(html_block, unsafe_allow_html=True)
+
+            if st.button("🛑 EXIT TRADE", type="primary", use_container_width=True, on_click=lambda: play_sound_now("exit")):
+                bot.force_exit()
+                st.rerun()
+        else:
+            tracker_placeholder.info("⏳ Radar Active: Waiting for High-Probability Setup...")
+
+        if st.session_state.get("tracker_updated"):
+            st.session_state.tracker_updated = False
+            st.rerun()
+
+        ltp_val = round(bot.state['spot'], 4)
+        trend_val = bot.state['current_trend']
+        signal_strength = bot.state.get('signal_strength', 0)
+
+        if bot.state.get('latest_data') is not None and len(bot.state['latest_data']) >= 10:
+            mh, ml, f_low, f_high = bot.analyzer.calculate_fib_zones(bot.state['latest_data'])
+            gz_display = f"{round(f_low, 2)} - {round(f_high, 2)}" if f_low > 0 else "Calculating..."
+        else:
+            gz_display = "Calculating..."
+
+        currency_sym = "$" if exch in ["MT5", "DELTA", "COINDCX", "BINANCE"] else "₹"
+        if exch in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+            inr_val = ltp_val * get_usdt_inr_rate()
+            ltp_display = f"{currency_sym}{ltp_val} (₹ {round(inr_val, 2)})"
+        else:
+            ltp_display = f"{currency_sym}{ltp_val}"
+
+        last_candle = bot.state.get("latest_candle")
+        if last_candle is not None:
+            o_val = last_candle.get('open', 0.0)
+            h_val = last_candle.get('high', 0.0)
+            l_val = last_candle.get('low', 0.0)
+            c_val = last_candle.get('close', 0.0)
+            v_val = last_candle.get('volume', 0.0)
+            if c_val > o_val:
+                vol_dom = "Buy Volume Dominant 🟢"
+            elif c_val < o_val:
+                vol_dom = "Sell Volume Dominant 🔴"
+            else:
+                vol_dom = "Neutral Volume ⚪"
+            v_display = f"{round(v_val, 2)} ({vol_dom})"
+        else:
+            o_val, h_val, l_val, c_val, v_display = 0.0, 0.0, 0.0, 0.0, "N/A"
+
+        day_high = "N/A"
+        day_low = "N/A"
+        try:
+            yf_ticker = YF_TICKERS.get(INDEX, INDEX)
+            df_day = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+            if not df_day.empty:
+                day_high = df_day['High'].max()
+                day_low = df_day['Low'].min()
+        except:
+            pass
+
+        st.markdown(f"""
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live Spot</div>
+                    <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
+                </div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Fib Golden Zone</div>
+                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{gz_display}</div>
+                </div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Algorithm Sentiment</div>
+                    <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
+                </div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Signal Strength</div>
+                    <div style="width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 5px;">
+                        <div style="width: {signal_strength}%; height: 10px; background: #0284c7; border-radius: 5px;"></div>
+                    </div>
+                    <div style="text-align: right; font-size: 0.8rem; color: #64748b; margin-top: 2px;">{signal_strength}%</div>
+                </div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live OHLCV</div>
+                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
+                        O: {round(o_val, 4)} &nbsp;|&nbsp; H: {round(h_val, 4)} &nbsp;|&nbsp; L: {round(l_val, 4)} &nbsp;|&nbsp; C: {round(c_val, 4)}<br>
+                        <span style="font-size: 0.95rem; color: #0284c7;">V: {v_display}</span>
+                    </div>
+                </div>
+                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
+                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Day's Range</div>
+                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
+                        H: {round(day_high, 4) if day_high != "N/A" else "N/A"} &nbsp;|&nbsp; L: {round(day_low, 4) if day_low != "N/A" else "N/A"}
+                    </div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("### 📅 Upcoming Major Events (2026)")
+        events = get_major_events_2026()
+        if events:
+            df_events = pd.DataFrame(events)
+            st.dataframe(df_events, use_container_width=True, hide_index=True)
+        else:
+            st.info("No major events in the near future.")
+
+        st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
+        c_h1, c_h2 = st.columns(2)
+        with c_h1:
+            SHOW_CHART = st.toggle("📊 Render Chart", True, on_change=lambda: play_sound_now("click"))
+        with c_h2:
+            FULL_CHART = st.toggle("⛶ Full Screen", False, on_change=lambda: play_sound_now("click"))
+
+        if SHOW_CHART and bot.state["latest_data"] is not None:
+            chart_df = bot.state["latest_data"].copy()
+            if not isinstance(chart_df.index, pd.DatetimeIndex):
+                if 'timestamp' in chart_df.columns:
+                    chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
+                    chart_df.set_index('timestamp', inplace=True)
+                else:
+                    chart_df.index = pd.date_range(end=get_ist(), periods=len(chart_df), freq='T')
+            try:
+                if chart_df.index.tz is not None:
+                    chart_df.index = chart_df.index.tz_localize(None)
+            except AttributeError:
+                pass
+            chart_df['time'] = chart_df.index.astype('int64') // 10**9
+            candles = chart_df[['time', 'open', 'high', 'low', 'close']].dropna().to_dict('records')
+            if len(candles) == 0:
+                st.warning("No candle data available for chart.")
+            else:
+                fib_lines = []
+                if not bot.state["active_trade"] and bot.state.get('fib_data'):
+                    fib = bot.state['fib_data']
+                    fib_lines = [
+                        {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
+                        {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
+                        {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
+                        {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
+                    ]
+                chartOptions = {
+                    "height": 700 if FULL_CHART else 400,
+                    "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
+                    "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
+                    "crosshair": {"mode": 0},
+                    "timeScale": {"timeVisible": True, "secondsVisible": False}
+                }
+                chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
+
+                if 'anchored_vwap' in chart_df.columns:
+                    avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
+                    if avwap_data:
+                        chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
+                if 'vwap' in chart_df.columns:
+                    vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
+                    if vwap_data:
+                        chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
+                ema_col = None
+                if 'ema_fast' in chart_df.columns:
+                    ema_col = 'ema_fast'
+                elif 'ema_short' in chart_df.columns:
+                    ema_col = 'ema_short'
+                elif 'ema9' in chart_df.columns:
+                    ema_col = 'ema9'
+                if ema_col:
+                    ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
+                    if ema_data:
+                        chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
+                if 'supertrend' in chart_df.columns:
+                    st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
+                    if st_data:
+                        chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
+
+                renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
+        elif not SHOW_CHART:
+            st.info("Chart is hidden. Enable 'Render Chart' to view.")
+
+        st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
+        fomo_signals = fomo_scanner.scan()
+        if fomo_signals:
+            df_fomo = pd.DataFrame(fomo_signals)
+            st.dataframe(df_fomo, use_container_width=True, hide_index=True)
+        else:
+            st.info("No volume spike alerts at the moment.")
+
+        total_trades = len(bot.state.get("paper_history", [])) if bot.is_mock else bot.state.get("trades_today", 0)
+        wins = bot.state.get("hz_wins", 0) + (st.session_state.win_streak if st.session_state.win_streak > 0 else 0)
+        win_pct = (wins / total_trades * 100) if total_trades > 0 else 0
+        st.metric("Win Percentage", f"{win_pct:.1f}%")
+
+        if bot.settings.get('hero_zero', False) and bot.state.get("hz_trades"):
+            hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
+            st.markdown(f"""
+            <div class="hz-stats">
+                <h4 style="color: white; margin:0 0 10px 0;">🎯 Hero/Zero Performance</h4>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+                    <div>Total Trades: {len(bot.state['hz_trades'])}</div>
+                    <div>Win Rate: {hz_win_rate:.1f}%</div>
+                    <div>Total P&L: {'🟢' if bot.state['hz_pnl'] > 0 else '🔴'} ₹{bot.state['hz_pnl']:.2f}</div>
+                    <div>Wins: {bot.state['hz_wins']} | Losses: {bot.state['hz_losses']}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ---------- TAB 2: SCANNERS (unchanged from original) ----------
 with tab2:
