@@ -5354,7 +5354,7 @@ elif st.session_state.page == "dashboard":
             f"<span class='broker-badge'>{broker_name}</span> | **IP:** `{bot.client_ip}` | **Device:** {st.session_state.device_name}",
             unsafe_allow_html=True
         )
-    with col2:
+   with col2:
         active_sessions = get_active_sessions(st.session_state.user_id) if st.session_state.user_id else []
         session_count = len(active_sessions)
         with st.popover(f"👤 {session_count}"):
@@ -5362,12 +5362,16 @@ elif st.session_state.page == "dashboard":
             st.markdown(f"**This device:** {st.session_state.device_name}")
             st.markdown(f"**IP:** {st.session_state.ip_address}")
             st.markdown("**Active Sessions:**")
+            
+            # Show a maximum of 5 to keep the UI clean
             for sess in active_sessions[:5]:
                 st.markdown(f"- {sess.get('device_name', 'Unknown')} ({sess.get('ip_address', 'Unknown')})")
-           if session_count > 5:
+            if session_count > 5:
                 st.markdown(f"*(+{session_count - 5} more ghost sessions)*")
-           st.divider()
-          # NEW: Button to wipe all old sessions
+            
+            st.divider()
+            
+            # NEW: Button to wipe all old sessions
             if st.button("🧹 Clear Ghost Sessions", use_container_width=True):
                 if HAS_DB:
                     # Delete all sessions for this user
@@ -5375,7 +5379,8 @@ elif st.session_state.page == "dashboard":
                     # Re-save only the current active one
                     save_device_session(st.session_state.user_id, st.session_state.device_name, st.session_state.ip_address, st.session_state.session_id)
                 st.rerun()
-          # UPDATED: Logout button that actually deletes the DB record
+
+            # UPDATED: Logout button that actually deletes the DB record
             if st.button("🚪 Logout", use_container_width=True, on_click=lambda: play_sound_now("click")):
                 bot.state["is_running"] = False
                 if HAS_DB:
@@ -5383,7 +5388,6 @@ elif st.session_state.page == "dashboard":
                 st.session_state.clear()
                 st.query_params.clear()
                 st.rerun()
-
     bot.settings = {
         "primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME,
         "lots": LOTS,
