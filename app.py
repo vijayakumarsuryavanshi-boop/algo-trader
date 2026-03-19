@@ -2369,34 +2369,65 @@ class TechnicalAnalyzer:
     @staticmethod
     def apply_ml_strategy(df, index_name, ml_prob_threshold, signal_persistence):
         """
-        Uses the global ml_predictor to get up/down probabilities.
-        Returns signal based on probability threshold and persistence.
+        Uses the global ml_predictor to get up/down probabilities, 
+        blended with fast momentum for early signal generation.
         """
-        # This method is intended to be called with the global ml_predictor instance.
-        # We'll assume ml_predictor is accessible via a module-level variable.
-        # In the bot's trading loop, ml_predictor is imported.
         import __main__ as main
         ml_predictor = getattr(main, 'ml_predictor', None)
         if ml_predictor is None:
             return "ML Predictor not available", "WAIT", 0, 0, df, 0, {}, 0
 
+        # Ensure we have fast indicators calculated for the early trigger
+        df = df.copy()
+        fast_ema = df['close'].ewm(span=5).mean().iloc[-1]
+        slow_ema = df['close'].ewm(span=13).mean().iloc[-1]
+        
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        atr = last.get('atr', 0)
+        vwap = last.get('vwap', 0)
+
+        # Calculate RSI if not present in the ML dataframe slice
+        if 'rsi' not in df.columns:
+            delta = df['close'].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
+            avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
+            rs = avg_gain / avg_loss
+            df['rsi'] = 100 - (100 / (1 + rs))
+
+        if 'volume_ratio' not in df.columns:
+            df['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
+
+        # Get the baseline ML probabilities
         prob_up, prob_down = ml_predictor.predict(df)
+        
         signal = "WAIT"
         strength = 0
-        if prob_up > prob_down + ml_prob_threshold:
+        
+        # Determine early momentum confirmation
+        bull_momentum = fast_ema > slow_ema and last['rsi'] > 50 and last['rsi'] > prev['rsi']
+        bear_momentum = fast_ema < slow_ema and last['rsi'] < 50 and last['rsi'] < prev['rsi']
+        vol_spike = last.get('volume_ratio', 1) > 1.1
+
+        # Core Logic: Trigger if ML strongly predicts OR (ML leans directionally + Fast Momentum aligns)
+        if (prob_up > prob_down + ml_prob_threshold) or (prob_up > 0.52 and bull_momentum and vol_spike):
             signal = "BUY_CE"
-            strength = int(prob_up * 100)
-            trend_desc = f"🤖 ML: Up {prob_up:.0%} | Down {prob_down:.0%}"
-        elif prob_down > prob_up + ml_prob_threshold:
+            strength = int(max(prob_up * 100, 85)) # Boost visual strength if caught early
+            trend_desc = f"🤖 ML EARLY BUY: Up {prob_up:.0%} + Momentum" if bull_momentum else f"🤖 ML BUY: Up {prob_up:.0%}"
+            
+        elif (prob_down > prob_up + ml_prob_threshold) or (prob_down > 0.52 and bear_momentum and vol_spike):
             signal = "BUY_PE"
-            strength = int(prob_down * 100)
-            trend_desc = f"🤖 ML: Down {prob_down:.0%} | Up {prob_up:.0%}"
+            strength = int(max(prob_down * 100, 85))
+            trend_desc = f"🤖 ML EARLY SELL: Down {prob_down:.0%} + Momentum" if bear_momentum else f"🤖 ML SELL: Down {prob_down:.0%}"
+            
         else:
             trend_desc = f"🤖 ML: Uncertain (Up {prob_up:.0%}, Down {prob_down:.0%})"
             strength = 50
 
-        # Add persistence logic (handled in bot loop)
-        return trend_desc, signal, 0, 0, df, 0, {}, strength
+        # Note: Persistence logic is handled in the main trading loop
+        return trend_desc, signal, vwap, fast_ema, df, atr, {}, strength
 
     # -----------------------------------------------------------------
     # VIJAY & RFF ALL-IN-ONE – aggressive momentum
@@ -2405,7 +2436,7 @@ class TechnicalAnalyzer:
     def apply_vijay_rff_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-
+        
         if len(df) < 20:
             return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
 
@@ -2413,50 +2444,24 @@ class TechnicalAnalyzer:
         prev = df.iloc[-2]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
 
-        # Combine EMA, RSI, MACD, volume, and supertrend
-        ema_bull = last['ema9'] > last['ema21']
-        ema_bear = last['ema9'] < last['ema21']
-        rsi_bull = last['rsi'] > 60
-        rsi_bear = last['rsi'] < 40
-        macd_bull = last['macd'] > last['macd_signal'] and last['macd_hist'] > 0
-        macd_bear = last['macd'] < last['macd_signal'] and last['macd_hist'] < 0
-        supertrend_bull = last['st_direction'] == 1
-        supertrend_bear = last['st_direction'] == -1
-        volume_spike = last['volume_ratio'] > 1.5
+        # Early triggers: Fast EMA cross (5 & 13 instead of 9 & 21) and rapid RSI shifts
+        fast_ema = df['close'].ewm(span=5).mean().iloc[-1]
+        slow_ema = df['close'].ewm(span=13).mean().iloc[-1]
+        
+        ema_bull_early = fast_ema > slow_ema and last['close'] > fast_ema
+        ema_bear_early = fast_ema < slow_ema and last['close'] < fast_ema
+        
+        rsi_bull = last['rsi'] > 55 and last['rsi'] > prev['rsi'] # Momentum shifting up
+        rsi_bear = last['rsi'] < 45 and last['rsi'] < prev['rsi'] # Momentum shifting down
+        
+        volume_spike = last['volume_ratio'] > 1.2 # Lowered volume requirement for earlier entry
 
-        # Price action: close near high/low
-        near_high = last['close'] > last['high'] * 0.95
-        near_low = last['close'] < last['low'] * 1.05
-
-        # Bullish signal: at least 3 conditions
-        bull_score = sum([ema_bull, rsi_bull, macd_bull, supertrend_bull, volume_spike, near_high])
-        bear_score = sum([ema_bear, rsi_bear, macd_bear, supertrend_bear, volume_spike, near_low])
-
-        if bull_score >= 3 and ema_bull:
-            signal = "BUY_CE"
-            strength = 70 + bull_score * 5
-            trend_desc = f"🟢 VIJAY BUY (Score {bull_score})"
-        elif bear_score >= 3 and ema_bear:
-            signal = "BUY_PE"
-            strength = 70 + bear_score * 5
-            trend_desc = f"🔴 VIJAY SELL (Score {bear_score})"
-        elif bull_score >= 2:
-            signal = "BUY_CE"
-            strength = 50 + bull_score * 5
-            trend_desc = f"🟡 VIJAY WEAK BUY (Score {bull_score})"
-        elif bear_score >= 2:
-            signal = "BUY_PE"
-            strength = 50 + bear_score * 5
-            trend_desc = f"🟡 VIJAY WEAK SELL (Score {bear_score})"
-        else:
-            signal = "WAIT"
-            strength = 30
-            trend_desc = f"⚖️ VIJAY NEUTRAL (Score B{bull_score}/S{bear_score})"
-
-        vwap = last.get('vwap', 0)
-        ema = last['ema9']
-        fib = {}
-        return trend_desc, signal, vwap, ema, df, atr, fib, strength
+        if ema_bull_early and rsi_bull and volume_spike:
+            return "🟢 VIJAY EARLY BUY", "BUY_CE", last.get('vwap', 0), fast_ema, df, atr, {}, 85
+        elif ema_bear_early and rsi_bear and volume_spike:
+            return "🔴 VIJAY EARLY SELL", "BUY_PE", last.get('vwap', 0), fast_ema, df, atr, {}, 85
+            
+        return "⚖️ VIJAY NEUTRAL", "WAIT", last.get('vwap', 0), last['ema9'], df, atr, {}, 30
 
     # -----------------------------------------------------------------
     # INSTITUTIONAL FVG + SMC – detects Fair Value Gaps
@@ -2465,46 +2470,25 @@ class TechnicalAnalyzer:
     def apply_institutional_fvg_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-
-        if len(df) < 5:
-            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+        if len(df) < 5: return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
 
         last = df.iloc[-1]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
 
-        # Detect FVG: a gap between consecutive candles
-        # Bullish FVG: current low > previous high (gap up)
-        # Bearish FVG: current high < previous low (gap down)
-        if len(df) >= 3:
-            c1 = df.iloc[-3]
-            c2 = df.iloc[-2]
-            c3 = df.iloc[-1]
+        # Look at the most recent 3 candles to instantly catch the FVG creation
+        c1, c2, c3 = df.iloc[-3], df.iloc[-2], df.iloc[-1]
+        
+        # Bullish FVG: Current candle low doesn't touch c1 high, AND closing strong
+        bullish_fvg = (c3['low'] > c1['high']) and (c3['close'] > c3['open'])
+        # Bearish FVG: Current candle high doesn't touch c1 low, AND closing weak
+        bearish_fvg = (c3['high'] < c1['low']) and (c3['close'] < c3['open'])
 
-            bullish_fvg = (c2['low'] > c1['high']) and (c3['low'] > c2['high'])  # simplified
-            bearish_fvg = (c2['high'] < c1['low']) and (c3['high'] < c2['low'])
-
-            if bullish_fvg:
-                signal = "BUY_CE"
-                strength = 85
-                trend_desc = "🟢 Bullish FVG Detected"
-            elif bearish_fvg:
-                signal = "BUY_PE"
-                strength = 85
-                trend_desc = "🔴 Bearish FVG Detected"
-            else:
-                signal = "WAIT"
-                strength = 30
-                trend_desc = "⚖️ No FVG"
-        else:
-            signal = "WAIT"
-            strength = 30
-            trend_desc = "⚖️ Insufficient candles"
-
-        vwap = last.get('vwap', 0)
-        ema = last['ema9']
-        fib = {}
-        return trend_desc, signal, vwap, ema, df, atr, fib, strength
-
+        if bullish_fvg and last['volume_ratio'] > 1.0:
+            return "🟢 Early Bullish FVG", "BUY_CE", last.get('vwap', 0), last['ema9'], df, atr, {}, 90
+        elif bearish_fvg and last['volume_ratio'] > 1.0:
+            return "🔴 Early Bearish FVG", "BUY_PE", last.get('vwap', 0), last['ema9'], df, atr, {}, 90
+            
+        return "⚖️ No FVG", "WAIT", last.get('vwap', 0), last['ema9'], df, atr, {}, 30
     # -----------------------------------------------------------------
     # LUX ALGO INSTITUTIONAL ICT – ICT concepts (order blocks, breaker)
     # -----------------------------------------------------------------
@@ -4388,42 +4372,55 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
+                
                 price_live = self.get_live_price(exchange, symbol, token)
                 if not price_live and not price:
                     self.log("❌ Cannot place CoinDCX order: price not available")
                     return None, "Price not available"
+                
                 if not price:
                     price = price_live
+                    
                 max_cap = self.settings.get('max_capital', 15000)
                 leverage = self.settings.get('leverage', 1)
                 position_value = max_cap * leverage
                 raw_qty = position_value / price
+                
                 if "BTC" in symbol or "ETH" in symbol:
                     clean_qty = round(raw_qty, 4)
-                elif "XRP" in symbol or "ADA" in symbol or "SOL" in symbol or "DOT" in symbol or "LINK" in symbol:
+                elif any(c in symbol for c in ["XRP", "ADA", "SOL", "DOT", "LINK"]):
                     clean_qty = round(raw_qty, 1)
                 else:
                     clean_qty = round(raw_qty, 0)
+                    
                 if clean_qty < 0.0001:
                     clean_qty = 0.0001
                 self.log(f"Calculated quantity for {symbol}: {clean_qty} (price={price}, cap={max_cap}, lev={leverage})")
 
-                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5).json()
+                # --- SAFE COINDCX MARKET FETCH ---
+                exchange_resp = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5)
                 market_symbol = None
-                for mkt in exchange_info:
-                    if mkt['cointype'].upper() == base_coin.upper() and mkt['currency'].upper() in ['USDT', 'INR']:
-                        if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
-                            market_symbol = mkt['symbol']
-                            break
-                        elif market_type == "Spot" and not mkt.get('is_future', False):
-                            market_symbol = mkt['symbol']
-                            break
+                
+                if exchange_resp.status_code == 200:
+                    exchange_info = exchange_resp.json()
+                    # Prevent 'string indices must be integers' crash
+                    if isinstance(exchange_info, list):
+                        for mkt in exchange_info:
+                            if isinstance(mkt, dict) and mkt.get('cointype', '').upper() == base_coin.upper() and mkt.get('currency', '').upper() in ['USDT', 'INR']:
+                                if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
+                                    market_symbol = mkt.get('symbol')
+                                    break
+                                elif market_type == "Spot" and not mkt.get('is_future', False):
+                                    market_symbol = mkt.get('symbol')
+                                    break
+                
                 if not market_symbol:
                     if market_type in ["Futures", "Options"]:
                         market_symbol = f"B-{base_coin}_USDT"
                     else:
                         market_symbol = f"{base_coin}USDT"
-                    self.log(f"⚠️ CoinDCX market symbol not found, using constructed: {market_symbol}")
+                    self.log(f"⚠️ CoinDCX market fetch failed or symbol not found, using fallback: {market_symbol}")
+                # ---------------------------------
 
                 if market_type in ["Futures", "Options"]:
                     coin_side = "long" if side.lower() == "buy" else "short"
@@ -4457,22 +4454,31 @@ class SniperBot:
                     'X-AUTH-SIGNATURE': signature,
                     'Content-Type': 'application/json'
                 }
+                
                 self.log(f"📡 CoinDCX payload: {payload_str}")
                 res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
+                
+                # --- SAFE RESPONSE PARSING ---
                 if res.status_code == 200:
-                    response_data = res.json()
-                    if isinstance(response_data, list) and len(response_data) > 0:
-                        order_id = response_data[0].get('id', 'DCX_ORDER_OK')
-                    elif isinstance(response_data, dict):
-                        order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
-                    else:
+                    try:
+                        response_data = res.json()
                         order_id = 'DCX_ORDER_OK'
-                    self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
-                    return order_id, None
+                        if isinstance(response_data, list) and len(response_data) > 0 and isinstance(response_data, dict):
+                            order_id = response_data.get('id', 'DCX_ORDER_OK')
+                        elif isinstance(response_data, dict):
+                            order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
+                            
+                        self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
+                        return order_id, None
+                    except ValueError:
+                        self.log("✅ CoinDCX Order Success, but response was not JSON.")
+                        return 'DCX_ORDER_OK', None
                 else:
                     error_msg = res.text if res.text else "Unknown error"
                     self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {error_msg}")
                     return None, f"CoinDCX rejected: {error_msg}"
+                # -----------------------------
+                    
             except Exception as e:
                 self.log(f"❌ CoinDCX Exception: {e}")
                 return None, f"CoinDCX exception: {str(e)}"
@@ -4969,16 +4975,56 @@ class SniperBot:
                         ltp = trade.get('current_ltp', trade['entry'])
                         pnl = trade.get('floating_pnl', 0.0)
 
+                        # Update Highest/Lowest for Trailing SL
+                        if ltp > trade.get('highest_price', trade['entry']):
+                            trade['highest_price'] = ltp
+                        if ltp < trade.get('lowest_price', trade['entry']):
+                            trade['lowest_price'] = ltp
+
+                        hit_tp = False
+                        hit_sl = False
+
                         if trade['type'] == "SELL":
+                            # Trailing SL Logic
+                            if tsl_pts > 0 and ltp < trade['lowest_price']:
+                                trade['sl'] = min(trade['sl'], ltp + tsl_pts)
+
+                            # Partial Booking Logic (50% at TP1)
+                            if ltp <= trade['tp1'] and not trade.get('booked_50'):
+                                partial_qty = int(trade['qty'] / 2)
+                                if partial_qty > 0 and not is_mock_mode:
+                                    self.place_real_order(trade['symbol'], trade['token'], partial_qty, "BUY", trade['exch'], "MARKET")
+                                trade['qty'] -= partial_qty
+                                trade['booked_50'] = True
+                                trade['sl'] = trade['entry'] # Move SL to Breakeven
+                                self.log(f"💰 Partial 50% Profit Booked at {ltp}")
+                                self.state["sound_queue"].append("tp")
+
                             hit_tp = ltp <= trade['tgt']
                             hit_sl = ltp >= trade['sl']
                         else:
+                            # Trailing SL Logic
+                            if tsl_pts > 0 and ltp > trade['highest_price']:
+                                trade['sl'] = max(trade['sl'], ltp - tsl_pts)
+
+                            # Partial Booking Logic (50% at TP1)
+                            if ltp >= trade['tp1'] and not trade.get('booked_50'):
+                                partial_qty = int(trade['qty'] / 2)
+                                if partial_qty > 0 and not is_mock_mode:
+                                    self.place_real_order(trade['symbol'], trade['token'], partial_qty, "SELL", trade['exch'], "MARKET")
+                                trade['qty'] -= partial_qty
+                                trade['booked_50'] = True
+                                trade['sl'] = trade['entry'] # Move SL to Breakeven
+                                self.log(f"💰 Partial 50% Profit Booked at {ltp}")
+                                self.state["sound_queue"].append("tp")
+
                             hit_tp = ltp >= trade['tgt']
                             hit_sl = ltp <= trade['sl']
 
                         market_close = current_time >= cutoff_time
 
                         if hit_tp or hit_sl or market_close:
+                            # ... (Keep your existing trade closure and journal saving logic here) ...
                             if not is_mock_mode and not trade.get("simulated"):
                                 exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                 self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'], "MARKET")
@@ -5158,18 +5204,25 @@ if st.session_state.page == "landing":
         By accessing and using this platform, you agree to the following:
 
         - You are solely responsible for all trading decisions and outcomes.
-        - This software is provided "as is" without any warranties.
+        
         - Past performance does not guarantee future results.
         - You acknowledge the high risk of financial loss in trading.
-        - You will not hold the developers liable for any losses.
+        
         - You must comply with all applicable laws and regulations.
         """)
         terms_accepted = st.checkbox("I have read and agree to the Terms and Conditions", key="terms_accepted")
         st.markdown('</div>', unsafe_allow_html=True)
 
-        if st.button("🚪 Enter", key="enter_btn", disabled=not terms_accepted, use_container_width=True, on_click=lambda: play_sound_now("click")):
-            st.session_state.page = "login"
-            st.rerun()
+        # Removed the 'disabled' attribute so the button is always active
+        if st.button("🚪 Enter", key="enter_btn", use_container_width=True):
+            if terms_accepted:
+                play_sound_now("click") # Play sound only on successful entry
+                st.session_state.page = "login"
+                st.rerun()
+            else:
+                # Show a slick warning toast instead of a locked cursor
+                st.toast("⚠️ Please accept the Terms and Conditions to proceed.", icon="🛑")
+                st.error("⚠️ Please check the box above to accept the Terms and Conditions.")
 
     st.markdown("""
     <div class="bento-grid">
@@ -5987,14 +6040,98 @@ elif st.session_state.page == "dashboard":
         live_tracker_ui()
 
         # 2. THE FIX: Place the Exit Button OUTSIDE the fragment in the global thread!
+        # 2. THE FIX: Place the Exit Button OUTSIDE the fragment in the global thread!
         if bot.state.get("active_trade"):
-            st.button(
-                "🛑 EXIT TRADE INSTANTLY", 
-                type="primary", 
-                use_container_width=True, 
-                key="global_exit_btn",
-                on_click=bot.force_exit
-            )
+            # Create 3 columns: Exit Button | Amount Input | Protect Button
+            col_ex1, col_ex2, col_ex3 = st.columns([2, 1.5, 2])
+            
+            with col_ex1:
+                st.button(
+                    "🛑 EXIT TRADE INSTANTLY", 
+                    type="primary", 
+                    use_container_width=True, 
+                    key="global_exit_btn",
+                    on_click=bot.force_exit
+                )
+                
+            with col_ex2:
+                # User inputs the exact monetary amount they want to lock in
+                st.number_input(
+                    "Protect Amount (₹)", 
+                    min_value=0, 
+                    value=500, 
+                    step=100, 
+                    key="protect_amt_input"
+                )
+                
+            with col_ex3:
+                def protect_live_profit():
+                    with bot.state["trade_lock"]:
+                        if bot.state["active_trade"]:
+                            tr = bot.state["active_trade"]
+                            live = bot.get_live_price(tr['exch'], tr['symbol'], tr['token']) or tr['current_ltp']
+                            qty = tr['qty']
+                            entry = tr['entry']
+                            
+                            # Retrieve the user's requested amount from session state
+                            target_profit = st.session_state.protect_amt_input
+                            
+                            if tr['type'] in ["BUY", "CE"]:
+                                current_pnl = (live - entry) * qty
+                                if current_pnl > target_profit:
+                                    # Calculate exact price point to lock the requested profit
+                                    new_sl = entry + (target_profit / qty)
+                                    tr['sl'] = new_sl
+                                    st.toast(f"🛡️ ₹{target_profit} Locked! Stop Loss moved to {new_sl:.2f}")
+                                    bot.state["sound_queue"].append("alert")
+                                else:
+                                    st.toast(f"⚠️ Cannot protect ₹{target_profit}. Current PnL is only ₹{current_pnl:.2f}", icon="⚠️")
+                            else:
+                                current_pnl = (entry - live) * qty
+                                if current_pnl > target_profit:
+                                    # Calculate exact price point to lock the requested profit
+                                    new_sl = entry - (target_profit / qty)
+                                    tr['sl'] = new_sl
+                                    st.toast(f"🛡️ ₹{target_profit} Locked! Stop Loss moved to {new_sl:.2f}")
+                                    bot.state["sound_queue"].append("alert")
+                                else:
+                                    st.toast(f"⚠️ Cannot protect ₹{target_profit}. Current PnL is only ₹{current_pnl:.2f}", icon="⚠️")
+                                    
+                st.button(
+                    "🛡️ PROTECT PROFIT", 
+                    use_container_width=True, 
+                    key="global_protect_btn",
+                    on_click=protect_live_profit
+                )
+                
+            with col_ex2:
+                def protect_live_profit():
+                    with bot.state["trade_lock"]:
+                        if bot.state["active_trade"]:
+                            tr = bot.state["active_trade"]
+                            live = bot.get_live_price(tr['exch'], tr['symbol'], tr['token']) or tr['current_ltp']
+                            
+                            # Lock SL slightly behind current live price
+                            buffer = tr['entry'] * 0.001 
+                            if tr['type'] in ["BUY", "CE"]:
+                                if live > tr['entry']:
+                                    tr['sl'] = live - buffer
+                                    st.toast(f"🛡️ Profit Protected! Stop Loss moved to {tr['sl']:.2f}")
+                                else:
+                                    st.toast("⚠️ Cannot protect. Trade is currently in a loss.", icon="⚠️")
+                            else:
+                                if live < tr['entry']:
+                                    tr['sl'] = live + buffer
+                                    st.toast(f"🛡️ Profit Protected! Stop Loss moved to {tr['sl']:.2f}")
+                                else:
+                                    st.toast("⚠️ Cannot protect. Trade is currently in a loss.", icon="⚠️")
+                                    
+                st.button(
+                    "🛡️ PROTECT PROFIT", 
+                    use_container_width=True, 
+                    key="global_protect_btn",
+                    on_click=protect_live_profit
+                )
 
         ltp_val = round(bot.state['spot'], 4)
         trend_val = bot.state['current_trend']
@@ -6524,24 +6661,42 @@ elif st.session_state.page == "dashboard":
         with sub_tabs[0]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                col_clr, col_msg = st.columns([1, 5])
+                col_clr, col_msg = st.columns()
+                
+                # 1. Define the dedicated callback function
+                def clear_tab3_data():
+                    play_sound_now("click")
+                    bot_ref = st.session_state.bot
+                    
+                    # Clear Local Memory
+                    bot_ref.state["logs"].clear()
+                    bot_ref.state["daily_pnl"] = 0.0
+                    bot_ref.state["trades_today"] = 0
+                    
+                    if bot_ref.is_mock:
+                        bot_ref.state["paper_history"] = []
+                        
+                    # Clear Database (if Real Trading)
+                    if not bot_ref.is_mock and HAS_DB:
+                        try:
+                            uid = getattr(bot_ref, "system_user_id", bot_ref.api_key)
+                            supabase.table("trade_logs").delete().eq("user_id", uid).execute()
+                            supabase.table("trade_journal").delete().eq("user_id", uid).execute()
+                        except Exception as e:
+                            print(f"DB clear error: {e}")
+
                 with col_clr:
-                    if st.button("🗑️ Clear", key="clear_logs_btn", use_container_width=True,
-                                 on_click=lambda: play_sound_now("click")):
-                        bot.state["logs"].clear()
-                        if bot.is_mock and "paper_history" in bot.state:
-                            bot.state["paper_history"] = []
-                        bot.state["daily_pnl"] = 0.0
-                        bot.state["trades_today"] = 0
-                        if not bot.is_mock and HAS_DB:
-                            try:
-                                uid = getattr(bot, "system_user_id", bot.api_key)
-                                supabase.table("trade_logs").delete().eq("user_id", uid).execute()
-                            except Exception as e:
-                                st.error(f"DB clear error: {e}")
-                        st.rerun()
+                    # 2. Attach the callback directly to the button
+                    st.button(
+                        "🗑️ Clear", 
+                        key="clear_logs_btn", 
+                        use_container_width=True,
+                        on_click=clear_tab3_data
+                    )
+                    
                 with col_msg:
                     st.caption("Clears console, paper history, and resets daily P&L (does not stop engine).")
+                    
                 if len(bot.state["logs"]) == 0:
                     st.info("No logs yet. Start the engine to see activity.")
                 else:
