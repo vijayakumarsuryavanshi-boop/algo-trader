@@ -2050,17 +2050,12 @@ class ScalpingModule:
         return "WAIT"
 
 # ==========================================
-# TECHNICAL ANALYZER (Full implementation – abbreviated for space)
-# ==========================================
-# ==========================================
-# TECHNICAL ANALYZER (FULL IMPLEMENTATION)
+# TECHNICAL ANALYZER (ALL STRATEGIES – EARLY SIGNALS)
 # ==========================================
 class TechnicalAnalyzer:
     @staticmethod
     def calculate_indicators(df, is_index=False):
-        """
-        Add all necessary technical indicators to the DataFrame.
-        """
+        """Add all necessary technical indicators to the DataFrame."""
         df = df.copy()
 
         # --- EMAs ---
@@ -2182,17 +2177,11 @@ class TechnicalAnalyzer:
         else:
             return "Neutral OI ⚪"
 
+    # -----------------------------------------------------------------
+    # PRIMARY STRATEGY (Momentum Breakout + S&R) – EARLY SIGNALS
+    # -----------------------------------------------------------------
     @staticmethod
     def apply_primary_strategy(df, index_name="NIFTY"):
-        """
-        Core strategy: catches early momentum using:
-        - EMA crossover
-        - RSI crossing 50
-        - Volume spike
-        - MACD histogram turn
-        - Bollinger Band touch
-        Returns (trend_description, signal, vwap, ema9, df_with_indicators, atr, fib_data, signal_strength)
-        """
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
 
@@ -2203,7 +2192,6 @@ class TechnicalAnalyzer:
         prev = df.iloc[-2]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
 
-        # --- Determine trend based on EMAs ---
         if last['ema9'] > last['ema21']:
             trend = "BULLISH"
         elif last['ema9'] < last['ema21']:
@@ -2211,7 +2199,6 @@ class TechnicalAnalyzer:
         else:
             trend = "NEUTRAL"
 
-        # --- Early confirmation conditions ---
         volume_ok = last['volume_ratio'] > 1.2 if not pd.isna(last['volume_ratio']) else False
         rsi_cross_up = prev['rsi'] <= 50 and last['rsi'] > 50
         rsi_cross_down = prev['rsi'] >= 50 and last['rsi'] < 50
@@ -2220,7 +2207,6 @@ class TechnicalAnalyzer:
         bb_bounce_up = last['close'] <= last['bb_lower'] * 1.01 and last['close'] > last['open']
         bb_bounce_down = last['close'] >= last['bb_upper'] * 0.99 and last['close'] < last['open']
 
-        # --- Signal Strength Calculation (always set) ---
         if trend == "BULLISH" and (rsi_cross_up or macd_hist_up or bb_bounce_up) and volume_ok:
             signal = "BUY_CE"
             trend_desc = f"🟢 STRONG BULLISH (EMA9>21, RSI>{last['rsi']:.0f}, Vol x{last['volume_ratio']:.1f})"
@@ -2253,8 +2239,381 @@ class TechnicalAnalyzer:
 
         vwap = last.get('vwap', 0)
         ema = last['ema9']
-        fib = {}  # simplified (can be filled later)
+        fib = {}
+        return trend_desc, signal, vwap, ema, df, atr, fib, strength
 
+    # -----------------------------------------------------------------
+    # KEYWORD RULE BUILDER – EARLY SIGNALS (user-selected rules)
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_keyword_strategy(df, custom_code, index_name="NIFTY"):
+        """
+        custom_code: comma-separated list of rule names, e.g. "EMA Crossover (9 & 21),RSI Breakout (>60/<40)"
+        """
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        atr = last['atr'] if not pd.isna(last['atr']) else 0
+
+        # Parse selected rules
+        rules = [r.strip() for r in custom_code.split(',')] if custom_code else []
+
+        # Pre‑compute conditions
+        ema_bull = last['ema9'] > last['ema21']
+        ema_bear = last['ema9'] < last['ema21']
+        ema_cross_up = prev['ema9'] <= prev['ema21'] and last['ema9'] > last['ema21']
+        ema_cross_down = prev['ema9'] >= prev['ema21'] and last['ema9'] < last['ema21']
+
+        rsi_overbought = last['rsi'] > 70
+        rsi_oversold = last['rsi'] < 30
+        rsi_bull_cross = prev['rsi'] <= 50 and last['rsi'] > 50
+        rsi_bear_cross = prev['rsi'] >= 50 and last['rsi'] < 50
+
+        macd_bull = last['macd'] > last['macd_signal']
+        macd_bear = last['macd'] < last['macd_signal']
+        macd_hist_up = prev['macd_hist'] <= 0 and last['macd_hist'] > 0
+        macd_hist_down = prev['macd_hist'] >= 0 and last['macd_hist'] < 0
+
+        bb_upper_touch = last['close'] >= last['bb_upper'] * 0.99
+        bb_lower_touch = last['close'] <= last['bb_lower'] * 1.01
+        bb_bounce_up = last['close'] <= last['bb_lower'] * 1.01 and last['close'] > last['open']
+        bb_bounce_down = last['close'] >= last['bb_upper'] * 0.99 and last['close'] < last['open']
+
+        vwap_above = last['close'] > last.get('vwap', last['close'])
+        vwap_below = last['close'] < last.get('vwap', last['close'])
+
+        supertrend_up = last['supertrend'] > last['close']  # actually supertrend line; direction stored separately
+        supertrend_down = last['supertrend'] < last['close']
+
+        # Count bullish and bearish rule matches
+        bull_score = 0
+        bear_score = 0
+        total_active = 0
+
+        for rule in rules:
+            total_active += 1
+            if "EMA Crossover" in rule:
+                if ema_cross_up: bull_score += 2
+                if ema_cross_down: bear_score += 2
+            if "Bollinger Bands Bounce" in rule:
+                if bb_bounce_up: bull_score += 2
+                if bb_bounce_down: bear_score += 2
+            if "RSI Breakout" in rule:
+                if rsi_bull_cross: bull_score += 2
+                if rsi_bear_cross: bear_score += 2
+            if "MACD Crossover" in rule:
+                if macd_hist_up: bull_score += 2
+                if macd_hist_down: bear_score += 2
+            if "Stochastic RSI" in rule:
+                # Placeholder – could be added later
+                pass
+            if "VWAP Position" in rule:
+                if vwap_above: bull_score += 1
+                if vwap_below: bear_score += 1
+            if "AlphaTrend / Supertrend" in rule or "UT Bot" in rule or "Next Super Trend" in rule:
+                if last['st_direction'] == 1: bull_score += 1
+                if last['st_direction'] == -1: bear_score += 1
+            if "Bollinger Bands" in rule:
+                if last['close'] > last['bb_mid']: bull_score += 1
+                if last['close'] < last['bb_mid']: bear_score += 1
+            if "Stochastic" in rule:
+                pass
+            if "Moving Average" in rule or "Exponential" in rule:
+                if ema_bull: bull_score += 1
+                if ema_bear: bear_score += 1
+            if "ICT" in rule or "Bull FVG" in rule or "Bear FVG" in rule:
+                # Could be detected, but simplified:
+                pass
+
+        # Volume confirmation
+        volume_ok = last['volume_ratio'] > 1.2
+
+        if total_active == 0:
+            signal = "WAIT"
+            trend_desc = "⚖️ No rules selected"
+            strength = 30
+        elif bull_score > bear_score + 2 and volume_ok:
+            signal = "BUY_CE"
+            strength = min(80 + bull_score * 2, 100)
+            trend_desc = f"🟢 BULLISH (Rules: {bull_score}/{bear_score})"
+        elif bear_score > bull_score + 2 and volume_ok:
+            signal = "BUY_PE"
+            strength = min(80 + bear_score * 2, 100)
+            trend_desc = f"🔴 BEARISH (Rules: {bear_score}/{bull_score})"
+        elif bull_score > bear_score:
+            signal = "BUY_CE"
+            strength = 50 + bull_score * 2
+            trend_desc = f"🟡 WEAK BULLISH (Rules: {bull_score}/{bear_score})"
+        elif bear_score > bull_score:
+            signal = "BUY_PE"
+            strength = 50 + bear_score * 2
+            trend_desc = f"🟡 WEAK BEARISH (Rules: {bear_score}/{bull_score})"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"⚖️ NEUTRAL (Rules: {bull_score}/{bear_score})"
+
+        vwap = last.get('vwap', 0)
+        ema = last['ema9']
+        fib = {}
+        return trend_desc, signal, vwap, ema, df, atr, fib, strength
+
+    # -----------------------------------------------------------------
+    # MACHINE LEARNING STRATEGY – uses ML predictor probabilities
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_ml_strategy(df, index_name, ml_prob_threshold, signal_persistence):
+        """
+        Uses the global ml_predictor to get up/down probabilities.
+        Returns signal based on probability threshold and persistence.
+        """
+        # This method is intended to be called with the global ml_predictor instance.
+        # We'll assume ml_predictor is accessible via a module-level variable.
+        # In the bot's trading loop, ml_predictor is imported.
+        import __main__ as main
+        ml_predictor = getattr(main, 'ml_predictor', None)
+        if ml_predictor is None:
+            return "ML Predictor not available", "WAIT", 0, 0, df, 0, {}, 0
+
+        prob_up, prob_down = ml_predictor.predict(df)
+        signal = "WAIT"
+        strength = 0
+        if prob_up > prob_down + ml_prob_threshold:
+            signal = "BUY_CE"
+            strength = int(prob_up * 100)
+            trend_desc = f"🤖 ML: Up {prob_up:.0%} | Down {prob_down:.0%}"
+        elif prob_down > prob_up + ml_prob_threshold:
+            signal = "BUY_PE"
+            strength = int(prob_down * 100)
+            trend_desc = f"🤖 ML: Down {prob_down:.0%} | Up {prob_up:.0%}"
+        else:
+            trend_desc = f"🤖 ML: Uncertain (Up {prob_up:.0%}, Down {prob_down:.0%})"
+            strength = 50
+
+        # Add persistence logic (handled in bot loop)
+        return trend_desc, signal, 0, 0, df, 0, {}, strength
+
+    # -----------------------------------------------------------------
+    # VIJAY & RFF ALL-IN-ONE – aggressive momentum
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_vijay_rff_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        atr = last['atr'] if not pd.isna(last['atr']) else 0
+
+        # Combine EMA, RSI, MACD, volume, and supertrend
+        ema_bull = last['ema9'] > last['ema21']
+        ema_bear = last['ema9'] < last['ema21']
+        rsi_bull = last['rsi'] > 60
+        rsi_bear = last['rsi'] < 40
+        macd_bull = last['macd'] > last['macd_signal'] and last['macd_hist'] > 0
+        macd_bear = last['macd'] < last['macd_signal'] and last['macd_hist'] < 0
+        supertrend_bull = last['st_direction'] == 1
+        supertrend_bear = last['st_direction'] == -1
+        volume_spike = last['volume_ratio'] > 1.5
+
+        # Price action: close near high/low
+        near_high = last['close'] > last['high'] * 0.95
+        near_low = last['close'] < last['low'] * 1.05
+
+        # Bullish signal: at least 3 conditions
+        bull_score = sum([ema_bull, rsi_bull, macd_bull, supertrend_bull, volume_spike, near_high])
+        bear_score = sum([ema_bear, rsi_bear, macd_bear, supertrend_bear, volume_spike, near_low])
+
+        if bull_score >= 3 and ema_bull:
+            signal = "BUY_CE"
+            strength = 70 + bull_score * 5
+            trend_desc = f"🟢 VIJAY BUY (Score {bull_score})"
+        elif bear_score >= 3 and ema_bear:
+            signal = "BUY_PE"
+            strength = 70 + bear_score * 5
+            trend_desc = f"🔴 VIJAY SELL (Score {bear_score})"
+        elif bull_score >= 2:
+            signal = "BUY_CE"
+            strength = 50 + bull_score * 5
+            trend_desc = f"🟡 VIJAY WEAK BUY (Score {bull_score})"
+        elif bear_score >= 2:
+            signal = "BUY_PE"
+            strength = 50 + bear_score * 5
+            trend_desc = f"🟡 VIJAY WEAK SELL (Score {bear_score})"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"⚖️ VIJAY NEUTRAL (Score B{bull_score}/S{bear_score})"
+
+        vwap = last.get('vwap', 0)
+        ema = last['ema9']
+        fib = {}
+        return trend_desc, signal, vwap, ema, df, atr, fib, strength
+
+    # -----------------------------------------------------------------
+    # INSTITUTIONAL FVG + SMC – detects Fair Value Gaps
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_institutional_fvg_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 5:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        atr = last['atr'] if not pd.isna(last['atr']) else 0
+
+        # Detect FVG: a gap between consecutive candles
+        # Bullish FVG: current low > previous high (gap up)
+        # Bearish FVG: current high < previous low (gap down)
+        if len(df) >= 3:
+            c1 = df.iloc[-3]
+            c2 = df.iloc[-2]
+            c3 = df.iloc[-1]
+
+            bullish_fvg = (c2['low'] > c1['high']) and (c3['low'] > c2['high'])  # simplified
+            bearish_fvg = (c2['high'] < c1['low']) and (c3['high'] < c2['low'])
+
+            if bullish_fvg:
+                signal = "BUY_CE"
+                strength = 85
+                trend_desc = "🟢 Bullish FVG Detected"
+            elif bearish_fvg:
+                signal = "BUY_PE"
+                strength = 85
+                trend_desc = "🔴 Bearish FVG Detected"
+            else:
+                signal = "WAIT"
+                strength = 30
+                trend_desc = "⚖️ No FVG"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = "⚖️ Insufficient candles"
+
+        vwap = last.get('vwap', 0)
+        ema = last['ema9']
+        fib = {}
+        return trend_desc, signal, vwap, ema, df, atr, fib, strength
+
+    # -----------------------------------------------------------------
+    # LUX ALGO INSTITUTIONAL ICT – ICT concepts (order blocks, breaker)
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_lux_algo_ict_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        atr = last['atr'] if not pd.isna(last['atr']) else 0
+
+        # Simple ICT: identify displacement (strong momentum candle) and then FVG
+        # Displacement: large body relative to previous range
+        body = abs(last['close'] - last['open'])
+        avg_body = (df['high'] - df['low']).rolling(10).mean().iloc[-1]
+        displacement = body > avg_body * 1.5
+
+        # Check if price is above/below key EMAs
+        ema_bull = last['ema9'] > last['ema21']
+        ema_bear = last['ema9'] < last['ema21']
+
+        # Look for order block: previous candle with small body and long wick in direction of displacement
+        prev_body = abs(prev['close'] - prev['open'])
+        prev_upper = prev['high'] - max(prev['close'], prev['open'])
+        prev_lower = min(prev['close'], prev['open']) - prev['low']
+
+        if displacement and last['close'] > last['open'] and ema_bull:
+            # Bullish displacement, check if previous candle could be order block (long lower wick)
+            if prev_lower > prev_body * 1.5:
+                signal = "BUY_CE"
+                strength = 90
+                trend_desc = "🟢 ICT Bullish Order Block"
+            else:
+                signal = "BUY_CE"
+                strength = 70
+                trend_desc = "🟢 ICT Bullish Displacement"
+        elif displacement and last['close'] < last['open'] and ema_bear:
+            if prev_upper > prev_body * 1.5:
+                signal = "BUY_PE"
+                strength = 90
+                trend_desc = "🔴 ICT Bearish Order Block"
+            else:
+                signal = "BUY_PE"
+                strength = 70
+                trend_desc = "🔴 ICT Bearish Displacement"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = "⚖️ No ICT Setup"
+
+        vwap = last.get('vwap', 0)
+        ema = last['ema9']
+        fib = {}
+        return trend_desc, signal, vwap, ema, df, atr, fib, strength
+
+    # -----------------------------------------------------------------
+    # MEAN REVERSION (BB/RSI) – overbought/oversold bounces
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_mean_reversion_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        atr = last['atr'] if not pd.isna(last['atr']) else 0
+
+        # Conditions for mean reversion
+        oversold_rsi = last['rsi'] < 30
+        overbought_rsi = last['rsi'] > 70
+        touch_lower_bb = last['close'] <= last['bb_lower']
+        touch_upper_bb = last['close'] >= last['bb_upper']
+        bounce_from_lower = touch_lower_bb and last['close'] > prev['close']  # price bouncing up
+        bounce_from_upper = touch_upper_bb and last['close'] < prev['close']  # price bouncing down
+
+        # Volume confirmation: higher volume on bounce
+        volume_ok = last['volume_ratio'] > 1.2
+
+        if (oversold_rsi or touch_lower_bb) and bounce_from_lower and volume_ok:
+            signal = "BUY_CE"
+            strength = 80
+            trend_desc = f"🟢 MEAN REV BUY (RSI {last['rsi']:.0f}, BB touch)"
+        elif (overbought_rsi or touch_upper_bb) and bounce_from_upper and volume_ok:
+            signal = "BUY_PE"
+            strength = 80
+            trend_desc = f"🔴 MEAN REV SELL (RSI {last['rsi']:.0f}, BB touch)"
+        elif oversold_rsi or touch_lower_bb:
+            signal = "BUY_CE"
+            strength = 50
+            trend_desc = f"🟡 WATCH BUY (RSI {last['rsi']:.0f})"
+        elif overbought_rsi or touch_upper_bb:
+            signal = "BUY_PE"
+            strength = 50
+            trend_desc = f"🟡 WATCH SELL (RSI {last['rsi']:.0f})"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"⚖️ NEUTRAL (RSI {last['rsi']:.0f})"
+
+        vwap = last.get('vwap', 0)
+        ema = last['ema9']
+        fib = {}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
 # ==========================================
 # MACHINE LEARNING PREDICTOR (abbreviated)
@@ -5549,48 +5908,93 @@ elif st.session_state.page == "dashboard":
         """, unsafe_allow_html=True)
 
         st.markdown("### 🎯 Live Position Tracker")
-        tracker_placeholder = st.empty()
 
-        if bot.state.get("active_trade"):
-            t = bot.state["active_trade"]
-            ltp = t.get('current_ltp', t['entry'])
-            pnl = t.get('floating_pnl', 0.0)
+        @st.fragment(run_every="3s")
+        def live_tracker_ui():
+            if bot.state.get("active_trade"):
+                t = bot.state["active_trade"]
+                
+                live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
+                if live_ltp:
+                    t['current_ltp'] = live_ltp
+                    if t['type'] == "SELL":
+                        t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
+                    else:
+                        t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
+                
+                ltp = t.get('current_ltp', t['entry'])
+                pnl = t.get('floating_pnl', 0.0)
 
-            pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
-            pnl_bg = "#f0fdf4" if pnl >= 0 else "#fef2f2"
-            pnl_sign = "+" if pnl >= 0 else ""
-            exec_type = t.get('exch', 'NFO')
-            buy_sell_color = "#22c55e" if t['type'] in ["CE", "BUY"] else "#ef4444"
+                pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+                pnl_sign = "+" if pnl >= 0 else ""
+                exec_type = t.get('exch', 'NFO')
 
-            pnl_display = round(pnl, 2)
-            if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                inr_pnl = pnl * get_usdt_inr_rate()
-                pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+                pnl_display = round(pnl, 2)
+                if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+                    inr_pnl = pnl * get_usdt_inr_rate()
+                    pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+                else:
+                    pnl_display = f"{pnl_sign}{round(pnl, 2)}"
 
-            # 1. Define badges (keep them on one line)
-            sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
-            rej_info = f"<br><span class='rejection-reason'>Reason: {t.get('rejection_reason', '')}</span>" if t.get("rejection_reason") else ''
+                sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
+                rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
 
-            # 2. The Bulletproof HTML String (DO NOT add any spaces to the left of these lines!)
-            html_block = f"""<div class="live-tracker">
-<div class="header">
-<div><span class="symbol-badge">{t["type"]}</span>{sim_badge}<strong style="margin-left: 15px; font-size: 1.3rem; color: white;">{t["symbol"]}</strong>{rej_info}</div>
-<div class="pnl-badge" style="color: {pnl_color}; border-color: {pnl_color};">{pnl_display}</div>
+                html_block = f"""<div class="live-tracker" style="margin-top: -15px;">
+<div class="header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
+<div style="display: flex; align-items: center; gap: 12px;">
+<span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
+{sim_badge}
+<span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
 </div>
-<div class="grid">
-<div class="info-box"><div class="label">Avg Entry</div><div class="value">{t["entry"]:.4f}</div></div>
-<div class="info-box"><div class="label">Live Mark</div><div class="value {'green' if pnl >= 0 else 'red'}">{ltp:.4f}</div></div>
-<div class="info-box"><div class="label">Qty</div><div class="value">{t["qty"]}</div><div style="color: #94a3b8; font-size:0.8rem;">({exec_type})</div></div>
-<div class="info-box"><div class="label">Risk Stop</div><div class="value red">{t["sl"]:.4f}</div></div>
+<div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
 </div>
-<div class="targets">🎯 TP1: <span>{t.get("tp1",0):.2f}</span>  |  TP2: <span>{t.get("tp2",0):.2f}</span>  |  TP3: <span>{t.get("tp3",0):.2f}</span></div>
+{rej_info}
+<div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
+</div>
+</div>
+<div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
+🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
+</div>
 </div>"""
+                
+                st.markdown(html_block, unsafe_allow_html=True)
+                
+                # Notice we completely REMOVED the button from here!
             
-            # 3. Render it
-            tracker_placeholder.markdown(html_block, unsafe_allow_html=True)
-        if st.session_state.get("tracker_updated"):
-            st.session_state.tracker_updated = False
-            st.rerun()
+            else:
+                st.markdown("""
+                <div style="display: flex; align-items: center; justify-content: center; height: 230px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 5px;">
+                    <span style="color: #94a3b8; font-weight: 600; font-size: 1.1rem;">⏳ Radar Active: Waiting for High-Probability Setup...</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # 1. Execute the Fragment to handle the laggy data fetching in isolation
+        live_tracker_ui()
+
+        # 2. THE FIX: Place the Exit Button OUTSIDE the fragment in the global thread!
+        if bot.state.get("active_trade"):
+            st.button(
+                "🛑 EXIT TRADE INSTANTLY", 
+                type="primary", 
+                use_container_width=True, 
+                key="global_exit_btn",
+                on_click=bot.force_exit
+            )
 
         ltp_val = round(bot.state['spot'], 4)
         trend_val = bot.state['current_trend']
