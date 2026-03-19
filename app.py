@@ -6036,7 +6036,7 @@ elif st.session_state.page == "dashboard":
                 </div>
                 """, unsafe_allow_html=True)
 
-        # 1. Execute the Fragment to handle the laggy data fetching in isolation
+       # 1. Execute the Fragment to handle the laggy data fetching in isolation
         live_tracker_ui()
 
         # 2. Place the Exit Button OUTSIDE the fragment in the global thread!
@@ -6068,9 +6068,15 @@ elif st.session_state.page == "dashboard":
                     with bot.state["trade_lock"]:
                         if bot.state["active_trade"]:
                             tr = bot.state["active_trade"]
-                            live = bot.get_live_price(tr['exch'], tr['symbol'], tr['token']) or tr['current_ltp']
                             qty = tr['qty']
+                            
+                            # Safety check to prevent Division By Zero crashes
+                            if qty <= 0: 
+                                return 
+                                
+                            live = bot.get_live_price(tr['exch'], tr['symbol'], tr['token']) or tr['current_ltp']
                             entry = tr['entry']
+                            current_sl = tr.get('sl', 0)
                             
                             # Retrieve the user's requested amount from session state
                             target_profit = st.session_state.protect_amt_input
@@ -6078,21 +6084,30 @@ elif st.session_state.page == "dashboard":
                             if tr['type'] in ["BUY", "CE"]:
                                 current_pnl = (live - entry) * qty
                                 if current_pnl > target_profit:
-                                    # Calculate exact price point to lock the requested profit
                                     new_sl = entry + (target_profit / qty)
-                                    tr['sl'] = new_sl
-                                    st.toast(f"🛡️ ₹{target_profit} Locked! Stop Loss moved to {new_sl:.2f}")
-                                    bot.state["sound_queue"].append("alert")
+                                    
+                                    # CRITICAL FIX: Only move SL up for Longs!
+                                    if new_sl > current_sl:
+                                        tr['sl'] = new_sl
+                                        st.toast(f"🛡️ ₹{target_profit} Locked! Stop Loss moved UP to {new_sl:.2f}")
+                                        bot.state["sound_queue"].append("alert")
+                                    else:
+                                        st.toast(f"ℹ️ Protection ignored: Your current Stop Loss ({current_sl:.2f}) already secures more profit.")
                                 else:
                                     st.toast(f"⚠️ Cannot protect ₹{target_profit}. Current PnL is only ₹{current_pnl:.2f}", icon="⚠️")
-                            else:
+                                    
+                            else: # SELL / PE
                                 current_pnl = (entry - live) * qty
                                 if current_pnl > target_profit:
-                                    # Calculate exact price point to lock the requested profit
                                     new_sl = entry - (target_profit / qty)
-                                    tr['sl'] = new_sl
-                                    st.toast(f"🛡️ ₹{target_profit} Locked! Stop Loss moved to {new_sl:.2f}")
-                                    bot.state["sound_queue"].append("alert")
+                                    
+                                    # CRITICAL FIX: Only move SL down for Shorts! (Or if SL is 0/unset)
+                                    if new_sl < current_sl or current_sl == 0:
+                                        tr['sl'] = new_sl
+                                        st.toast(f"🛡️ ₹{target_profit} Locked! Stop Loss moved DOWN to {new_sl:.2f}")
+                                        bot.state["sound_queue"].append("alert")
+                                    else:
+                                        st.toast(f"ℹ️ Protection ignored: Your current Stop Loss ({current_sl:.2f}) already secures more profit.")
                                 else:
                                     st.toast(f"⚠️ Cannot protect ₹{target_profit}. Current PnL is only ₹{current_pnl:.2f}", icon="⚠️")
                                     
