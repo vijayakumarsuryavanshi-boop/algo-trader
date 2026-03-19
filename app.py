@@ -6039,8 +6039,7 @@ elif st.session_state.page == "dashboard":
         # 1. Execute the Fragment to handle the laggy data fetching in isolation
         live_tracker_ui()
 
-        # 2. THE FIX: Place the Exit Button OUTSIDE the fragment in the global thread!
-        # 2. THE FIX: Place the Exit Button OUTSIDE the fragment in the global thread!
+        # 2. Place the Exit Button OUTSIDE the fragment in the global thread!
         if bot.state.get("active_trade"):
             # Create 3 columns: Exit Button | Amount Input | Protect Button
             col_ex1, col_ex2, col_ex3 = st.columns([2, 1.5, 2])
@@ -6096,35 +6095,6 @@ elif st.session_state.page == "dashboard":
                                     bot.state["sound_queue"].append("alert")
                                 else:
                                     st.toast(f"⚠️ Cannot protect ₹{target_profit}. Current PnL is only ₹{current_pnl:.2f}", icon="⚠️")
-                                    
-                st.button(
-                    "🛡️ PROTECT PROFIT", 
-                    use_container_width=True, 
-                    key="global_protect_btn",
-                    on_click=protect_live_profit
-                )
-                
-            with col_ex2:
-                def protect_live_profit():
-                    with bot.state["trade_lock"]:
-                        if bot.state["active_trade"]:
-                            tr = bot.state["active_trade"]
-                            live = bot.get_live_price(tr['exch'], tr['symbol'], tr['token']) or tr['current_ltp']
-                            
-                            # Lock SL slightly behind current live price
-                            buffer = tr['entry'] * 0.001 
-                            if tr['type'] in ["BUY", "CE"]:
-                                if live > tr['entry']:
-                                    tr['sl'] = live - buffer
-                                    st.toast(f"🛡️ Profit Protected! Stop Loss moved to {tr['sl']:.2f}")
-                                else:
-                                    st.toast("⚠️ Cannot protect. Trade is currently in a loss.", icon="⚠️")
-                            else:
-                                if live < tr['entry']:
-                                    tr['sl'] = live + buffer
-                                    st.toast(f"🛡️ Profit Protected! Stop Loss moved to {tr['sl']:.2f}")
-                                else:
-                                    st.toast("⚠️ Cannot protect. Trade is currently in a loss.", icon="⚠️")
                                     
                 st.button(
                     "🛡️ PROTECT PROFIT", 
