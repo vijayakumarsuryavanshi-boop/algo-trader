@@ -6661,42 +6661,24 @@ elif st.session_state.page == "dashboard":
         with sub_tabs[0]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
-                col_clr, col_msg = st.columns()
-                
-                # 1. Define the dedicated callback function
-                def clear_tab3_data():
-                    play_sound_now("click")
-                    bot_ref = st.session_state.bot
-                    
-                    # Clear Local Memory
-                    bot_ref.state["logs"].clear()
-                    bot_ref.state["daily_pnl"] = 0.0
-                    bot_ref.state["trades_today"] = 0
-                    
-                    if bot_ref.is_mock:
-                        bot_ref.state["paper_history"] = []
-                        
-                    # Clear Database (if Real Trading)
-                    if not bot_ref.is_mock and HAS_DB:
-                        try:
-                            uid = getattr(bot_ref, "system_user_id", bot_ref.api_key)
-                            supabase.table("trade_logs").delete().eq("user_id", uid).execute()
-                            supabase.table("trade_journal").delete().eq("user_id", uid).execute()
-                        except Exception as e:
-                            print(f"DB clear error: {e}")
-
+                col_clr, col_msg = st.columns([1, 5])
                 with col_clr:
-                    # 2. Attach the callback directly to the button
-                    st.button(
-                        "🗑️ Clear", 
-                        key="clear_logs_btn", 
-                        use_container_width=True,
-                        on_click=clear_tab3_data
-                    )
-                    
+                    if st.button("🗑️ Clear", key="clear_logs_btn", use_container_width=True,
+                                 on_click=lambda: play_sound_now("click")):
+                        bot.state["logs"].clear()
+                        if bot.is_mock and "paper_history" in bot.state:
+                            bot.state["paper_history"] = []
+                        bot.state["daily_pnl"] = 0.0
+                        bot.state["trades_today"] = 0
+                        if not bot.is_mock and HAS_DB:
+                            try:
+                                uid = getattr(bot, "system_user_id", bot.api_key)
+                                supabase.table("trade_logs").delete().eq("user_id", uid).execute()
+                            except Exception as e:
+                                st.error(f"DB clear error: {e}")
+                        st.rerun()
                 with col_msg:
                     st.caption("Clears console, paper history, and resets daily P&L (does not stop engine).")
-                    
                 if len(bot.state["logs"]) == 0:
                     st.info("No logs yet. Start the engine to see activity.")
                 else:
