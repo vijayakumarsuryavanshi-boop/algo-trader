@@ -1,5 +1,6 @@
 # ==========================================
 # SHREE ALGO TRADING PLATFORM – FULL PRODUCTION SCRIPT
+
 # ==========================================
 
 import streamlit as st
@@ -35,7 +36,7 @@ from datetime import datetime, timedelta
 import qrcode
 from io import BytesIO
 from PIL import Image
-from streamlit_autorefresh import st_autorefresh
+# No st_autorefresh import
 
 # ---------- Firebase for push notifications ----------
 try:
@@ -1376,7 +1377,21 @@ STRAT_LIST = [
     "TradingView Webhook",
     "Mean Reversion (BB/RSI)",
     "Arbitrage (Nifty/BankNifty)",
-    "Event Driven (Earnings)"
+    "Event Driven (Earnings)",
+    "Vega Management (IV Filter)",
+    "Delta Probability Filter",
+    "Vertical Spreads",
+    "Short Near Expiry",
+    "Neutral Strategies (Iron Condor)",
+    "No-Loss Structures (Box Spread)",
+    "Long Strangle/Straddle",
+    "Iron Condor/Butterfly",
+    "Short Strangle",
+    "Bull Call / Bear Put Spread",
+    "Ratio Backspread",
+    "9:20 Strategy",
+    "Expiry Day Strategy (Tue/Wed)",
+    "3 PM Analysis (Wed)"
 ]
 
 if not st.session_state.user_lots:
@@ -1959,7 +1974,7 @@ class FOMOScanner:
         
     def scan(self):
         now = time.time()
-        if now - self._last_scan_time < 60:
+        if now - self._last_scan_time < 300:  # Scan every 5 minutes max
             return list(self.signals)
         self._last_scan_time = now
         
@@ -1998,7 +2013,7 @@ class FOMOScanner:
                         else:
                             base_asset = ticker.replace(".NS", "").replace("-USD", "USD")
                         if base_asset and base_asset != current_asset:
-                            if ticker not in self.last_alert_time or now - self.last_alert_time[ticker] > 60:
+                            if ticker not in self.last_alert_time or now - self.last_alert_time[ticker] > 300:
                                 self.last_alert_time[ticker] = now
                 except:
                     continue
@@ -2369,65 +2384,34 @@ class TechnicalAnalyzer:
     @staticmethod
     def apply_ml_strategy(df, index_name, ml_prob_threshold, signal_persistence):
         """
-        Uses the global ml_predictor to get up/down probabilities, 
-        blended with fast momentum for early signal generation.
+        Uses the global ml_predictor to get up/down probabilities.
+        Returns signal based on probability threshold and persistence.
         """
+        # This method is intended to be called with the global ml_predictor instance.
+        # We'll assume ml_predictor is accessible via a module-level variable.
+        # In the bot's trading loop, ml_predictor is imported.
         import __main__ as main
         ml_predictor = getattr(main, 'ml_predictor', None)
         if ml_predictor is None:
             return "ML Predictor not available", "WAIT", 0, 0, df, 0, {}, 0
 
-        # Ensure we have fast indicators calculated for the early trigger
-        df = df.copy()
-        fast_ema = df['close'].ewm(span=5).mean().iloc[-1]
-        slow_ema = df['close'].ewm(span=13).mean().iloc[-1]
-        
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-        atr = last.get('atr', 0)
-        vwap = last.get('vwap', 0)
-
-        # Calculate RSI if not present in the ML dataframe slice
-        if 'rsi' not in df.columns:
-            delta = df['close'].diff()
-            gain = delta.where(delta > 0, 0)
-            loss = -delta.where(delta < 0, 0)
-            avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
-            avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
-            rs = avg_gain / avg_loss
-            df['rsi'] = 100 - (100 / (1 + rs))
-
-        if 'volume_ratio' not in df.columns:
-            df['volume_ratio'] = df['volume'] / df['volume'].rolling(20).mean()
-
-        # Get the baseline ML probabilities
         prob_up, prob_down = ml_predictor.predict(df)
-        
         signal = "WAIT"
         strength = 0
-        
-        # Determine early momentum confirmation
-        bull_momentum = fast_ema > slow_ema and last['rsi'] > 50 and last['rsi'] > prev['rsi']
-        bear_momentum = fast_ema < slow_ema and last['rsi'] < 50 and last['rsi'] < prev['rsi']
-        vol_spike = last.get('volume_ratio', 1) > 1.1
-
-        # Core Logic: Trigger if ML strongly predicts OR (ML leans directionally + Fast Momentum aligns)
-        if (prob_up > prob_down + ml_prob_threshold) or (prob_up > 0.52 and bull_momentum and vol_spike):
+        if prob_up > prob_down + ml_prob_threshold:
             signal = "BUY_CE"
-            strength = int(max(prob_up * 100, 85)) # Boost visual strength if caught early
-            trend_desc = f"🤖 ML EARLY BUY: Up {prob_up:.0%} + Momentum" if bull_momentum else f"🤖 ML BUY: Up {prob_up:.0%}"
-            
-        elif (prob_down > prob_up + ml_prob_threshold) or (prob_down > 0.52 and bear_momentum and vol_spike):
+            strength = int(prob_up * 100)
+            trend_desc = f"🤖 ML: Up {prob_up:.0%} | Down {prob_down:.0%}"
+        elif prob_down > prob_up + ml_prob_threshold:
             signal = "BUY_PE"
-            strength = int(max(prob_down * 100, 85))
-            trend_desc = f"🤖 ML EARLY SELL: Down {prob_down:.0%} + Momentum" if bear_momentum else f"🤖 ML SELL: Down {prob_down:.0%}"
-            
+            strength = int(prob_down * 100)
+            trend_desc = f"🤖 ML: Down {prob_down:.0%} | Up {prob_up:.0%}"
         else:
             trend_desc = f"🤖 ML: Uncertain (Up {prob_up:.0%}, Down {prob_down:.0%})"
             strength = 50
 
-        # Note: Persistence logic is handled in the main trading loop
-        return trend_desc, signal, vwap, fast_ema, df, atr, {}, strength
+        # Add persistence logic (handled in bot loop)
+        return trend_desc, signal, 0, 0, df, 0, {}, strength
 
     # -----------------------------------------------------------------
     # VIJAY & RFF ALL-IN-ONE – aggressive momentum
@@ -2436,7 +2420,7 @@ class TechnicalAnalyzer:
     def apply_vijay_rff_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-        
+
         if len(df) < 20:
             return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
 
@@ -2444,24 +2428,50 @@ class TechnicalAnalyzer:
         prev = df.iloc[-2]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
 
-        # Early triggers: Fast EMA cross (5 & 13 instead of 9 & 21) and rapid RSI shifts
-        fast_ema = df['close'].ewm(span=5).mean().iloc[-1]
-        slow_ema = df['close'].ewm(span=13).mean().iloc[-1]
-        
-        ema_bull_early = fast_ema > slow_ema and last['close'] > fast_ema
-        ema_bear_early = fast_ema < slow_ema and last['close'] < fast_ema
-        
-        rsi_bull = last['rsi'] > 55 and last['rsi'] > prev['rsi'] # Momentum shifting up
-        rsi_bear = last['rsi'] < 45 and last['rsi'] < prev['rsi'] # Momentum shifting down
-        
-        volume_spike = last['volume_ratio'] > 1.2 # Lowered volume requirement for earlier entry
+        # Combine EMA, RSI, MACD, volume, and supertrend
+        ema_bull = last['ema9'] > last['ema21']
+        ema_bear = last['ema9'] < last['ema21']
+        rsi_bull = last['rsi'] > 60
+        rsi_bear = last['rsi'] < 40
+        macd_bull = last['macd'] > last['macd_signal'] and last['macd_hist'] > 0
+        macd_bear = last['macd'] < last['macd_signal'] and last['macd_hist'] < 0
+        supertrend_bull = last['st_direction'] == 1
+        supertrend_bear = last['st_direction'] == -1
+        volume_spike = last['volume_ratio'] > 1.5
 
-        if ema_bull_early and rsi_bull and volume_spike:
-            return "🟢 VIJAY EARLY BUY", "BUY_CE", last.get('vwap', 0), fast_ema, df, atr, {}, 85
-        elif ema_bear_early and rsi_bear and volume_spike:
-            return "🔴 VIJAY EARLY SELL", "BUY_PE", last.get('vwap', 0), fast_ema, df, atr, {}, 85
-            
-        return "⚖️ VIJAY NEUTRAL", "WAIT", last.get('vwap', 0), last['ema9'], df, atr, {}, 30
+        # Price action: close near high/low
+        near_high = last['close'] > last['high'] * 0.95
+        near_low = last['close'] < last['low'] * 1.05
+
+        # Bullish signal: at least 3 conditions
+        bull_score = sum([ema_bull, rsi_bull, macd_bull, supertrend_bull, volume_spike, near_high])
+        bear_score = sum([ema_bear, rsi_bear, macd_bear, supertrend_bear, volume_spike, near_low])
+
+        if bull_score >= 3 and ema_bull:
+            signal = "BUY_CE"
+            strength = 70 + bull_score * 5
+            trend_desc = f"🟢 VIJAY BUY (Score {bull_score})"
+        elif bear_score >= 3 and ema_bear:
+            signal = "BUY_PE"
+            strength = 70 + bear_score * 5
+            trend_desc = f"🔴 VIJAY SELL (Score {bear_score})"
+        elif bull_score >= 2:
+            signal = "BUY_CE"
+            strength = 50 + bull_score * 5
+            trend_desc = f"🟡 VIJAY WEAK BUY (Score {bull_score})"
+        elif bear_score >= 2:
+            signal = "BUY_PE"
+            strength = 50 + bear_score * 5
+            trend_desc = f"🟡 VIJAY WEAK SELL (Score {bear_score})"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"⚖️ VIJAY NEUTRAL (Score B{bull_score}/S{bear_score})"
+
+        vwap = last.get('vwap', 0)
+        ema = last['ema9']
+        fib = {}
+        return trend_desc, signal, vwap, ema, df, atr, fib, strength
 
     # -----------------------------------------------------------------
     # INSTITUTIONAL FVG + SMC – detects Fair Value Gaps
@@ -2470,25 +2480,46 @@ class TechnicalAnalyzer:
     def apply_institutional_fvg_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-        if len(df) < 5: return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        if len(df) < 5:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
 
         last = df.iloc[-1]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
 
-        # Look at the most recent 3 candles to instantly catch the FVG creation
-        c1, c2, c3 = df.iloc[-3], df.iloc[-2], df.iloc[-1]
-        
-        # Bullish FVG: Current candle low doesn't touch c1 high, AND closing strong
-        bullish_fvg = (c3['low'] > c1['high']) and (c3['close'] > c3['open'])
-        # Bearish FVG: Current candle high doesn't touch c1 low, AND closing weak
-        bearish_fvg = (c3['high'] < c1['low']) and (c3['close'] < c3['open'])
+        # Detect FVG: a gap between consecutive candles
+        # Bullish FVG: current low > previous high (gap up)
+        # Bearish FVG: current high < previous low (gap down)
+        if len(df) >= 3:
+            c1 = df.iloc[-3]
+            c2 = df.iloc[-2]
+            c3 = df.iloc[-1]
 
-        if bullish_fvg and last['volume_ratio'] > 1.0:
-            return "🟢 Early Bullish FVG", "BUY_CE", last.get('vwap', 0), last['ema9'], df, atr, {}, 90
-        elif bearish_fvg and last['volume_ratio'] > 1.0:
-            return "🔴 Early Bearish FVG", "BUY_PE", last.get('vwap', 0), last['ema9'], df, atr, {}, 90
-            
-        return "⚖️ No FVG", "WAIT", last.get('vwap', 0), last['ema9'], df, atr, {}, 30
+            bullish_fvg = (c2['low'] > c1['high']) and (c3['low'] > c2['high'])  # simplified
+            bearish_fvg = (c2['high'] < c1['low']) and (c3['high'] < c2['low'])
+
+            if bullish_fvg:
+                signal = "BUY_CE"
+                strength = 85
+                trend_desc = "🟢 Bullish FVG Detected"
+            elif bearish_fvg:
+                signal = "BUY_PE"
+                strength = 85
+                trend_desc = "🔴 Bearish FVG Detected"
+            else:
+                signal = "WAIT"
+                strength = 30
+                trend_desc = "⚖️ No FVG"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = "⚖️ Insufficient candles"
+
+        vwap = last.get('vwap', 0)
+        ema = last['ema9']
+        fib = {}
+        return trend_desc, signal, vwap, ema, df, atr, fib, strength
+
     # -----------------------------------------------------------------
     # LUX ALGO INSTITUTIONAL ICT – ICT concepts (order blocks, breaker)
     # -----------------------------------------------------------------
@@ -2599,19 +2630,370 @@ class TechnicalAnalyzer:
         ema = last['ema9']
         fib = {}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
+
+    # -----------------------------------------------------------------
+    # VEGA MANAGEMENT – avoid buying when IV is high
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_vega_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        atr_pct = last['atr'] / last['close'] * 100
+        high_iv = atr_pct > 2.0
+        if high_iv:
+            signal = "WAIT"
+            strength = 0
+            trend_desc = f"⚠️ VEGA: High IV ({atr_pct:.1f}%), avoid buying options"
+        else:
+            t, s, v, e, df_c, a, f, st = TechnicalAnalyzer.apply_primary_strategy(df, index_name)
+            signal = s
+            strength = st
+            trend_desc = f"✅ VEGA: IV normal ({atr_pct:.1f}%), {t}"
+        return trend_desc, signal, 0, 0, df, last['atr'], {}, strength
+
+    # -----------------------------------------------------------------
+    # DELTA PROBABILITY FILTER – only take trades with high probability
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_delta_probability_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        t, s, v, e, df_c, a, f, st = TechnicalAnalyzer.apply_primary_strategy(df, index_name)
+        if s != "WAIT":
+            prob = st / 100.0
+            if prob < 0.20:
+                s = "WAIT"
+                st = 0
+                trend_desc = f"📊 DELTA PROB: Low probability ({prob:.0%}) – skip"
+            else:
+                trend_desc = f"📊 DELTA PROB: {prob:.0%} chance – {t}"
+        else:
+            trend_desc = t
+        return trend_desc, s, v, e, df_c, a, f, st
+
+    # -----------------------------------------------------------------
+    # VERTICAL SPREADS – directional with defined risk
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_vertical_spread_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        t, s, v, e, df_c, a, f, st = TechnicalAnalyzer.apply_primary_strategy(df, index_name)
+        if s != "WAIT":
+            if s == "BUY_CE":
+                signal = "VERTICAL_CALL"
+            elif s == "BUY_PE":
+                signal = "VERTICAL_PUT"
+            else:
+                signal = s
+            trend_desc = f"📐 VERTICAL SPREAD: {t}"
+        else:
+            signal = s
+            trend_desc = t
+        return trend_desc, signal, v, e, df_c, a, f, st
+
+    # -----------------------------------------------------------------
+    # SHORT NEAR EXPIRY – capture theta decay in final days
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_short_near_expiry_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        now = get_ist()
+        days_to_expiry = (dt.datetime(now.year, now.month, now.day + (3 - now.weekday() if now.weekday() < 3 else 3)) - now).days
+        near_expiry = days_to_expiry <= 3
+        last = df.iloc[-1]
+        if near_expiry:
+            atr_pct = last['atr'] / last['close'] * 100
+            if atr_pct > 2.0:
+                if last['rsi'] > 70:
+                    signal = "SELL_CALL"
+                    strength = 80
+                    trend_desc = f"⏰ SHORT NEAR EXPIRY: High IV {atr_pct:.1f}%, overbought -> SELL CALL"
+                elif last['rsi'] < 30:
+                    signal = "SELL_PUT"
+                    strength = 80
+                    trend_desc = f"⏰ SHORT NEAR EXPIRY: High IV {atr_pct:.1f}%, oversold -> SELL PUT"
+                else:
+                    signal = "WAIT"
+                    strength = 30
+                    trend_desc = f"⏰ SHORT NEAR EXPIRY: High IV but neutral RSI"
+            else:
+                signal = "WAIT"
+                strength = 30
+                trend_desc = f"⏰ SHORT NEAR EXPIRY: Low IV, not optimal"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"⏰ SHORT NEAR EXPIRY: Not near expiry ({days_to_expiry} days left)"
+        return trend_desc, signal, 0, 0, df, last['atr'], {}, strength
+
+    # -----------------------------------------------------------------
+    # NEUTRAL STRATEGIES – iron condor / strangle for range-bound markets
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_neutral_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        atr_pct = last['atr'] / last['close'] * 100
+        if atr_pct < 1.5 and 40 < last['rsi'] < 60:
+            signal = "IRON_CONDOR"
+            strength = 70
+            trend_desc = f"⚖️ NEUTRAL: Low volatility ({atr_pct:.1f}%), RSI {last['rsi']:.0f} -> IRON CONDOR"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"⚖️ NEUTRAL: Not range-bound (ATR% {atr_pct:.1f}, RSI {last['rsi']:.0f})"
+        return trend_desc, signal, 0, 0, df, last['atr'], {}, strength
+
+    # -----------------------------------------------------------------
+    # NO-LOSS STRUCTURES – collars, box spreads, butterflies (mispricing)
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_no_loss_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        atr_pct = last['atr'] / last['close'] * 100
+        if atr_pct > 3.0 and (last['rsi'] > 80 or last['rsi'] < 20):
+            signal = "BOX_SPREAD"
+            strength = 85
+            trend_desc = f"🔒 NO-LOSS: Potential box spread (high IV {atr_pct:.1f}%, extreme RSI)"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"🔒 NO-LOSS: No mispricing detected"
+        return trend_desc, signal, 0, 0, df, last['atr'], {}, strength
+
+    # -----------------------------------------------------------------
+    # LONG STRANGLE/STRADDLE – expecting big move, direction unknown
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_long_strangle_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        atr_pct = last['atr'] / last['close'] * 100
+        if atr_pct > 2.5 and (last['rsi'] > 75 or last['rsi'] < 25):
+            signal = "LONG_STRANGLE"
+            strength = 85
+            trend_desc = f"🎭 LONG STRANGLE: High IV ({atr_pct:.1f}%), extreme RSI {last['rsi']:.0f} -> expected big move"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"🎭 LONG STRANGLE: Volatility {atr_pct:.1f}%, RSI {last['rsi']:.0f}"
+        return trend_desc, signal, 0, 0, df, last['atr'], {}, strength
+
+    # -----------------------------------------------------------------
+    # IRON CONDOR/IRON BUTTERFLY – high IV initially, mean reversion later
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_iron_condor_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        atr_pct = last['atr'] / last['close'] * 100
+        if atr_pct > 2.0 and 40 < last['rsi'] < 60:
+            signal = "IRON_CONDOR"
+            strength = 80
+            trend_desc = f"🦋 IRON CONDOR: High IV ({atr_pct:.1f}%), neutral RSI {last['rsi']:.0f} -> expect mean reversion"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"🦋 IRON CONDOR: Volatility {atr_pct:.1f}%, RSI {last['rsi']:.0f}"
+        return trend_desc, signal, 0, 0, df, last['atr'], {}, strength
+
+    # -----------------------------------------------------------------
+    # SHORT STRANGLE – range-bound market, collect premium
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_short_strangle_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        atr_pct = last['atr'] / last['close'] * 100
+        if atr_pct < 1.5 and 45 < last['rsi'] < 55:
+            signal = "SHORT_STRANGLE"
+            strength = 75
+            trend_desc = f"📉 SHORT STRANGLE: Low IV ({atr_pct:.1f}%), RSI {last['rsi']:.0f} -> range bound, sell premium"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"📉 SHORT STRANGLE: Volatility {atr_pct:.1f}%, RSI {last['rsi']:.0f}"
+        return trend_desc, signal, 0, 0, df, last['atr'], {}, strength
+
+    # -----------------------------------------------------------------
+    # BULL CALL SPREAD / BEAR PUT SPREAD – moderate trend
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_spread_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        t, s, v, e, df_c, a, f, st = TechnicalAnalyzer.apply_primary_strategy(df, index_name)
+        if s != "WAIT":
+            if s == "BUY_CE":
+                signal = "BULL_CALL_SPREAD"
+            elif s == "BUY_PE":
+                signal = "BEAR_PUT_SPREAD"
+            else:
+                signal = s
+            trend_desc = f"📊 SPREAD: {t}"
+        else:
+            signal = s
+            trend_desc = t
+        return trend_desc, signal, v, e, df_c, a, f, st
+
+    # -----------------------------------------------------------------
+    # CALL/PUT RATIO BACKSPREAD – strong trend, sell 1 OTM, buy 2+ ITM
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_ratio_backspread_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        last = df.iloc[-1]
+        atr_pct = last['atr'] / last['close'] * 100
+        if atr_pct > 2.0:
+            if last['rsi'] > 70:
+                signal = "CALL_BACKSPREAD"
+                strength = 90
+                trend_desc = f"⚡ RATIO BACKSPREAD: Strong uptrend, sell OTM call, buy 2+ ITM calls"
+            elif last['rsi'] < 30:
+                signal = "PUT_BACKSPREAD"
+                strength = 90
+                trend_desc = f"⚡ RATIO BACKSPREAD: Strong downtrend, sell OTM put, buy 2+ ITM puts"
+            else:
+                signal = "WAIT"
+                strength = 30
+                trend_desc = f"⚡ RATIO BACKSPREAD: Trend not strong enough"
+        else:
+            signal = "WAIT"
+            strength = 30
+            trend_desc = f"⚡ RATIO BACKSPREAD: Low volatility"
+        return trend_desc, signal, 0, 0, df, last['atr'], {}, strength
+
+    # -----------------------------------------------------------------
+    # 9:20 STRATEGY – take position after first 20 minutes of market open
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_920_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        now = get_ist()
+        if now.hour == 9 and 20 <= now.minute <= 40:
+            t, s, v, e, df_c, a, f, st = TechnicalAnalyzer.apply_primary_strategy(df, index_name)
+            trend_desc = f"⏰ 9:20 STRATEGY: {t}"
+        else:
+            s = "WAIT"
+            st = 0
+            trend_desc = "⏰ 9:20 STRATEGY: Outside trading window (9:20-9:40)"
+        return trend_desc, s, 0, 0, df, 0, {}, st
+
+    # -----------------------------------------------------------------
+    # WEDNESDAY/THURSDAY EXPIRY – buy options early, exit before expiry
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_expiry_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        now = get_ist()
+        if now.weekday() in [1, 2]:  # Tuesday or Wednesday
+            t, s, v, e, df_c, a, f, st = TechnicalAnalyzer.apply_primary_strategy(df, index_name)
+            if s != "WAIT":
+                trend_desc = f"📅 EXPIRY STRATEGY: {t} – hold until Wednesday/Thursday morning"
+            else:
+                trend_desc = t
+        else:
+            s = "WAIT"
+            st = 0
+            trend_desc = "📅 EXPIRY STRATEGY: Not Tuesday/Wednesday – skip"
+        return trend_desc, s, 0, 0, df, 0, {}, st
+
+    # -----------------------------------------------------------------
+    # 3 PM ANALYSIS – check Wednesday 3 PM candle to decide on Thursday
+    # -----------------------------------------------------------------
+    @staticmethod
+    def apply_3pm_strategy(df, index_name="NIFTY"):
+        is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
+        df = TechnicalAnalyzer.calculate_indicators(df, is_index)
+
+        if len(df) < 20:
+            return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
+
+        now = get_ist()
+        if now.weekday() == 2 and now.hour == 15 and now.minute <= 5:
+            t, s, v, e, df_c, a, f, st = TechnicalAnalyzer.apply_primary_strategy(df, index_name)
+            trend_desc = f"⏰ 3 PM ANALYSIS: {t} – prepare for Thursday"
+        else:
+            s = "WAIT"
+            st = 0
+            trend_desc = "⏰ 3 PM ANALYSIS: Not Wednesday 3 PM"
+        return trend_desc, s, 0, 0, df, 0, {}, st
+
 # ==========================================
-# MACHINE LEARNING PREDICTOR (abbreviated)
+# MACHINE LEARNING PREDICTOR (FIXED)
 # ==========================================
 class MLPredictor:
     def __init__(self):
         self.rf_model = None
-        self.xgb_model = None
-        self.mlp_model = None
         self.scaler = StandardScaler()
         self.is_trained = False
         self.last_train_index = 0
-        self.feature_cols = None
-        self.signal_history = deque(maxlen=10)
+        self.feature_cols = ['rsi', 'macd_hist', 'volume_ratio', 'atr_pct', 'ema9', 'ema21', 'close_pct']
+        self.train_lock = Lock()
         self.train_queue = queue.Queue()
         self.train_thread = threading.Thread(target=self._background_train, daemon=True)
         self.train_thread.start()
@@ -2621,35 +3003,95 @@ class MLPredictor:
         while True:
             try:
                 df = self.train_queue.get(timeout=1)
-                if df is not None:
+                if df is not None and HAS_SKLEARN:
                     self._do_train(df)
             except queue.Empty:
                 continue
 
     def _do_train(self, df):
-        # Full implementation in previous answers
-        pass
+        try:
+            # Prepare features and labels
+            df = df.copy()
+            df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
+            df['atr_pct'] = df['atr'] / df['close'] * 100
+            df['close_pct'] = df['close'].pct_change() * 100
+            df = df.dropna()
+
+            if len(df) < 50:
+                return
+
+            X = df[self.feature_cols].values
+            y = df['target'].values
+
+            # Scale features
+            X_scaled = self.scaler.fit_transform(X)
+
+            # Train Random Forest
+            self.rf_model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+            self.rf_model.fit(X_scaled, y)
+            self.is_trained = True
+            self.last_train_index = len(df)
+            print("ML model trained successfully")
+        except Exception as e:
+            print(f"ML training error: {e}")
 
     def prepare_features(self, df):
-        # Full implementation
-        pass
+        """Extract features from the last row of df"""
+        if df is None or len(df) < 20:
+            return None
+        last = df.iloc[-1]
+        try:
+            features = {
+                'rsi': last.get('rsi', 50),
+                'macd_hist': last.get('macd_hist', 0),
+                'volume_ratio': last.get('volume_ratio', 1),
+                'atr_pct': last.get('atr', 0) / last['close'] * 100,
+                'ema9': last.get('ema9', last['close']),
+                'ema21': last.get('ema21', last['close']),
+                'close_pct': df['close'].pct_change().iloc[-1] * 100 if len(df) > 1 else 0
+            }
+            return np.array([list(features.values())])
+        except:
+            return None
 
     def train(self, df):
-        if len(df) < 50:
+        if len(df) < 50 or not HAS_SKLEARN:
             return
         self.train_queue.put(df.copy())
 
     def predict(self, df):
-        if not self.is_trained:
+        if not self.is_trained or not HAS_SKLEARN:
+            # Fallback: use simple momentum
+            if df is not None and len(df) > 10:
+                last_close = df['close'].iloc[-1]
+                prev_close = df['close'].iloc[-2]
+                if last_close > prev_close:
+                    return 0.6, 0.4
+                elif last_close < prev_close:
+                    return 0.4, 0.6
             return 0.5, 0.5
-        # Simplified
-        return 0.5, 0.5
+
+        X = self.prepare_features(df)
+        if X is None:
+            return 0.5, 0.5
+
+        X_scaled = self.scaler.transform(X)
+        prob = self.rf_model.predict_proba(X_scaled)[0]
+        return prob[1], prob[0]  # prob[1] = up probability, prob[0] = down
 
     def should_retrain(self, df):
         return not self.is_trained or len(df) - self.last_train_index >= 50
 
     def explain_prediction(self, df):
-        return None
+        if not HAS_SHAP or not self.is_trained:
+            return None
+        X = self.prepare_features(df)
+        if X is None:
+            return None
+        X_scaled = self.scaler.transform(X)
+        explainer = shap.TreeExplainer(self.rf_model)
+        shap_values = explainer.shap_values(X_scaled)
+        return shap_values
 
 ml_predictor = MLPredictor()
 
@@ -2973,8 +3415,7 @@ class TelegramController:
 # BACKTESTING ENGINE
 # ==========================================
 class Backtester:
-    def __init__(self, bot, strategy_func, df, initial_capital=100000, lot_size=1):
-        self.bot = bot
+    def __init__(self, strategy_func, df, initial_capital=100000, lot_size=1):
         self.strategy_func = strategy_func
         self.df = df.copy()
         self.initial_capital = initial_capital
@@ -2982,6 +3423,12 @@ class Backtester:
         self.lot_size = lot_size
         self.trades = []
         self.equity_curve = []
+        self.total_return = 0.0
+        self.sharpe = 0.0
+        self.max_dd = 0.0
+        self.win_rate = 0.0
+        self.avg_win = 0.0
+        self.avg_loss = 0.0
 
     def run(self):
         self.df['signal'] = None
@@ -3026,8 +3473,15 @@ class Backtester:
         self.equity_curve = self.df[['equity']].dropna()
         self.total_return = (self.equity_curve.iloc[-1]['equity'] / self.initial_capital - 1) * 100
         returns = self.df['strategy_returns'].dropna()
-        self.sharpe_ratio = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() != 0 else 0
-        self.max_drawdown = (self.equity_curve['equity'] / self.equity_curve['equity'].cummax() - 1).min() * 100
+        self.sharpe = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() != 0 else 0
+        self.max_dd = (self.equity_curve['equity'] / self.equity_curve['equity'].cummax() - 1).min() * 100
+        pnl_list = [t['pnl'] for t in self.trades]
+        if pnl_list:
+            wins = [p for p in pnl_list if p > 0]
+            losses = [p for p in pnl_list if p < 0]
+            self.win_rate = len(wins) / len(pnl_list) * 100 if pnl_list else 0
+            self.avg_win = np.mean(wins) if wins else 0
+            self.avg_loss = np.mean(losses) if losses else 0
         return self.equity_curve, self.total_return, self.trades
 
     def plot_results(self):
@@ -3316,7 +3770,11 @@ class SniperBot:
                         self.log(f"Exit order failed: {err}")
                 else:
                     ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
-                pnl = (ltp - t['entry']) * t['qty'] if t['type'] in ["CE", "BUY"] else (t['entry'] - ltp) * t['qty']
+                # Calculate PnL based on direction
+                if t['type'] in ["CE", "BUY"]:
+                    pnl = (ltp - t['entry']) * t['qty']
+                else:  # SELL, PE
+                    pnl = (t['entry'] - ltp) * t['qty']
                 if not self.is_mock and hasattr(self, "system_user_id"):
                     today = get_ist().strftime('%Y-%m-%d')
                     now = get_ist().strftime('%H:%M:%S')
@@ -3327,6 +3785,33 @@ class SniperBot:
                 st.toast(f"Trade closed at {ltp:.2f} | PnL: ₹{pnl:.2f}", icon="✅")
             self.state["is_running"] = False
 
+    # ---------- Protect Profit ----------
+    def protect_profit(self):
+        with self.state["trade_lock"]:
+            if self.state["active_trade"]:
+                t = self.state["active_trade"]
+                # Move SL to entry price (break-even) if profitable
+                if t['type'] in ['CE', 'BUY']:
+                    if t['current_ltp'] > t['entry']:
+                        new_sl = t['entry']
+                        if new_sl > t['sl']:
+                            t['sl'] = new_sl
+                            self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f}")
+                            self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}")
+                        else:
+                            self.log("Protect profit: SL already better")
+                else:  # SELL
+                    if t['current_ltp'] < t['entry']:
+                        new_sl = t['entry']
+                        if new_sl < t['sl']:
+                            t['sl'] = new_sl
+                            self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f}")
+                            self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}")
+                        else:
+                            self.log("Protect profit: SL already better")
+            else:
+                self.log("No active trade to protect")
+
     # ---------- Background PnL Updater ----------
     def start_pnl_updater(self):
         def update():
@@ -3336,7 +3821,7 @@ class SniperBot:
                     ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
                     if ltp:
                         trade['current_ltp'] = ltp
-                        if trade['type'] == "SELL":
+                        if trade['type'] in ["SELL", "PE"]:
                             pnl = (trade['entry'] - ltp) * trade['qty']
                         else:
                             pnl = (ltp - trade['entry']) * trade['qty']
@@ -3902,9 +4387,20 @@ class SniperBot:
         except Exception as e:
             self.log(f"⚠️ Error in get_historical_data: {e}")
 
+        # Standardize column names to lower case
+        if df is not None and not df.empty:
+            df.rename(columns=lambda x: x.lower(), inplace=True)
+            # Ensure required columns exist
+            if 'open' not in df.columns: df['open'] = df['close']
+            if 'high' not in df.columns: df['high'] = df['close']
+            if 'low' not in df.columns: df['low'] = df['close']
+            if 'volume' not in df.columns: df['volume'] = 0
+
         if (df is None or df.empty) and symbol in YF_TICKERS:
             self.log(f"⚠️ Using yfinance fallback for {symbol} historical data")
             df = self._fallback_yfinance(symbol, interval)
+            if df is not None and not df.empty:
+                df.rename(columns=lambda x: x.lower(), inplace=True)
         return df
 
     def _fallback_yfinance(self, symbol, interval):
@@ -4372,55 +4868,42 @@ class SniperBot:
                 ts = int(round(time.time() * 1000))
                 market_type = self.settings.get("crypto_mode", "Spot")
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-                
                 price_live = self.get_live_price(exchange, symbol, token)
                 if not price_live and not price:
                     self.log("❌ Cannot place CoinDCX order: price not available")
                     return None, "Price not available"
-                
                 if not price:
                     price = price_live
-                    
                 max_cap = self.settings.get('max_capital', 15000)
                 leverage = self.settings.get('leverage', 1)
                 position_value = max_cap * leverage
                 raw_qty = position_value / price
-                
                 if "BTC" in symbol or "ETH" in symbol:
                     clean_qty = round(raw_qty, 4)
-                elif any(c in symbol for c in ["XRP", "ADA", "SOL", "DOT", "LINK"]):
+                elif "XRP" in symbol or "ADA" in symbol or "SOL" in symbol or "DOT" in symbol or "LINK" in symbol:
                     clean_qty = round(raw_qty, 1)
                 else:
                     clean_qty = round(raw_qty, 0)
-                    
                 if clean_qty < 0.0001:
                     clean_qty = 0.0001
                 self.log(f"Calculated quantity for {symbol}: {clean_qty} (price={price}, cap={max_cap}, lev={leverage})")
 
-                # --- SAFE COINDCX MARKET FETCH ---
-                exchange_resp = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5)
+                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5).json()
                 market_symbol = None
-                
-                if exchange_resp.status_code == 200:
-                    exchange_info = exchange_resp.json()
-                    # Prevent 'string indices must be integers' crash
-                    if isinstance(exchange_info, list):
-                        for mkt in exchange_info:
-                            if isinstance(mkt, dict) and mkt.get('cointype', '').upper() == base_coin.upper() and mkt.get('currency', '').upper() in ['USDT', 'INR']:
-                                if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
-                                    market_symbol = mkt.get('symbol')
-                                    break
-                                elif market_type == "Spot" and not mkt.get('is_future', False):
-                                    market_symbol = mkt.get('symbol')
-                                    break
-                
+                for mkt in exchange_info:
+                    if mkt['cointype'].upper() == base_coin.upper() and mkt['currency'].upper() in ['USDT', 'INR']:
+                        if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
+                            market_symbol = mkt['symbol']
+                            break
+                        elif market_type == "Spot" and not mkt.get('is_future', False):
+                            market_symbol = mkt['symbol']
+                            break
                 if not market_symbol:
                     if market_type in ["Futures", "Options"]:
                         market_symbol = f"B-{base_coin}_USDT"
                     else:
                         market_symbol = f"{base_coin}USDT"
-                    self.log(f"⚠️ CoinDCX market fetch failed or symbol not found, using fallback: {market_symbol}")
-                # ---------------------------------
+                    self.log(f"⚠️ CoinDCX market symbol not found, using constructed: {market_symbol}")
 
                 if market_type in ["Futures", "Options"]:
                     coin_side = "long" if side.lower() == "buy" else "short"
@@ -4454,31 +4937,22 @@ class SniperBot:
                     'X-AUTH-SIGNATURE': signature,
                     'Content-Type': 'application/json'
                 }
-                
                 self.log(f"📡 CoinDCX payload: {payload_str}")
                 res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
-                
-                # --- SAFE RESPONSE PARSING ---
                 if res.status_code == 200:
-                    try:
-                        response_data = res.json()
+                    response_data = res.json()
+                    if isinstance(response_data, list) and len(response_data) > 0:
+                        order_id = response_data[0].get('id', 'DCX_ORDER_OK')
+                    elif isinstance(response_data, dict):
+                        order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
+                    else:
                         order_id = 'DCX_ORDER_OK'
-                        if isinstance(response_data, list) and len(response_data) > 0 and isinstance(response_data, dict):
-                            order_id = response_data.get('id', 'DCX_ORDER_OK')
-                        elif isinstance(response_data, dict):
-                            order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
-                            
-                        self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
-                        return order_id, None
-                    except ValueError:
-                        self.log("✅ CoinDCX Order Success, but response was not JSON.")
-                        return 'DCX_ORDER_OK', None
+                    self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
+                    return order_id, None
                 else:
                     error_msg = res.text if res.text else "Unknown error"
                     self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {error_msg}")
                     return None, f"CoinDCX rejected: {error_msg}"
-                # -----------------------------
-                    
             except Exception as e:
                 self.log(f"❌ CoinDCX Exception: {e}")
                 return None, f"CoinDCX exception: {str(e)}"
@@ -4727,10 +5201,38 @@ class SniperBot:
                                 trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_lux_algo_ict_strategy(df_candles, index)
                             elif "Mean Reversion" in strategy:
                                 trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_mean_reversion_strategy(df_candles, index)
+                            # New strategies
+                            elif strategy == "Vega Management (IV Filter)":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_vega_strategy(df_candles, index)
+                            elif strategy == "Delta Probability Filter":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_delta_probability_strategy(df_candles, index)
+                            elif strategy == "Vertical Spreads":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_vertical_spread_strategy(df_candles, index)
+                            elif strategy == "Short Near Expiry":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_short_near_expiry_strategy(df_candles, index)
+                            elif strategy == "Neutral Strategies (Iron Condor)":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_neutral_strategy(df_candles, index)
+                            elif strategy == "No-Loss Structures (Box Spread)":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_no_loss_strategy(df_candles, index)
+                            elif strategy == "Long Strangle/Straddle":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_long_strangle_strategy(df_candles, index)
+                            elif strategy == "Iron Condor/Butterfly":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_iron_condor_strategy(df_candles, index)
+                            elif strategy == "Short Strangle":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_short_strangle_strategy(df_candles, index)
+                            elif strategy == "Bull Call / Bear Put Spread":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_spread_strategy(df_candles, index)
+                            elif strategy == "Ratio Backspread":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_ratio_backspread_strategy(df_candles, index)
+                            elif strategy == "9:20 Strategy":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_920_strategy(df_candles, index)
+                            elif strategy == "Expiry Day Strategy (Tue/Wed)":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_expiry_strategy(df_candles, index)
+                            elif strategy == "3 PM Analysis (Wed)":
+                                trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_3pm_strategy(df_candles, index)
                             else:
-                                # ---------- FIX: Use the new primary strategy ----------
+                                # Default to primary
                                 trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_primary_strategy(df_candles, index)
-                                # ------------------------------------------------------
 
                             if strategy == "Machine Learning" and signal != "WAIT" and signal_persistence > 1:
                                 self.state["signal_history"].append(signal)
@@ -4775,6 +5277,23 @@ class SniperBot:
                                     signal_strength += 10
                     else:
                         trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = "Waiting for Market Data", "WAIT", 0, 0, df_candles, 0, {}, 0
+
+                    # Map advanced signals to basic BUY_CE/BUY_PE for execution
+                    if signal in ["VERTICAL_CALL", "BULL_CALL_SPREAD", "CALL_BACKSPREAD"]:
+                        signal = "BUY_CE"
+                    elif signal in ["VERTICAL_PUT", "BEAR_PUT_SPREAD", "PUT_BACKSPREAD"]:
+                        signal = "BUY_PE"
+                    elif signal in ["SELL_CALL", "SHORT_STRANGLE", "IRON_CONDOR"]:
+                        signal = "BUY_PE"
+                    elif signal in ["SELL_PUT"]:
+                        signal = "BUY_CE"
+                    elif signal in ["LONG_STRANGLE", "BOX_SPREAD"]:
+                        # Choose direction based on RSI
+                        if df_candles is not None and len(df_candles) > 0:
+                            last_rsi = df_candles['rsi'].iloc[-1] if 'rsi' in df_candles.columns else 50
+                        else:
+                            last_rsi = 50
+                        signal = "BUY_CE" if last_rsi > 50 else "BUY_PE"
 
                     if df_chart is not None and hasattr(df_chart, 'columns'):
                         temp_df = self.analyzer.calculate_indicators(df_chart, index in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"])
@@ -4845,25 +5364,29 @@ class SniperBot:
                             if is_mock_mode:
                                 entry_ltp = self.apply_slippage(entry_ltp, signal)
 
-                            trade_type = "CE" if signal == "BUY_CE" else "PE"
-                            if is_mt5_asset or is_crypto or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA"]:
-                                trade_type = "BUY" if signal == "BUY_CE" else "SELL"
+                            # Determine trade direction
+                            is_long = (signal == "BUY_CE")
+                            if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA"]:
+                                trade_type = "BUY" if is_long else "SELL"
+                            else:
+                                trade_type = "CE" if is_long else "PE"
 
+                            # Calculate SL and TP based on direction
                             if is_crypto and df_candles is not None and len(df_candles) > 20:
                                 swing_high, swing_low = self.analyzer.get_support_resistance(df_candles)
-                                if trade_type == "BUY" and swing_low:
+                                if is_long and swing_low:
                                     dynamic_sl = swing_low
                                     tp1 = entry_ltp + (entry_ltp - swing_low) * 2
                                     tp2 = entry_ltp + (entry_ltp - swing_low) * 3
                                     tp3 = entry_ltp + (entry_ltp - swing_low) * 4
-                                elif trade_type == "SELL" and swing_high:
+                                elif not is_long and swing_high:
                                     dynamic_sl = swing_high
                                     tp1 = entry_ltp - (swing_high - entry_ltp) * 2
                                     tp2 = entry_ltp - (swing_high - entry_ltp) * 3
                                     tp3 = entry_ltp - (swing_high - entry_ltp) * 4
                                 else:
                                     if three_five_seven and current_atr > 0:
-                                        if trade_type in ["CE", "BUY"]:
+                                        if is_long:
                                             dynamic_sl = entry_ltp - current_atr * 1.5
                                             tp1 = entry_ltp + current_atr * 3
                                             tp2 = entry_ltp + current_atr * 5
@@ -4874,19 +5397,19 @@ class SniperBot:
                                             tp2 = entry_ltp - current_atr * 5
                                             tp3 = entry_ltp - current_atr * 7
                                     else:
-                                        if trade_type == "SELL":
+                                        if not is_long:  # SELL
                                             dynamic_sl = entry_ltp + sl_pts
                                             tp1 = entry_ltp - tgt_pts
                                             tp2 = entry_ltp - (tgt_pts * 2)
                                             tp3 = entry_ltp - (tgt_pts * 3)
-                                        else:
+                                        else:  # BUY
                                             dynamic_sl = entry_ltp - sl_pts
                                             tp1 = entry_ltp + tgt_pts
                                             tp2 = entry_ltp + (tgt_pts * 2)
                                             tp3 = entry_ltp + (tgt_pts * 3)
                             else:
                                 if three_five_seven and current_atr > 0:
-                                    if trade_type in ["CE", "BUY"]:
+                                    if is_long:
                                         dynamic_sl = entry_ltp - current_atr * 1.5
                                         tp1 = entry_ltp + current_atr * 3
                                         tp2 = entry_ltp + current_atr * 5
@@ -4897,12 +5420,12 @@ class SniperBot:
                                         tp2 = entry_ltp - current_atr * 5
                                         tp3 = entry_ltp - current_atr * 7
                                 else:
-                                    if trade_type == "SELL":
+                                    if not is_long:  # SELL
                                         dynamic_sl = entry_ltp + sl_pts
                                         tp1 = entry_ltp - tgt_pts
                                         tp2 = entry_ltp - (tgt_pts * 2)
                                         tp3 = entry_ltp - (tgt_pts * 3)
-                                    else:
+                                    else:  # BUY
                                         dynamic_sl = entry_ltp - sl_pts
                                         tp1 = entry_ltp + tgt_pts
                                         tp2 = entry_ltp + (tgt_pts * 2)
@@ -4936,7 +5459,7 @@ class SniperBot:
                             order_success = True
                             reject_reason = None
                             if not is_mock_mode:
-                                exec_side = "SELL" if new_trade['type'] == "SELL" else "BUY"
+                                exec_side = "SELL" if not is_long else "BUY"
                                 if use_limit_orders and is_crypto:
                                     order_type = "LIMIT"
                                     order_price = entry_ltp
@@ -4975,58 +5498,41 @@ class SniperBot:
                         ltp = trade.get('current_ltp', trade['entry'])
                         pnl = trade.get('floating_pnl', 0.0)
 
-                        # Update Highest/Lowest for Trailing SL
-                        if ltp > trade.get('highest_price', trade['entry']):
-                            trade['highest_price'] = ltp
-                        if ltp < trade.get('lowest_price', trade['entry']):
-                            trade['lowest_price'] = ltp
+                        # Determine direction
+                        is_long = (trade['type'] in ["CE", "BUY"])
 
-                        hit_tp = False
-                        hit_sl = False
+                        # Trailing stop logic
+                        if tsl_pts > 0:
+                            if is_long:
+                                if ltp > trade['entry']:
+                                    new_trail = ltp - tsl_pts
+                                    if 'trailing_stop' not in trade or new_trail > trade['trailing_stop']:
+                                        trade['trailing_stop'] = new_trail
+                                        if trade['trailing_stop'] > trade['sl']:
+                                            trade['sl'] = trade['trailing_stop']
+                                            self.log(f"Trailing SL moved to {trade['sl']:.2f}")
+                            else:  # SELL
+                                if ltp < trade['entry']:
+                                    new_trail = ltp + tsl_pts
+                                    if 'trailing_stop' not in trade or new_trail < trade['trailing_stop']:
+                                        trade['trailing_stop'] = new_trail
+                                        if trade['trailing_stop'] < trade['sl']:
+                                            trade['sl'] = trade['trailing_stop']
+                                            self.log(f"Trailing SL moved to {trade['sl']:.2f}")
 
-                        if trade['type'] == "SELL":
-                            # Trailing SL Logic
-                            if tsl_pts > 0 and ltp < trade['lowest_price']:
-                                trade['sl'] = min(trade['sl'], ltp + tsl_pts)
-
-                            # Partial Booking Logic (50% at TP1)
-                            if ltp <= trade['tp1'] and not trade.get('booked_50'):
-                                partial_qty = int(trade['qty'] / 2)
-                                if partial_qty > 0 and not is_mock_mode:
-                                    self.place_real_order(trade['symbol'], trade['token'], partial_qty, "BUY", trade['exch'], "MARKET")
-                                trade['qty'] -= partial_qty
-                                trade['booked_50'] = True
-                                trade['sl'] = trade['entry'] # Move SL to Breakeven
-                                self.log(f"💰 Partial 50% Profit Booked at {ltp}")
-                                self.state["sound_queue"].append("tp")
-
+                        # Check TP/SL
+                        if not is_long:  # SELL
                             hit_tp = ltp <= trade['tgt']
                             hit_sl = ltp >= trade['sl']
-                        else:
-                            # Trailing SL Logic
-                            if tsl_pts > 0 and ltp > trade['highest_price']:
-                                trade['sl'] = max(trade['sl'], ltp - tsl_pts)
-
-                            # Partial Booking Logic (50% at TP1)
-                            if ltp >= trade['tp1'] and not trade.get('booked_50'):
-                                partial_qty = int(trade['qty'] / 2)
-                                if partial_qty > 0 and not is_mock_mode:
-                                    self.place_real_order(trade['symbol'], trade['token'], partial_qty, "SELL", trade['exch'], "MARKET")
-                                trade['qty'] -= partial_qty
-                                trade['booked_50'] = True
-                                trade['sl'] = trade['entry'] # Move SL to Breakeven
-                                self.log(f"💰 Partial 50% Profit Booked at {ltp}")
-                                self.state["sound_queue"].append("tp")
-
+                        else:  # BUY
                             hit_tp = ltp >= trade['tgt']
                             hit_sl = ltp <= trade['sl']
 
                         market_close = current_time >= cutoff_time
 
                         if hit_tp or hit_sl or market_close:
-                            # ... (Keep your existing trade closure and journal saving logic here) ...
                             if not is_mock_mode and not trade.get("simulated"):
-                                exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
+                                exec_side = "BUY" if not is_long else "SELL"
                                 self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'], "MARKET")
                             if hit_tp:
                                 self.state["sound_queue"].append("tp")
@@ -5204,25 +5710,18 @@ if st.session_state.page == "landing":
         By accessing and using this platform, you agree to the following:
 
         - You are solely responsible for all trading decisions and outcomes.
-        
+        - This software is provided "as is" without any warranties.
         - Past performance does not guarantee future results.
         - You acknowledge the high risk of financial loss in trading.
-        
+        - You will not hold the developers liable for any losses.
         - You must comply with all applicable laws and regulations.
         """)
         terms_accepted = st.checkbox("I have read and agree to the Terms and Conditions", key="terms_accepted")
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Removed the 'disabled' attribute so the button is always active
-        if st.button("🚪 Enter", key="enter_btn", use_container_width=True):
-            if terms_accepted:
-                play_sound_now("click") # Play sound only on successful entry
-                st.session_state.page = "login"
-                st.rerun()
-            else:
-                # Show a slick warning toast instead of a locked cursor
-                st.toast("⚠️ Please accept the Terms and Conditions to proceed.", icon="🛑")
-                st.error("⚠️ Please check the box above to accept the Terms and Conditions.")
+        if st.button("🚪 Enter", key="enter_btn", disabled=not terms_accepted, use_container_width=True, on_click=lambda: play_sound_now("click")):
+            st.session_state.page = "login"
+            st.rerun()
 
     st.markdown("""
     <div class="bento-grid">
@@ -5574,12 +6073,69 @@ elif st.session_state.page == "splash":
         while st.session_state.bot.state["sound_queue"]:
             latest_sound = st.session_state.bot.state["sound_queue"].popleft()
             play_sound_ui(latest_sound)
-    st.balloons()
     st.markdown("""
-    <div class="splash">
-        <h1>🎉 HAPPY TRADING 🎉</h1>
+    <style>
+    .scene {
+        width: 200px;
+        height: 200px;
+        perspective: 600px;
+        margin: 50px auto;
+    }
+    .cube {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        transform-style: preserve-3d;
+        animation: rotateCube 10s infinite linear;
+    }
+    .cube__face {
+        position: absolute;
+        width: 200px;
+        height: 200px;
+        background: rgba(255,255,255,0.9);
+        border: 2px solid #ff6600;
+        font-size: 24px;
+        font-weight: bold;
+        text-align: center;
+        line-height: 200px;
+        color: #ff6600;
+        backface-visibility: visible;
+    }
+    .cube__face--front  { transform: rotateY(0deg) translateZ(100px); background: rgba(255,165,0,0.8); }
+    .cube__face--right  { transform: rotateY(90deg) translateZ(100px); background: rgba(255,215,0,0.8); }
+    .cube__face--back   { transform: rotateY(180deg) translateZ(100px); background: rgba(255,140,0,0.8); }
+    .cube__face--left   { transform: rotateY(-90deg) translateZ(100px); background: rgba(255,200,0,0.8); }
+    .cube__face--top    { transform: rotateX(90deg) translateZ(100px); background: rgba(255,190,0,0.8); }
+    .cube__face--bottom { transform: rotateX(-90deg) translateZ(100px); background: rgba(255,210,0,0.8); }
+    @keyframes rotateCube {
+        from { transform: rotateX(0deg) rotateY(0deg); }
+        to { transform: rotateX(360deg) rotateY(360deg); }
+    }
+    .splash-text {
+        text-align: center;
+        font-size: 2rem;
+        margin-top: 30px;
+        color: #ff6600;
+        animation: fadeIn 2s;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    </style>
+    <div class="scene">
+        <div class="cube">
+            <div class="cube__face cube__face--front">🕉️</div>
+            <div class="cube__face cube__face--back">श्री</div>
+            <div class="cube__face cube__face--right">Om</div>
+            <div class="cube__face cube__face--left">Shree</div>
+            <div class="cube__face cube__face--top">🕉️</div>
+            <div class="cube__face cube__face--bottom">श्री</div>
+        </div>
     </div>
+    <div class="splash-text">Welcome to SHREE Algo Trading Platform</div>
     """, unsafe_allow_html=True)
+    st.balloons()
     time.sleep(1.5)
     st.session_state.page = "dashboard"
     st.rerun()
@@ -5588,6 +6144,8 @@ elif st.session_state.page == "splash":
 # DASHBOARD (with live tracker placeholder and background update)
 # ==========================================
 elif st.session_state.page == "dashboard":
+    # No global autorefresh – we use fragments for real‑time updates
+
     bot = st.session_state.bot
 
     if st.session_state.user_id in ["developer@example.com", "vijayakumar@example.com"]:
@@ -5970,7 +6528,8 @@ elif st.session_state.page == "dashboard":
                 live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
                 if live_ltp:
                     t['current_ltp'] = live_ltp
-                    if t['type'] == "SELL":
+                    # PnL calculation based on direction
+                    if t['type'] in ["SELL", "PE"]:
                         t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                     else:
                         t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
@@ -6036,87 +6595,27 @@ elif st.session_state.page == "dashboard":
                 </div>
                 """, unsafe_allow_html=True)
 
-       # 1. Execute the Fragment to handle the laggy data fetching in isolation
+        # 1. Execute the Fragment to handle the laggy data fetching in isolation
         live_tracker_ui()
 
-        # 2. Place the Exit Button OUTSIDE the fragment in the global thread!
+        # 2. THE FIX: Place the Exit Button OUTSIDE the fragment in the global thread!
         if bot.state.get("active_trade"):
-            # Create 3 columns: Exit Button | Amount Input | Protect Button
-            col_ex1, col_ex2, col_ex3 = st.columns([2, 1.5, 2])
-            
-            with col_ex1:
-                st.button(
-                    "🛑 EXIT TRADE INSTANTLY", 
-                    type="primary", 
-                    use_container_width=True, 
-                    key="global_exit_btn",
-                    on_click=bot.force_exit
-                )
-                
-            with col_ex2:
-                # User inputs the exact monetary amount they want to lock in
-                st.number_input(
-                    "Protect Amount (₹)", 
-                    min_value=0, 
-                    value=500, 
-                    step=100, 
-                    key="protect_amt_input"
-                )
-                
-            with col_ex3:
-                def protect_live_profit():
-                    with bot.state["trade_lock"]:
-                        if bot.state["active_trade"]:
-                            tr = bot.state["active_trade"]
-                            qty = tr['qty']
-                            
-                            # Safety check to prevent Division By Zero crashes
-                            if qty <= 0: 
-                                return 
-                                
-                            live = bot.get_live_price(tr['exch'], tr['symbol'], tr['token']) or tr['current_ltp']
-                            entry = tr['entry']
-                            current_sl = tr.get('sl', 0)
-                            
-                            # Retrieve the user's requested amount from session state
-                            target_profit = st.session_state.protect_amt_input
-                            
-                            if tr['type'] in ["BUY", "CE"]:
-                                current_pnl = (live - entry) * qty
-                                if current_pnl > target_profit:
-                                    new_sl = entry + (target_profit / qty)
-                                    
-                                    # CRITICAL FIX: Only move SL up for Longs!
-                                    if new_sl > current_sl:
-                                        tr['sl'] = new_sl
-                                        st.toast(f"🛡️ ₹{target_profit} Locked! Stop Loss moved UP to {new_sl:.2f}")
-                                        bot.state["sound_queue"].append("alert")
-                                    else:
-                                        st.toast(f"ℹ️ Protection ignored: Your current Stop Loss ({current_sl:.2f}) already secures more profit.")
-                                else:
-                                    st.toast(f"⚠️ Cannot protect ₹{target_profit}. Current PnL is only ₹{current_pnl:.2f}", icon="⚠️")
-                                    
-                            else: # SELL / PE
-                                current_pnl = (entry - live) * qty
-                                if current_pnl > target_profit:
-                                    new_sl = entry - (target_profit / qty)
-                                    
-                                    # CRITICAL FIX: Only move SL down for Shorts! (Or if SL is 0/unset)
-                                    if new_sl < current_sl or current_sl == 0:
-                                        tr['sl'] = new_sl
-                                        st.toast(f"🛡️ ₹{target_profit} Locked! Stop Loss moved DOWN to {new_sl:.2f}")
-                                        bot.state["sound_queue"].append("alert")
-                                    else:
-                                        st.toast(f"ℹ️ Protection ignored: Your current Stop Loss ({current_sl:.2f}) already secures more profit.")
-                                else:
-                                    st.toast(f"⚠️ Cannot protect ₹{target_profit}. Current PnL is only ₹{current_pnl:.2f}", icon="⚠️")
-                                    
-                st.button(
-                    "🛡️ PROTECT PROFIT", 
-                    use_container_width=True, 
-                    key="global_protect_btn",
-                    on_click=protect_live_profit
-                )
+            # Exit button
+            st.button(
+                "🛑 EXIT TRADE INSTANTLY", 
+                type="primary", 
+                use_container_width=True, 
+                key="global_exit_btn",
+                on_click=bot.force_exit
+            )
+            # Protect profit button
+            st.button(
+                "🛡️ Protect Profit", 
+                type="secondary", 
+                use_container_width=True, 
+                key="protect_profit_btn",
+                on_click=bot.protect_profit
+            )
 
         ltp_val = round(bot.state['spot'], 4)
         trend_val = bot.state['current_trend']
@@ -6582,38 +7081,34 @@ elif st.session_state.page == "dashboard":
                 with col_hz1:
                     min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
                 with col_hz2:
-                    st.info("Auto‑scanning every 10 seconds...")
-                if 'hz_last_scan' not in st.session_state:
-                    st.session_state.hz_last_scan = time.time()
-                if time.time() - st.session_state.hz_last_scan > 10:
-                    st.session_state.hz_last_scan = time.time()
-                    st.rerun()
-                with st.spinner("Scanning for Hero/Zero patterns..."):
-                    st.markdown("### Nifty 50 Stocks")
-                    nifty_results = bot.scan_hero_zero_indian_stocks()
-                    if not nifty_results.empty:
-                        st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
-                        styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
-                        st.dataframe(styled_results, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
+                    st.info("Scan now (auto‑cached daily)")
+                if st.button("🔍 Scan Hero/Zero Now", use_container_width=True):
+                    with st.spinner("Scanning for Hero/Zero patterns..."):
+                        st.markdown("### Nifty 50 Stocks")
+                        nifty_results = bot.scan_hero_zero_indian_stocks()
+                        if not nifty_results.empty:
+                            st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
+                            styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
+                            st.dataframe(styled_results, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
 
-                    st.markdown("### Penny Stocks")
-                    penny_results = bot.scan_penny_stocks()
-                    if not penny_results.empty:
-                        st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
-                        penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
-                        st.dataframe(penny_styled, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
+                        st.markdown("### Penny Stocks")
+                        penny_results = bot.scan_penny_stocks()
+                        if not penny_results.empty:
+                            st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
+                            penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
+                            st.dataframe(penny_styled, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
 
-                    st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
-                    pin_results = bot.scan_pin_bars()
-                    if pin_results:
-                        pin_df = pd.DataFrame(pin_results)
-                        st.dataframe(pin_df, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No pin bar reversals detected at this moment")
+                        st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
+                        pin_results = bot.scan_pin_bars()
+                        if pin_results:
+                            pin_df = pd.DataFrame(pin_results)
+                            st.dataframe(pin_df, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No pin bar reversals detected at this moment")
 
                     st.markdown("### 📝 Entry Instructions")
                     st.info("""
