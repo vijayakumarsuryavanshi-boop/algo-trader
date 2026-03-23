@@ -3066,9 +3066,9 @@ class MLPredictor:
                 last_close = df['close'].iloc[-1]
                 prev_close = df['close'].iloc[-2]
                 if last_close > prev_close:
-                    return 0.6, 0.4
+                    return 0.8, 0.2
                 elif last_close < prev_close:
-                    return 0.4, 0.6
+                    return 0.2, 0.8
             return 0.5, 0.5
 
         X = self.prepare_features(df)
@@ -5184,8 +5184,12 @@ class SniperBot:
                             if strategy == "Keyword Rule Builder":
                                 trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_keyword_strategy(df_candles, custom_code, index)
                             elif strategy == "Machine Learning":
-                                if ml_predictor.should_retrain(df_candles):
+                                if not ml_predictor.is_trained:
                                     ml_predictor.train(df_candles)
+                                else:
+                                    if ml_predictor.should_retrain(df_candles):
+                                        ml_predictor.train(df_candles)  # keep background for subsequent retrains
+
                                 trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_ml_strategy(
                                     df_candles, index, ml_prob_threshold, signal_persistence
                                 )
@@ -6285,7 +6289,7 @@ elif st.session_state.page == "dashboard":
             THREE_FIVE_SEVEN = st.toggle("🔢 3-5-7 Rule (ATR based)", False, on_change=lambda: play_sound_now("click"))
         with col_adv2:
             if STRATEGY == "Machine Learning":
-                ML_PROB_THRESHOLD = st.slider("ML Probability Threshold", 0.1, 0.6, 0.30, 0.05, on_change=lambda: play_sound_now("click"))
+                ML_PROB_THRESHOLD = st.slider("ML Probability Threshold", 0.1, 0.6, 0.15, 0.05, on_change=lambda: play_sound_now("click"))
                 SIGNAL_PERSISTENCE = st.slider("Signal Persistence (bars)", 1, 3, 1, 1, on_change=lambda: play_sound_now("click"))
             else:
                 ML_PROB_THRESHOLD = 0.30
