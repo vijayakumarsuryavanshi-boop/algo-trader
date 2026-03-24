@@ -3776,8 +3776,7 @@ class SniperBot:
                 else: 
                     # This covers "BUY", "CE", "PE"
                     pnl = (ltp - t['entry']) * t['qty']
-                else:  # SELL, PE
-                    pnl = (t['entry'] - ltp) * t['qty']
+                
                 if not self.is_mock and hasattr(self, "system_user_id"):
                     today = get_ist().strftime('%Y-%m-%d')
                     now = get_ist().strftime('%H:%M:%S')
