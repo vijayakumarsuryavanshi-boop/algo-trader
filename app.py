@@ -3821,10 +3821,10 @@ class SniperBot:
                     ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
                     if ltp:
                         trade['current_ltp'] = ltp
-                        if trade['type'] in ["SELL", "PE"]:
-                            pnl = (trade['entry'] - ltp) * trade['qty']
+                        if trade['type'] in ["SELL", "SELL_CALL", "SELL_PUT"]:
+                            pnl = (entry - ltp) * qty
                         else:
-                            pnl = (ltp - trade['entry']) * trade['qty']
+                            pnl = (ltp - entry) * qty
                         trade['floating_pnl'] = pnl
                         st.session_state.tracker_updated = True
                 time.sleep(1)
