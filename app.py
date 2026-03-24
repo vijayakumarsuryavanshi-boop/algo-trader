@@ -3839,16 +3839,22 @@ class SniperBot:
                     ltp = self.get_live_price(trade['exch'], trade['symbol'], trade['token'])
                     if ltp:
                         trade['current_ltp'] = ltp
-                        if trade['type'] in ["SELL", "SELL_CALL", "SELL_PUT"]:
-                            pnl = (entry - ltp) * qty
+                        
+                        # FIX: ONLY short-selling uses (Entry - LTP)
+                        # Buying CE or PE both use (LTP - Entry) because you want the premium to rise!
+                        if trade['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]: 
+                            pnl = (trade['entry'] - ltp) * trade['qty']
                         else:
-                            pnl = (ltp - entry) * qty
+                            # This safely covers "BUY", "CE", "PE", "BUY_CE", "BUY_PE"
+                            pnl = (ltp - trade['entry']) * trade['qty']
+                            
                         trade['floating_pnl'] = pnl
                         st.session_state.tracker_updated = True
                 time.sleep(1)
         thread = threading.Thread(target=update, daemon=True)
+        # Add script run context so the thread can access Streamlit session state
+        add_script_run_ctx(thread)
         thread.start()
-
     def load_daily_pnl(self):
         if self.is_mock or not HAS_DB:
             return 0.0
