@@ -3787,7 +3787,7 @@ class SniperBot:
 
     # ---------- Protect Profit ----------
     def protect_profit(self):
-    with self.state["trade_lock"]:
+      with self.state["trade_lock"]:
         if self.state["active_trade"]:
             trade = self.state["active_trade"]
             ltp = trade.get('current_ltp', trade['entry'])
