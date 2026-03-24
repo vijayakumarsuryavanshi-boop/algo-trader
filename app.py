@@ -3787,31 +3787,49 @@ class SniperBot:
 
     # ---------- Protect Profit ----------
     def protect_profit(self):
-        with self.state["trade_lock"]:
-            if self.state["active_trade"]:
-                t = self.state["active_trade"]
-                # Move SL to entry price (break-even) if profitable
-                if t['type'] in ['CE', 'BUY']:
-                    if t['current_ltp'] > t['entry']:
-                        new_sl = t['entry']
-                        if new_sl > t['sl']:
-                            t['sl'] = new_sl
-                            self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f}")
-                            self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}")
-                        else:
-                            self.log("Protect profit: SL already better")
-                else:  # SELL
-                    if t['current_ltp'] < t['entry']:
-                        new_sl = t['entry']
-                        if new_sl < t['sl']:
-                            t['sl'] = new_sl
-                            self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f}")
-                            self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}")
-                        else:
-                            self.log("Protect profit: SL already better")
+    with self.state["trade_lock"]:
+        if self.state["active_trade"]:
+            trade = self.state["active_trade"]
+            ltp = trade.get('current_ltp', trade['entry'])
+            is_long = trade['type'] in ["CE", "BUY", "PE"]
+            # Calculate unrealised PnL
+            if is_long:
+                pnl = (ltp - trade['entry']) * trade['qty']
             else:
-                self.log("No active trade to protect")
+                pnl = (trade['entry'] - ltp) * trade['qty']
 
+            # Define profit thresholds and corresponding stop distances from entry
+            # Example: lock 0 profit when pnl >= 500, lock 500 when pnl >= 1000, lock 1000 when pnl >= 1500
+            thresholds = [
+                (500, 0),    # at 500 profit, move SL to entry (lock 0)
+                (1000, 500), # at 1000 profit, move SL to entry+500 (lock 500)
+                (1500, 1000) # at 1500 profit, move SL to entry+1000 (lock 1000)
+            ]
+
+            new_sl = None
+            for threshold, lock_amount in thresholds:
+                if pnl >= threshold:
+                    if is_long:
+                        new_sl = trade['entry'] + lock_amount / trade['qty']
+                    else:
+                        new_sl = trade['entry'] - lock_amount / trade['qty']
+
+            if new_sl is not None:
+                # Only update if the new SL improves protection
+                if is_long:
+                    if new_sl > trade['sl']:
+                        trade['sl'] = new_sl
+                        self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f} (locked ₹{lock_amount})")
+                        self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}, locked ₹{lock_amount}")
+                else:
+                    if new_sl < trade['sl']:
+                        trade['sl'] = new_sl
+                        self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f} (locked ₹{lock_amount})")
+                        self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}, locked ₹{lock_amount}")
+            else:
+                self.log("No profit threshold reached to lock.")
+        else:
+            self.log("No active trade to protect")
     # ---------- Background PnL Updater ----------
     def start_pnl_updater(self):
         def update():
@@ -4887,6 +4905,7 @@ class SniperBot:
                 if clean_qty < 0.0001:
                     clean_qty = 0.0001
                 self.log(f"Calculated quantity for {symbol}: {clean_qty} (price={price}, cap={max_cap}, lev={leverage})")
+                self.settings.setdefault("profit_thresholds", [(500, 0), (1000, 500), (1500, 1000)])
 
                 exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5).json()
                 market_symbol = None
