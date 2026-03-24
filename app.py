@@ -3771,7 +3771,10 @@ class SniperBot:
                 else:
                     ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
                 # Calculate PnL based on direction
-                if t['type'] in ["CE", "BUY"]:
+                if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                    pnl = (t['entry'] - ltp) * t['qty']
+                else: 
+                    # This covers "BUY", "CE", "PE"
                     pnl = (ltp - t['entry']) * t['qty']
                 else:  # SELL, PE
                     pnl = (t['entry'] - ltp) * t['qty']
@@ -3830,7 +3833,7 @@ class SniperBot:
                 self.log("No profit threshold reached to lock.")
         else:
             self.log("No active trade to protect")
-    # ---------- Background PnL Updater ----------
+   # ---------- Background PnL Updater ----------
     def start_pnl_updater(self):
         def update():
             while True:
