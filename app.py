@@ -5395,17 +5395,21 @@ class SniperBot:
                             if is_mock_mode:
                                 entry_ltp = self.apply_slippage(entry_ltp, signal)
 
-                            # Determine trade direction
+                           # Determine trade direction
                             is_long = (signal == "BUY_CE")
-                            if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA"]:
+                            
+                            # SMART CHECK: Did the bot resolve an Option Contract?
+                            is_option_contract = str(strike_sym).endswith("CE") or str(strike_sym).endswith("PE")
+                            
+                            if is_option_contract:
+                                trade_type = "CE" if str(strike_sym).endswith("CE") else "PE"
+                                is_price_rising = True # We are buying premium, expect it to rise
+                            elif is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA"]:
                                 trade_type = "BUY" if is_long else "SELL"
+                                is_price_rising = is_long
                             else:
                                 trade_type = "CE" if is_long else "PE"
-
-                            # --- FIX FOR SL/TP DIRECTION ---
-                            # If buying an option (CE or PE) or buying an asset (BUY), we profit when the premium/price goes UP.
-                            # We only profit when the price goes DOWN if we are explicitly short-selling ("SELL").
-                            is_price_rising = trade_type in ["BUY", "CE", "PE"]
+                                is_price_rising = True
 
                             # Calculate SL and TP based on direction
                             if is_crypto and df_candles is not None and len(df_candles) > 20:
@@ -5495,7 +5499,8 @@ class SniperBot:
                             order_success = True
                             reject_reason = None
                             if not is_mock_mode:
-                                exec_side = "SELL" if not is_long else "BUY"
+                                # If it's an option (CE/PE), we always BUY to enter. If shorting futures, we SELL.
+                                exec_side = "BUY" if trade_type in ["CE", "PE", "BUY"] else "SELL"
                                 if use_limit_orders and is_crypto:
                                     order_type = "LIMIT"
                                     order_price = entry_ltp
@@ -5566,9 +5571,10 @@ class SniperBot:
 
                         market_close = current_time >= cutoff_time
 
-                        if hit_tp or hit_sl or market_close:
+                       if hit_tp or hit_sl or market_close:
                             if not is_mock_mode and not trade.get("simulated"):
-                                exec_side = "BUY" if not is_long else "SELL"
+                                # Reverse of entry: If we shorted a future ("SELL"), we BUY to cover. Otherwise, we SELL to close.
+                                exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
                                 self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'], "MARKET")
                             if hit_tp:
                                 self.state["sound_queue"].append("tp")
