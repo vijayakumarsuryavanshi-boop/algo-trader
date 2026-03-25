@@ -3755,13 +3755,19 @@ class SniperBot:
         self.system_user_id = None
         self.user_role = "trader"
 
-    # ---------- Force Exit ----------
+   # ---------- Force Exit ----------
     def force_exit(self):
         with self.state["trade_lock"]:
             if self.state["active_trade"]:
                 t = self.state["active_trade"]
+                
                 if not self.is_mock and not t.get("simulated"):
-                    exec_side = "BUY" if t['type'] == "SELL" else "SELL"
+                    # FIX: Make sure ALL short types BUY to close, and all long types SELL to close
+                    if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                        exec_side = "BUY"
+                    else:
+                        exec_side = "SELL"
+                        
                     order_id, err = self.place_real_order(t['symbol'], t['token'], t['qty'], exec_side, t['exch'], "MARKET")
                     if order_id:
                         ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
@@ -3770,6 +3776,7 @@ class SniperBot:
                         self.log(f"Exit order failed: {err}")
                 else:
                     ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
+                    
                 # Calculate PnL based on direction
                 if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
                     pnl = (t['entry'] - ltp) * t['qty']
@@ -3781,12 +3788,13 @@ class SniperBot:
                     today = get_ist().strftime('%Y-%m-%d')
                     now = get_ist().strftime('%H:%M:%S')
                     save_trade(self.system_user_id, today, now, t['symbol'], t['type'], t['qty'], t['entry'], ltp, pnl, "Manual Exit")
+                
                 self.state["daily_pnl"] += pnl
                 self.state["active_trade"] = None
                 self.state["sound_queue"].append("exit")
                 st.toast(f"Trade closed at {ltp:.2f} | PnL: ₹{pnl:.2f}", icon="✅")
+                
             self.state["is_running"] = False
-
     # ---------- Protect Profit ----------
     def protect_profit(self):
       with self.state["trade_lock"]:
