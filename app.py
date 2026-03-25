@@ -3755,19 +3755,13 @@ class SniperBot:
         self.system_user_id = None
         self.user_role = "trader"
 
-   # ---------- Force Exit ----------
+    # ---------- Force Exit ----------
     def force_exit(self):
         with self.state["trade_lock"]:
             if self.state["active_trade"]:
                 t = self.state["active_trade"]
-                
                 if not self.is_mock and not t.get("simulated"):
-                    # FIX: Make sure ALL short types BUY to close, and all long types SELL to close
-                    if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                        exec_side = "BUY"
-                    else:
-                        exec_side = "SELL"
-                        
+                    exec_side = "BUY" if t['type'] == "SELL" else "SELL"
                     order_id, err = self.place_real_order(t['symbol'], t['token'], t['qty'], exec_side, t['exch'], "MARKET")
                     if order_id:
                         ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
@@ -3776,7 +3770,6 @@ class SniperBot:
                         self.log(f"Exit order failed: {err}")
                 else:
                     ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
-                    
                 # Calculate PnL based on direction
                 if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
                     pnl = (t['entry'] - ltp) * t['qty']
@@ -3788,13 +3781,12 @@ class SniperBot:
                     today = get_ist().strftime('%Y-%m-%d')
                     now = get_ist().strftime('%H:%M:%S')
                     save_trade(self.system_user_id, today, now, t['symbol'], t['type'], t['qty'], t['entry'], ltp, pnl, "Manual Exit")
-                
                 self.state["daily_pnl"] += pnl
                 self.state["active_trade"] = None
                 self.state["sound_queue"].append("exit")
                 st.toast(f"Trade closed at {ltp:.2f} | PnL: ₹{pnl:.2f}", icon="✅")
-                
             self.state["is_running"] = False
+
     # ---------- Protect Profit ----------
     def protect_profit(self):
       with self.state["trade_lock"]:
@@ -5408,8 +5400,8 @@ class SniperBot:
                             if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA"]:
                                 trade_type = "BUY" if is_long else "SELL"
                             else:
-                               trade_type = "CE" if is_long else "PE"
-                               instrument_is_long = trade_type in ["BUY", "CE", "PE"]
+                                trade_type = "CE" if is_long else "PE"
+
                             # Calculate SL and TP based on direction
                             if is_crypto and df_candles is not None and len(df_candles) > 20:
                                 swing_high, swing_low = self.analyzer.get_support_resistance(df_candles)
@@ -5425,7 +5417,7 @@ class SniperBot:
                                     tp3 = entry_ltp - (swing_high - entry_ltp) * 4
                                 else:
                                     if three_five_seven and current_atr > 0:
-                                        if instrument_is_long: # <--- CHANGED HERE
+                                        if is_long:
                                             dynamic_sl = entry_ltp - current_atr * 1.5
                                             tp1 = entry_ltp + current_atr * 3
                                             tp2 = entry_ltp + current_atr * 5
@@ -5436,12 +5428,12 @@ class SniperBot:
                                             tp2 = entry_ltp - current_atr * 5
                                             tp3 = entry_ltp - current_atr * 7
                                     else:
-                                        if not instrument_is_long:
+                                        if not is_long:  # SELL
                                             dynamic_sl = entry_ltp + sl_pts
                                             tp1 = entry_ltp - tgt_pts
                                             tp2 = entry_ltp - (tgt_pts * 2)
                                             tp3 = entry_ltp - (tgt_pts * 3)
-                                        else:  # BUY, CE, PE  # <--- CHANGED HERE
+                                        else:  # BUY
                                             dynamic_sl = entry_ltp - sl_pts
                                             tp1 = entry_ltp + tgt_pts
                                             tp2 = entry_ltp + (tgt_pts * 2)
@@ -5536,34 +5528,34 @@ class SniperBot:
                         trade = self.state["active_trade"]
                         ltp = trade.get('current_ltp', trade['entry'])
                         pnl = trade.get('floating_pnl', 0.0)
-                        
-                        # Determine direction
-                        instrument_is_long = (trade['type'] in ["CE", "BUY", "PE"])
 
-                        # 1. Trailing stop logic
+                        # Determine direction
+                        is_long = (trade['type'] in ["CE", "BUY"])
+
+                        # Trailing stop logic
                         if tsl_pts > 0:
-                            if instrument_is_long:  # BUY, CE, PE
+                            if is_long:
                                 if ltp > trade['entry']:
                                     new_trail = ltp - tsl_pts
                                     if 'trailing_stop' not in trade or new_trail > trade['trailing_stop']:
                                         trade['trailing_stop'] = new_trail
                                         if trade['trailing_stop'] > trade['sl']:
                                             trade['sl'] = trade['trailing_stop']
-                                            self.log(f"Trailing SL moved up to {trade['sl']:.2f}")
-                            else:  # SHORT SELL
+                                            self.log(f"Trailing SL moved to {trade['sl']:.2f}")
+                            else:  # SELL
                                 if ltp < trade['entry']:
                                     new_trail = ltp + tsl_pts
                                     if 'trailing_stop' not in trade or new_trail < trade['trailing_stop']:
                                         trade['trailing_stop'] = new_trail
                                         if trade['trailing_stop'] < trade['sl']:
                                             trade['sl'] = trade['trailing_stop']
-                                            self.log(f"Trailing SL moved down to {trade['sl']:.2f}")
+                                            self.log(f"Trailing SL moved to {trade['sl']:.2f}")
 
-                        # 2. Check TP/SL Hit
-                        if not instrument_is_long:  # SHORT SELL
+                        # Check TP/SL
+                        if not is_long:  # SELL
                             hit_tp = ltp <= trade['tgt']
                             hit_sl = ltp >= trade['sl']
-                        else:  # BUY, CE, PE
+                        else:  # BUY
                             hit_tp = ltp >= trade['tgt']
                             hit_sl = ltp <= trade['sl']
 
@@ -6568,10 +6560,10 @@ elif st.session_state.page == "dashboard":
                 if live_ltp:
                     t['current_ltp'] = live_ltp
                     # PnL calculation based on direction
-                   if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                       t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
+                    if t['type'] in ["SELL", "PE"]:
+                        t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                     else:
-                       t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
+                        t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
                 
                 ltp = t.get('current_ltp', t['entry'])
                 pnl = t.get('floating_pnl', 0.0)
