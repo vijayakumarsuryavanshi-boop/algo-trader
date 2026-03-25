@@ -5535,13 +5535,12 @@ class SniperBot:
                         # Trailing stop logic
                         if tsl_pts > 0:
                             if instrument_is_long:
-                        
                             if not instrument_is_long:  # SELL
-                               hit_tp = ltp <= trade['tgt']
-                               hit_sl = ltp >= trade['sl']
+                                hit_tp = ltp <= trade['tgt']
+                                hit_sl = ltp >= trade['sl']
                             else:  # BUY, CE, PE
-                               hit_tp = ltp >= trade['tgt']
-                               hit_sl = ltp <= trade['sl']
+                                hit_tp = ltp >= trade['tgt']
+                                hit_sl = ltp <= trade['sl']
                                 if ltp > trade['entry']:
                                     new_trail = ltp - tsl_pts
                                     if 'trailing_stop' not in trade or new_trail > trade['trailing_stop']:
