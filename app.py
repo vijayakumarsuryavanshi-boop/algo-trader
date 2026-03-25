@@ -5532,36 +5532,30 @@ class SniperBot:
                         # Determine direction
                         instrument_is_long = (trade['type'] in ["CE", "BUY", "PE"])
 
-                        # Trailing stop logic
+                        # 1. Trailing stop logic
                         if tsl_pts > 0:
-                            if instrument_is_long:
-                            if not instrument_is_long:  # SELL
-                                hit_tp = ltp <= trade['tgt']
-                                hit_sl = ltp >= trade['sl']
-                            else:  # BUY, CE, PE
-                                hit_tp = ltp >= trade['tgt']
-                                hit_sl = ltp <= trade['sl']
+                            if instrument_is_long:  # BUY, CE, PE
                                 if ltp > trade['entry']:
                                     new_trail = ltp - tsl_pts
                                     if 'trailing_stop' not in trade or new_trail > trade['trailing_stop']:
                                         trade['trailing_stop'] = new_trail
                                         if trade['trailing_stop'] > trade['sl']:
                                             trade['sl'] = trade['trailing_stop']
-                                            self.log(f"Trailing SL moved to {trade['sl']:.2f}")
-                            else:  # SELL
+                                            self.log(f"Trailing SL moved up to {trade['sl']:.2f}")
+                            else:  # SHORT SELL
                                 if ltp < trade['entry']:
                                     new_trail = ltp + tsl_pts
                                     if 'trailing_stop' not in trade or new_trail < trade['trailing_stop']:
                                         trade['trailing_stop'] = new_trail
                                         if trade['trailing_stop'] < trade['sl']:
                                             trade['sl'] = trade['trailing_stop']
-                                            self.log(f"Trailing SL moved to {trade['sl']:.2f}")
+                                            self.log(f"Trailing SL moved down to {trade['sl']:.2f}")
 
-                        # Check TP/SL
-                        if not is_long:  # SELL
+                        # 2. Check TP/SL Hit
+                        if not instrument_is_long:  # SHORT SELL
                             hit_tp = ltp <= trade['tgt']
                             hit_sl = ltp >= trade['sl']
-                        else:  # BUY
+                        else:  # BUY, CE, PE
                             hit_tp = ltp >= trade['tgt']
                             hit_sl = ltp <= trade['sl']
 
