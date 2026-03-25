@@ -5400,8 +5400,8 @@ class SniperBot:
                             if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA"]:
                                 trade_type = "BUY" if is_long else "SELL"
                             else:
-                                trade_type = "CE" if is_long else "PE"
-
+                               trade_type = "CE" if is_long else "PE"
+                               instrument_is_long = trade_type in ["BUY", "CE", "PE"]
                             # Calculate SL and TP based on direction
                             if is_crypto and df_candles is not None and len(df_candles) > 20:
                                 swing_high, swing_low = self.analyzer.get_support_resistance(df_candles)
@@ -5417,23 +5417,23 @@ class SniperBot:
                                     tp3 = entry_ltp - (swing_high - entry_ltp) * 4
                                 else:
                                     if three_five_seven and current_atr > 0:
-                                        if is_long:
+                                        if instrument_is_long: # <--- CHANGED HERE
                                             dynamic_sl = entry_ltp - current_atr * 1.5
                                             tp1 = entry_ltp + current_atr * 3
                                             tp2 = entry_ltp + current_atr * 5
                                             tp3 = entry_ltp + current_atr * 7
                                         else:
-                                            dynamic_sl = entry_ltp + current_atr * 1.5
+                                           dynamic_sl = entry_ltp + current_atr * 1.5
                                             tp1 = entry_ltp - current_atr * 3
                                             tp2 = entry_ltp - current_atr * 5
                                             tp3 = entry_ltp - current_atr * 7
                                     else:
-                                        if not is_long:  # SELL
+                                        if not instrument_is_long:
                                             dynamic_sl = entry_ltp + sl_pts
                                             tp1 = entry_ltp - tgt_pts
                                             tp2 = entry_ltp - (tgt_pts * 2)
                                             tp3 = entry_ltp - (tgt_pts * 3)
-                                        else:  # BUY
+                                        else:  # BUY, CE, PE  # <--- CHANGED HERE
                                             dynamic_sl = entry_ltp - sl_pts
                                             tp1 = entry_ltp + tgt_pts
                                             tp2 = entry_ltp + (tgt_pts * 2)
@@ -5528,13 +5528,20 @@ class SniperBot:
                         trade = self.state["active_trade"]
                         ltp = trade.get('current_ltp', trade['entry'])
                         pnl = trade.get('floating_pnl', 0.0)
-
+                        
                         # Determine direction
-                        is_long = (trade['type'] in ["CE", "BUY"])
+                        instrument_is_long = (trade['type'] in ["CE", "BUY", "PE"])
 
                         # Trailing stop logic
-                        if tsl_pts > 0:
-                            if is_long:
+                       if tsl_pts > 0:
+                            if instrument_is_long:
+                        
+                            if not instrument_is_long:  # SELL
+                               hit_tp = ltp <= trade['tgt']
+                               hit_sl = ltp >= trade['sl']
+                            else:  # BUY, CE, PE
+                               hit_tp = ltp >= trade['tgt']
+                               hit_sl = ltp <= trade['sl']
                                 if ltp > trade['entry']:
                                     new_trail = ltp - tsl_pts
                                     if 'trailing_stop' not in trade or new_trail > trade['trailing_stop']:
@@ -6560,10 +6567,10 @@ elif st.session_state.page == "dashboard":
                 if live_ltp:
                     t['current_ltp'] = live_ltp
                     # PnL calculation based on direction
-                    if t['type'] in ["SELL", "PE"]:
-                        t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
+                   if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                       t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                     else:
-                        t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
+                       t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
                 
                 ltp = t.get('current_ltp', t['entry'])
                 pnl = t.get('floating_pnl', 0.0)
