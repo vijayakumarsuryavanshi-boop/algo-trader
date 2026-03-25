@@ -5530,7 +5530,7 @@ class SniperBot:
                         pnl = trade.get('floating_pnl', 0.0)
 
                         # Determine direction
-                        is_long = (trade['type'] in ["CE", "BUY"])
+                        is_long = (trade['type'] in ["CE", "PE", "BUY", "BUY_CE", "BUY_PE"])
 
                         # Trailing stop logic
                         if tsl_pts > 0:
@@ -6560,10 +6560,10 @@ elif st.session_state.page == "dashboard":
                 if live_ltp:
                     t['current_ltp'] = live_ltp
                     # PnL calculation based on direction
-                    if t['type'] in ["SELL", "PE"]:
-                        t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
+                    if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                       t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                     else:
-                        t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
+                       t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
                 
                 ltp = t.get('current_ltp', t['entry'])
                 pnl = t.get('floating_pnl', 0.0)
