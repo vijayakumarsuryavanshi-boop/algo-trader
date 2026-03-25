@@ -5402,22 +5402,27 @@ class SniperBot:
                             else:
                                 trade_type = "CE" if is_long else "PE"
 
+                            # --- FIX FOR SL/TP DIRECTION ---
+                            # If buying an option (CE or PE) or buying an asset (BUY), we profit when the premium/price goes UP.
+                            # We only profit when the price goes DOWN if we are explicitly short-selling ("SELL").
+                            is_price_rising = trade_type in ["BUY", "CE", "PE"]
+
                             # Calculate SL and TP based on direction
                             if is_crypto and df_candles is not None and len(df_candles) > 20:
                                 swing_high, swing_low = self.analyzer.get_support_resistance(df_candles)
-                                if is_long and swing_low:
+                                if is_price_rising and swing_low:
                                     dynamic_sl = swing_low
                                     tp1 = entry_ltp + (entry_ltp - swing_low) * 2
                                     tp2 = entry_ltp + (entry_ltp - swing_low) * 3
                                     tp3 = entry_ltp + (entry_ltp - swing_low) * 4
-                                elif not is_long and swing_high:
+                                elif not is_price_rising and swing_high:
                                     dynamic_sl = swing_high
                                     tp1 = entry_ltp - (swing_high - entry_ltp) * 2
                                     tp2 = entry_ltp - (swing_high - entry_ltp) * 3
                                     tp3 = entry_ltp - (swing_high - entry_ltp) * 4
                                 else:
                                     if three_five_seven and current_atr > 0:
-                                        if is_long:
+                                        if is_price_rising:
                                             dynamic_sl = entry_ltp - current_atr * 1.5
                                             tp1 = entry_ltp + current_atr * 3
                                             tp2 = entry_ltp + current_atr * 5
@@ -5428,19 +5433,19 @@ class SniperBot:
                                             tp2 = entry_ltp - current_atr * 5
                                             tp3 = entry_ltp - current_atr * 7
                                     else:
-                                        if not is_long:  # SELL
+                                        if not is_price_rising:  # SELL
                                             dynamic_sl = entry_ltp + sl_pts
                                             tp1 = entry_ltp - tgt_pts
                                             tp2 = entry_ltp - (tgt_pts * 2)
                                             tp3 = entry_ltp - (tgt_pts * 3)
-                                        else:  # BUY
+                                        else:  # BUY / CE / PE
                                             dynamic_sl = entry_ltp - sl_pts
                                             tp1 = entry_ltp + tgt_pts
                                             tp2 = entry_ltp + (tgt_pts * 2)
                                             tp3 = entry_ltp + (tgt_pts * 3)
                             else:
                                 if three_five_seven and current_atr > 0:
-                                    if is_long:
+                                    if is_price_rising:
                                         dynamic_sl = entry_ltp - current_atr * 1.5
                                         tp1 = entry_ltp + current_atr * 3
                                         tp2 = entry_ltp + current_atr * 5
@@ -5451,12 +5456,12 @@ class SniperBot:
                                         tp2 = entry_ltp - current_atr * 5
                                         tp3 = entry_ltp - current_atr * 7
                                 else:
-                                    if not is_long:  # SELL
+                                    if not is_price_rising:  # SELL
                                         dynamic_sl = entry_ltp + sl_pts
                                         tp1 = entry_ltp - tgt_pts
                                         tp2 = entry_ltp - (tgt_pts * 2)
                                         tp3 = entry_ltp - (tgt_pts * 3)
-                                    else:  # BUY
+                                    else:  # BUY / CE / PE
                                         dynamic_sl = entry_ltp - sl_pts
                                         tp1 = entry_ltp + tgt_pts
                                         tp2 = entry_ltp + (tgt_pts * 2)
