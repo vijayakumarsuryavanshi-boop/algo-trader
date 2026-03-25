@@ -5423,7 +5423,7 @@ class SniperBot:
                                             tp2 = entry_ltp + current_atr * 5
                                             tp3 = entry_ltp + current_atr * 7
                                         else:
-                                           dynamic_sl = entry_ltp + current_atr * 1.5
+                                            dynamic_sl = entry_ltp + current_atr * 1.5
                                             tp1 = entry_ltp - current_atr * 3
                                             tp2 = entry_ltp - current_atr * 5
                                             tp3 = entry_ltp - current_atr * 7
