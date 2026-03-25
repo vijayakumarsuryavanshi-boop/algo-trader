@@ -5571,7 +5571,7 @@ class SniperBot:
 
                         market_close = current_time >= cutoff_time
 
-                       if hit_tp or hit_sl or market_close:
+                        if hit_tp or hit_sl or market_close:
                             if not is_mock_mode and not trade.get("simulated"):
                                 # Reverse of entry: If we shorted a future ("SELL"), we BUY to cover. Otherwise, we SELL to close.
                                 exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
