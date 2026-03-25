@@ -5533,7 +5533,7 @@ class SniperBot:
                         instrument_is_long = (trade['type'] in ["CE", "BUY", "PE"])
 
                         # Trailing stop logic
-                       if tsl_pts > 0:
+                        if tsl_pts > 0:
                             if instrument_is_long:
                         
                             if not instrument_is_long:  # SELL
