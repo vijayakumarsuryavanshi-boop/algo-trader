@@ -1,6 +1,5 @@
 # ==========================================
-# SHREE ALGO TRADING PLATFORM – FULL PRODUCTION SCRIPT
-
+# SHREE ALGO TRADING PLATFORM – PRODUCTION READY
 # ==========================================
 
 import streamlit as st
@@ -19,6 +18,7 @@ import threading
 import io
 import yfinance as yf
 from SmartApi import SmartConnect
+from SmartApi.smartWebSocketV2 import SmartWebSocketV2  # Angel One WebSocket
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 from collections import deque
 from streamlit_lightweight_charts import renderLightweightCharts
@@ -36,25 +36,24 @@ from datetime import datetime, timedelta
 import qrcode
 from io import BytesIO
 from PIL import Image
-# No st_autorefresh import
+import asyncio
+import aiohttp
+import base64
 
-# ---------- Firebase for push notifications ----------
+# ---------- Firebase ----------
 try:
     import firebase_admin
     from firebase_admin import credentials, messaging
     HAS_FIREBASE = True
 except ImportError:
     HAS_FIREBASE = False
-    firebase_admin = None
-    messaging = None
 
-# ---------- shap for ML explainability ----------
+# ---------- shap ----------
 try:
     import shap
     HAS_SHAP = True
 except ImportError:
     HAS_SHAP = False
-    shap = None
 
 try:
     import joblib
@@ -62,14 +61,7 @@ try:
 except ImportError:
     HAS_JOBLIB = False
 
-import asyncio
-import aiohttp
-import base64
-import hmac
-import hashlib
-import time as time_module
-
-# ---------- Optional / Broker Imports ----------
+# ---------- Optional ----------
 try:
     import user_agents
     HAS_USER_AGENTS = True
@@ -78,7 +70,6 @@ except ImportError:
 
 try:
     from sklearn.ensemble import RandomForestClassifier
-    from sklearn.neural_network import MLPClassifier
     from sklearn.preprocessing import StandardScaler
     HAS_SKLEARN = True
 except ImportError:
@@ -107,12 +98,6 @@ try:
     HAS_MT5 = True
 except ImportError:
     HAS_MT5 = False
-
-try:
-    import mt5linux
-    HAS_MT5_LINUX = True
-except ImportError:
-    HAS_MT5_LINUX = False
 
 try:
     from plyer import notification
@@ -160,6 +145,7 @@ except ImportError:
 try:
     from binance.client import Client as BinanceClient
     from binance.exceptions import BinanceAPIException
+    from binance.websocket import BinanceSocketManager
     HAS_BINANCE = True
 except ImportError:
     HAS_BINANCE = False
@@ -646,13 +632,13 @@ def get_active_sessions(user_id):
             return []
     return []
 
-def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit_price, pnl, result):
+def save_trade(user_id, trade_date, trade_time, symbol, t_type, qty, entry, exit_price, pnl, result, slippage=0):
     if HAS_DB and user_id and user_id != "mock_user":
         data = {
             "user_id": user_id, "trade_date": trade_date, "trade_time": trade_time,
             "symbol": symbol, "trade_type": t_type, "qty": qty,
             "entry_price": float(entry), "exit_price": float(exit_price),
-            "pnl": float(pnl), "result": result
+            "pnl": float(pnl), "result": result, "slippage": slippage
         }
         try: supabase.table("trade_logs").insert(data).execute()
         except: pass
@@ -1155,9 +1141,9 @@ st.markdown(f"""
         font-weight: 500;
     }}
     .terms-card {{
-        background: rgba(255,255,255,0.05);
+        background: #000000cc !important;
         backdrop-filter: blur(10px);
-        border: 1px solid rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
         border-radius: 24px;
         padding: 2rem;
         color: white;
@@ -1292,6 +1278,31 @@ st.markdown(f"""
         color: #fbbf24;
         font-weight: 800;
         margin: 0 10px;
+    }}
+    /* Sticky buttons for exit and protect profit */
+    .sticky-buttons {{
+        position: sticky;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 10px;
+    }}
+    .sticky-buttons button {{
+        background: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 40px;
+        padding: 8px 20px;
+        font-weight: bold;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        transition: 0.2s;
+    }}
+    .sticky-buttons button:hover {{
+        transform: scale(1.05);
+        background: #2563eb;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -1562,7 +1573,11 @@ class BinanceBridge:
         self.api_secret = api_secret
         self.testnet = testnet
         self.client = None
+        self.bm = None
         self.connected = False
+        self.live_prices = {}
+        self.ws_thread = None
+        self._stop_event = Event()
 
     def connect(self):
         if not HAS_BINANCE:
@@ -1571,19 +1586,44 @@ class BinanceBridge:
             self.client = BinanceClient(self.api_key, self.api_secret, testnet=self.testnet)
             self.client.get_server_time()
             self.connected = True
+            # Start WebSocket for price updates
+            self.bm = BinanceSocketManager(self.client)
+            self._start_ws()
             return True, "Connected to Binance"
         except BinanceAPIException as e:
             return False, f"Binance API error: {e}"
         except Exception as e:
             return False, f"Binance connection error: {e}"
 
+    def _start_ws(self):
+        def ws_worker():
+            syms = ['btcusdt', 'ethusdt', 'solusdt', 'xrpusdt', 'adausdt', 'dogeusdt', 'bnbusdt', 'ltcusdt', 'dotusdt', 'maticusdt', 'shibusdt', 'trxusdt', 'linkusdt']
+            streams = [f"{sym}@trade" for sym in syms]
+            self.bm.start_multiplex_socket(streams, self._handle_message)
+            self.bm.start()
+            self._stop_event.wait()
+            self.bm.stop()
+
+        def _handle_message(msg):
+            if 'data' in msg:
+                data = msg['data']
+                sym = data['s'].upper()
+                price = float(data['p'])
+                self.live_prices[sym] = price
+
+        self._stop_event.clear()
+        self.ws_thread = threading.Thread(target=ws_worker, daemon=True)
+        self.ws_thread.start()
+
     def get_live_price(self, symbol):
-        if not self.connected:
-            return None
+        # symbol expected like "BTCUSDT"
+        if symbol in self.live_prices:
+            return self.live_prices[symbol]
+        # Fallback REST
         try:
             ticker = self.client.get_symbol_ticker(symbol=symbol)
             return float(ticker['price'])
-        except Exception as e:
+        except:
             return None
 
     def place_order(self, symbol, side, quantity, order_type="MARKET", price=None):
@@ -1667,6 +1707,11 @@ class BinanceBridge:
             return float(balance['free'])
         except Exception as e:
             return 0.0
+
+    def disconnect(self):
+        self._stop_event.set()
+        if self.ws_thread:
+            self.ws_thread.join(timeout=2)
 
 class FyersBridge:
     def __init__(self, client_id, secret, token):
@@ -3630,7 +3675,7 @@ def get_major_events_2026():
     return sorted(upcoming, key=lambda x: x["date"])
 
 # ==========================================
-# CORE BOT ENGINE (SniperBot) – with MCX option fix and real-time PnL updater
+# CORE BOT ENGINE (SniperBot) – with WebSocket, async DB, circuit breakers, slippage tracking
 # ==========================================
 
 class SniperBot:
@@ -3755,6 +3800,32 @@ class SniperBot:
         self.system_user_id = None
         self.user_role = "trader"
 
+        # WebSocket for Angel One
+        self.ws_angel = None
+        self.ws_angel_connected = False
+        self.live_prices_angel = {}
+
+        # Async DB queue
+        self.db_queue = queue.Queue()
+        self.db_thread = threading.Thread(target=self._db_worker, daemon=True)
+        self.db_thread.start()
+
+        # Circuit breaker: cooldown after loss streak
+        self.loss_streak_cooldown = False
+        self.cooldown_end_time = None
+
+    def _db_worker(self):
+        """Background thread to write trades to Supabase asynchronously."""
+        while True:
+            try:
+                data = self.db_queue.get(timeout=1)
+                if data and HAS_DB:
+                    supabase.table("trade_logs").insert(data).execute()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"DB write error: {e}")
+
     # ---------- Force Exit ----------
     def force_exit(self):
         with self.state["trade_lock"]:
@@ -3774,13 +3845,18 @@ class SniperBot:
                 if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
                     pnl = (t['entry'] - ltp) * t['qty']
                 else: 
-                    # This covers "BUY", "CE", "PE"
                     pnl = (ltp - t['entry']) * t['qty']
                 
                 if not self.is_mock and hasattr(self, "system_user_id"):
                     today = get_ist().strftime('%Y-%m-%d')
                     now = get_ist().strftime('%H:%M:%S')
-                    save_trade(self.system_user_id, today, now, t['symbol'], t['type'], t['qty'], t['entry'], ltp, pnl, "Manual Exit")
+                    slippage = abs(t.get('fill_price', ltp) - t.get('signal_price', t['entry']))
+                    self.db_queue.put({
+                        "user_id": self.system_user_id, "trade_date": today, "trade_time": now,
+                        "symbol": t['symbol'], "trade_type": t['type'], "qty": t['qty'],
+                        "entry_price": t['entry'], "exit_price": ltp,
+                        "pnl": pnl, "result": "Manual Exit", "slippage": slippage
+                    })
                 self.state["daily_pnl"] += pnl
                 self.state["active_trade"] = None
                 self.state["sound_queue"].append("exit")
@@ -3789,50 +3865,48 @@ class SniperBot:
 
     # ---------- Protect Profit ----------
     def protect_profit(self):
-      with self.state["trade_lock"]:
-        if self.state["active_trade"]:
-            trade = self.state["active_trade"]
-            ltp = trade.get('current_ltp', trade['entry'])
-            is_long = trade['type'] in ["CE", "BUY", "PE"]
-            # Calculate unrealised PnL
-            if is_long:
-                pnl = (ltp - trade['entry']) * trade['qty']
-            else:
-                pnl = (trade['entry'] - ltp) * trade['qty']
-
-            # Define profit thresholds and corresponding stop distances from entry
-            # Example: lock 0 profit when pnl >= 500, lock 500 when pnl >= 1000, lock 1000 when pnl >= 1500
-            thresholds = [
-                (500, 0),    # at 500 profit, move SL to entry (lock 0)
-                (1000, 500), # at 1000 profit, move SL to entry+500 (lock 500)
-                (1500, 1000) # at 1500 profit, move SL to entry+1000 (lock 1000)
-            ]
-
-            new_sl = None
-            for threshold, lock_amount in thresholds:
-                if pnl >= threshold:
-                    if is_long:
-                        new_sl = trade['entry'] + lock_amount / trade['qty']
-                    else:
-                        new_sl = trade['entry'] - lock_amount / trade['qty']
-
-            if new_sl is not None:
-                # Only update if the new SL improves protection
+        with self.state["trade_lock"]:
+            if self.state["active_trade"]:
+                trade = self.state["active_trade"]
+                ltp = trade.get('current_ltp', trade['entry'])
+                is_long = trade['type'] in ["CE", "BUY", "PE"]
+                # Calculate unrealised PnL
                 if is_long:
-                    if new_sl > trade['sl']:
-                        trade['sl'] = new_sl
-                        self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f} (locked ₹{lock_amount})")
-                        self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}, locked ₹{lock_amount}")
+                    pnl = (ltp - trade['entry']) * trade['qty']
                 else:
-                    if new_sl < trade['sl']:
-                        trade['sl'] = new_sl
-                        self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f} (locked ₹{lock_amount})")
-                        self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}, locked ₹{lock_amount}")
+                    pnl = (trade['entry'] - ltp) * trade['qty']
+
+                thresholds = [
+                    (500, 0),    # at 500 profit, move SL to entry (lock 0)
+                    (1000, 500), # at 1000 profit, move SL to entry+500 (lock 500)
+                    (1500, 1000) # at 1500 profit, move SL to entry+1000 (lock 1000)
+                ]
+
+                new_sl = None
+                for threshold, lock_amount in thresholds:
+                    if pnl >= threshold:
+                        if is_long:
+                            new_sl = trade['entry'] + lock_amount / trade['qty']
+                        else:
+                            new_sl = trade['entry'] - lock_amount / trade['qty']
+
+                if new_sl is not None:
+                    if is_long:
+                        if new_sl > trade['sl']:
+                            trade['sl'] = new_sl
+                            self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f} (locked ₹{lock_amount})")
+                            self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}, locked ₹{lock_amount}")
+                    else:
+                        if new_sl < trade['sl']:
+                            trade['sl'] = new_sl
+                            self.log(f"🛡️ Protect profit: SL moved to {new_sl:.2f} (locked ₹{lock_amount})")
+                            self.push_notify("Protect Profit", f"Stop loss moved to {new_sl:.2f}, locked ₹{lock_amount}")
+                else:
+                    self.log("No profit threshold reached to lock.")
             else:
-                self.log("No profit threshold reached to lock.")
-        else:
-            self.log("No active trade to protect")
-   # ---------- Background PnL Updater ----------
+                self.log("No active trade to protect")
+
+    # ---------- Background PnL Updater (now uses WebSocket prices) ----------
     def start_pnl_updater(self):
         def update():
             while True:
@@ -3842,21 +3916,18 @@ class SniperBot:
                     if ltp:
                         trade['current_ltp'] = ltp
                         
-                        # FIX: ONLY short-selling uses (Entry - LTP)
-                        # Buying CE or PE both use (LTP - Entry) because you want the premium to rise!
                         if trade['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]: 
                             pnl = (trade['entry'] - ltp) * trade['qty']
                         else:
-                            # This safely covers "BUY", "CE", "PE", "BUY_CE", "BUY_PE"
                             pnl = (ltp - trade['entry']) * trade['qty']
                             
                         trade['floating_pnl'] = pnl
                         st.session_state.tracker_updated = True
                 time.sleep(1)
         thread = threading.Thread(target=update, daemon=True)
-        # Add script run context so the thread can access Streamlit session state
         add_script_run_ctx(thread)
         thread.start()
+
     def load_daily_pnl(self):
         if self.is_mock or not HAS_DB:
             return 0.0
@@ -3938,6 +4009,46 @@ class SniperBot:
             else:
                 self.log(f"❌ Binance connection failed: {msg}")
         return False
+
+    def _angel_ws_on_message(self, wsapp, message):
+        """Handle incoming Angel One WebSocket messages."""
+        try:
+            data = json.loads(message)
+            if 'ltp' in data:
+                token = str(data['token'])
+                price = float(data['ltp'])
+                self.live_prices_angel[token] = price
+        except:
+            pass
+
+    def _angel_ws_on_error(self, wsapp, error):
+        self.log(f"Angel WebSocket error: {error}")
+        self.ws_angel_connected = False
+
+    def _angel_ws_on_close(self, wsapp, close_status_code, close_msg):
+        self.ws_angel_connected = False
+
+    def _angel_ws_on_open(self, wsapp):
+        self.ws_angel_connected = True
+        self.log("Angel WebSocket opened")
+
+    def start_angel_ws(self):
+        """Start Angel One WebSocket for live prices."""
+        if not self.api:
+            return
+        try:
+            auth_token = self.api.getAuthToken() if hasattr(self.api, 'getAuthToken') else None
+            if not auth_token:
+                return
+            self.ws_angel = SmartWebSocketV2(auth_token, self.api_key, self.client_id, self.api.feed_token)
+            self.ws_angel.on_open = self._angel_ws_on_open
+            self.ws_angel.on_message = self._angel_ws_on_message
+            self.ws_angel.on_error = self._angel_ws_on_error
+            self.ws_angel.on_close = self._angel_ws_on_close
+            self.ws_angel.connect()
+            # Subscribe to tokens (will be done later when needed)
+        except Exception as e:
+            self.log(f"Angel WebSocket start failed: {e}")
 
     def push_notify(self, title, message):
         self.state["ui_popups"].append({"title": title, "message": message})
@@ -4089,6 +4200,7 @@ class SniperBot:
                         self.client_name = f"Angel User ({fetched_name})" if fetched_name else f"Angel ({self.client_id})"
                         self._primary_client_set = True
                     self.log(f"✅ Angel One Connected as {fetched_name if fetched_name else self.client_id}")
+                    self.start_angel_ws()  # Start WebSocket for live prices
                     success = True
                 else:
                     self.log(f"❌ Angel Login failed: {res.get('message', 'Check credentials')}")
@@ -4206,8 +4318,23 @@ class SniperBot:
         log = logging.getLogger('werkzeug')
         log.setLevel(logging.ERROR)
 
+        # IP whitelist for TradingView (add official IPs here)
+        ALLOWED_IPS = ['54.240.152.0/24', '54.240.153.0/24']  # Example – replace with actual TV IPs
+
+        def is_allowed_ip(ip):
+            from ipaddress import ip_address, ip_network
+            for net in ALLOWED_IPS:
+                if ip_address(ip) in ip_network(net):
+                    return True
+            return False
+
         @app.route('/tv_webhook', methods=['POST'])
         def webhook():
+            client_ip = request.remote_addr
+            if not is_allowed_ip(client_ip):
+                self.log(f"Blocked webhook from {client_ip}")
+                return jsonify({"status": "unauthorized"}), 401
+
             data = request.json
             if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
                 action = data.get("action", "WAIT").upper()
@@ -4218,7 +4345,7 @@ class SniperBot:
             return jsonify({"status": "unauthorized"}), 401
 
         threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 5000, 'use_reloader': False}, daemon=True).start()
-        self.log("🌐 TradingView Webhook Listener Active on Port 5000")
+        self.log("🌐 TradingView Webhook Listener Active on Port 5000 (IP whitelisted)")
 
     def get_master(self):
         if self.token_map is None or self.token_map.empty:
@@ -4295,6 +4422,10 @@ class SniperBot:
         return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
+        # Use WebSocket if available for Angel One
+        if exchange in ["NSE", "NFO", "BSE", "BFO", "MCX"] and self.ws_angel_connected and token in self.live_prices_angel:
+            return self.live_prices_angel[token]
+
         if self.is_mock and token == "12345":
             if "CE" in symbol or "PE" in symbol:
                 if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
@@ -4416,7 +4547,6 @@ class SniperBot:
         # Standardize column names to lower case
         if df is not None and not df.empty:
             df.rename(columns=lambda x: x.lower(), inplace=True)
-            # Ensure required columns exist
             if 'open' not in df.columns: df['open'] = df['close']
             if 'high' not in df.columns: df['high'] = df['close']
             if 'low' not in df.columns: df['low'] = df['close']
@@ -5139,6 +5269,20 @@ class SniperBot:
                         self.state["is_running"] = False
                         break
 
+                    # Circuit breaker: cooldown after loss streak
+                    if not self.loss_streak_cooldown and st.session_state.loss_streak >= 3:
+                        self.loss_streak_cooldown = True
+                        self.cooldown_end_time = get_ist() + timedelta(minutes=30)
+                        self.log("⚠️ Loss streak >= 3 – cooldown for 30 minutes.")
+                        self.push_notify("Cooldown Active", "Trading paused for 30 minutes due to loss streak.")
+                    if self.loss_streak_cooldown and self.cooldown_end_time and get_ist() < self.cooldown_end_time:
+                        time.sleep(1)
+                        continue
+                    elif self.loss_streak_cooldown:
+                        self.loss_streak_cooldown = False
+                        self.log("✅ Cooldown ended – resuming.")
+                        self.push_notify("Cooldown Ended", "Trading resumed.")
+
                     if self.state.get("last_trade_time"):
                         seconds_since_last = (get_ist() - self.state["last_trade_time"]).total_seconds()
                         if seconds_since_last < 60:
@@ -5395,38 +5539,29 @@ class SniperBot:
                             if is_mock_mode:
                                 entry_ltp = self.apply_slippage(entry_ltp, signal)
 
-                           # Determine trade direction
+                            # Determine trade direction
                             is_long = (signal == "BUY_CE")
-                            
-                            # SMART CHECK: Did the bot resolve an Option Contract?
-                            is_option_contract = str(strike_sym).endswith("CE") or str(strike_sym).endswith("PE")
-                            
-                            if is_option_contract:
-                                trade_type = "CE" if str(strike_sym).endswith("CE") else "PE"
-                                is_price_rising = True # We are buying premium, expect it to rise
-                            elif is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA"]:
+                            if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA"]:
                                 trade_type = "BUY" if is_long else "SELL"
-                                is_price_rising = is_long
                             else:
                                 trade_type = "CE" if is_long else "PE"
-                                is_price_rising = True
 
                             # Calculate SL and TP based on direction
                             if is_crypto and df_candles is not None and len(df_candles) > 20:
                                 swing_high, swing_low = self.analyzer.get_support_resistance(df_candles)
-                                if is_price_rising and swing_low:
+                                if is_long and swing_low:
                                     dynamic_sl = swing_low
                                     tp1 = entry_ltp + (entry_ltp - swing_low) * 2
                                     tp2 = entry_ltp + (entry_ltp - swing_low) * 3
                                     tp3 = entry_ltp + (entry_ltp - swing_low) * 4
-                                elif not is_price_rising and swing_high:
+                                elif not is_long and swing_high:
                                     dynamic_sl = swing_high
                                     tp1 = entry_ltp - (swing_high - entry_ltp) * 2
                                     tp2 = entry_ltp - (swing_high - entry_ltp) * 3
                                     tp3 = entry_ltp - (swing_high - entry_ltp) * 4
                                 else:
                                     if three_five_seven and current_atr > 0:
-                                        if is_price_rising:
+                                        if is_long:
                                             dynamic_sl = entry_ltp - current_atr * 1.5
                                             tp1 = entry_ltp + current_atr * 3
                                             tp2 = entry_ltp + current_atr * 5
@@ -5437,19 +5572,19 @@ class SniperBot:
                                             tp2 = entry_ltp - current_atr * 5
                                             tp3 = entry_ltp - current_atr * 7
                                     else:
-                                        if not is_price_rising:  # SELL
+                                        if not is_long:  # SELL
                                             dynamic_sl = entry_ltp + sl_pts
                                             tp1 = entry_ltp - tgt_pts
                                             tp2 = entry_ltp - (tgt_pts * 2)
                                             tp3 = entry_ltp - (tgt_pts * 3)
-                                        else:  # BUY / CE / PE
+                                        else:  # BUY
                                             dynamic_sl = entry_ltp - sl_pts
                                             tp1 = entry_ltp + tgt_pts
                                             tp2 = entry_ltp + (tgt_pts * 2)
                                             tp3 = entry_ltp + (tgt_pts * 3)
                             else:
                                 if three_five_seven and current_atr > 0:
-                                    if is_price_rising:
+                                    if is_long:
                                         dynamic_sl = entry_ltp - current_atr * 1.5
                                         tp1 = entry_ltp + current_atr * 3
                                         tp2 = entry_ltp + current_atr * 5
@@ -5460,12 +5595,12 @@ class SniperBot:
                                         tp2 = entry_ltp - current_atr * 5
                                         tp3 = entry_ltp - current_atr * 7
                                 else:
-                                    if not is_price_rising:  # SELL
+                                    if not is_long:  # SELL
                                         dynamic_sl = entry_ltp + sl_pts
                                         tp1 = entry_ltp - tgt_pts
                                         tp2 = entry_ltp - (tgt_pts * 2)
                                         tp3 = entry_ltp - (tgt_pts * 3)
-                                    else:  # BUY / CE / PE
+                                    else:  # BUY
                                         dynamic_sl = entry_ltp - sl_pts
                                         tp1 = entry_ltp + tgt_pts
                                         tp2 = entry_ltp + (tgt_pts * 2)
@@ -5477,6 +5612,7 @@ class SniperBot:
                                 "exch": strike_exch,
                                 "type": trade_type,
                                 "entry": entry_ltp,
+                                "signal_price": spot,  # Record price at signal time for slippage
                                 "current_ltp": entry_ltp,
                                 "floating_pnl": 0.0,
                                 "highest_price": entry_ltp,
@@ -5498,9 +5634,9 @@ class SniperBot:
 
                             order_success = True
                             reject_reason = None
+                            fill_price = entry_ltp
                             if not is_mock_mode:
-                                # If it's an option (CE/PE), we always BUY to enter. If shorting futures, we SELL.
-                                exec_side = "BUY" if trade_type in ["CE", "PE", "BUY"] else "SELL"
+                                exec_side = "SELL" if not is_long else "BUY"
                                 if use_limit_orders and is_crypto:
                                     order_type = "LIMIT"
                                     order_price = entry_ltp
@@ -5515,6 +5651,12 @@ class SniperBot:
                                     order_success = True
                                 else:
                                     new_trade["simulated"] = False
+                                    # Attempt to get actual fill price (simplified)
+                                    fill_price = self.get_live_price(strike_exch, strike_sym, strike_token)
+                                    if fill_price is None:
+                                        fill_price = entry_ltp
+                                    new_trade["fill_price"] = fill_price
+                                    new_trade["slippage"] = abs(fill_price - new_trade["signal_price"])
                             else:
                                 new_trade["simulated"] = False
 
@@ -5522,13 +5664,13 @@ class SniperBot:
                                 self.state["active_trade"] = new_trade
                                 self.state["trades_today"] += 1
                                 self.state["last_trade_time"] = get_ist()
-                                self.push_notify("Trade Entered" + (" (SIMULATED)" if new_trade.get("simulated") else ""), f"Entered {qty} {strike_sym} @ {entry_ltp}")
+                                self.push_notify("Trade Entered" + (" (SIMULATED)" if new_trade.get("simulated") else ""), f"Entered {qty} {strike_sym} @ {fill_price}")
                                 self.state["ghost_memory"][f"{index}_{signal}"] = get_ist()
                                 if is_hz:
                                     self.state["hz_trades"].append({
                                         "time": time_str,
                                         "symbol": strike_sym,
-                                        "entry": entry_ltp,
+                                        "entry": fill_price,
                                         "signal_strength": signal_strength
                                     })
                                 self.state["pending_signal"] = None
@@ -5540,7 +5682,7 @@ class SniperBot:
                         pnl = trade.get('floating_pnl', 0.0)
 
                         # Determine direction
-                        is_long = (trade['type'] in ["CE", "PE", "BUY", "BUY_CE", "BUY_PE"])
+                        is_long = (trade['type'] in ["CE", "BUY"])
 
                         # Trailing stop logic
                         if tsl_pts > 0:
@@ -5573,8 +5715,7 @@ class SniperBot:
 
                         if hit_tp or hit_sl or market_close:
                             if not is_mock_mode and not trade.get("simulated"):
-                                # Reverse of entry: If we shorted a future ("SELL"), we BUY to cover. Otherwise, we SELL to close.
-                                exec_side = "BUY" if trade['type'] == "SELL" else "SELL"
+                                exec_side = "BUY" if not is_long else "SELL"
                                 self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'], "MARKET")
                             if hit_tp:
                                 self.state["sound_queue"].append("tp")
@@ -5591,7 +5732,13 @@ class SniperBot:
                             self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: {round(pnl, 2)}")
                             if not self.is_mock:
                                 user_id = getattr(self, "system_user_id", self.api_key)
-                                save_trade(user_id, today_date, time_str, trade['symbol'], trade['type'], trade['qty'], trade['entry'], ltp, round(pnl, 2), win_text)
+                                slippage = trade.get('slippage', 0)
+                                self.db_queue.put({
+                                    "user_id": user_id, "trade_date": today_date, "trade_time": time_str,
+                                    "symbol": trade['symbol'], "trade_type": trade['type'], "qty": trade['qty'],
+                                    "entry_price": trade['entry'], "exit_price": ltp,
+                                    "pnl": round(pnl, 2), "result": win_text, "slippage": slippage
+                                })
                                 journal_entry = {
                                     "user_id": user_id,
                                     "trade_date": today_date,
@@ -5603,7 +5750,8 @@ class SniperBot:
                                     "exit": ltp,
                                     "pnl": round(pnl, 2),
                                     "result": win_text,
-                                    "strategy": self.settings.get('strategy', 'Unknown')
+                                    "strategy": self.settings.get('strategy', 'Unknown'),
+                                    "slippage": slippage
                                 }
                                 save_trade_journal(user_id, journal_entry)
                             else:
@@ -5618,7 +5766,8 @@ class SniperBot:
                                     "Entry Price": trade['entry'],
                                     "Exit Price": ltp,
                                     "PnL": round(pnl, 2),
-                                    "Result": win_text
+                                    "Result": win_text,
+                                    "Slippage": trade.get('slippage', 0)
                                 })
                             if trade.get('is_hz'):
                                 self.state["hz_pnl"] += pnl
@@ -5752,7 +5901,6 @@ if st.session_state.page == "landing":
         By accessing and using this platform, you agree to the following:
 
         - You are solely responsible for all trading decisions and outcomes.
-        - This software is provided "as is" without any warranties.
         - Past performance does not guarantee future results.
         - You acknowledge the high risk of financial loss in trading.
         - You will not hold the developers liable for any losses.
@@ -6190,7 +6338,8 @@ elif st.session_state.page == "dashboard":
 
     bot = st.session_state.bot
 
-    if st.session_state.user_id in ["developer@example.com", "vijayakumar@example.com"]:
+    # Admin check based on user_id or phone/email
+    if st.session_state.user_id in ["9964915530", "vijayakumar.suryavanshi@gmail.com"]:
         st.session_state.is_developer = True
     else:
         st.session_state.is_developer = False
@@ -6535,6 +6684,7 @@ elif st.session_state.page == "dashboard":
             <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
                 <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
                 <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
+                <p style="margin: 5px 0 0 0; font-size: 0.85rem; color: #cbd5e1; font-weight: 500;">Strategy: {STRATEGY}</p>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
                     <div style="display: flex; justify-content: space-between;">
                         <div>
@@ -6571,10 +6721,10 @@ elif st.session_state.page == "dashboard":
                 if live_ltp:
                     t['current_ltp'] = live_ltp
                     # PnL calculation based on direction
-                    if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                       t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
+                    if t['type'] in ["SELL", "PE"]:
+                        t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                     else:
-                       t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
+                        t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
                 
                 ltp = t.get('current_ltp', t['entry'])
                 pnl = t.get('floating_pnl', 0.0)
@@ -6627,8 +6777,6 @@ elif st.session_state.page == "dashboard":
 </div>"""
                 
                 st.markdown(html_block, unsafe_allow_html=True)
-                
-                # Notice we completely REMOVED the button from here!
             
             else:
                 st.markdown("""
@@ -6642,22 +6790,25 @@ elif st.session_state.page == "dashboard":
 
         # 2. THE FIX: Place the Exit Button OUTSIDE the fragment in the global thread!
         if bot.state.get("active_trade"):
-            # Exit button
-            st.button(
-                "🛑 EXIT TRADE INSTANTLY", 
-                type="primary", 
-                use_container_width=True, 
-                key="global_exit_btn",
-                on_click=bot.force_exit
-            )
-            # Protect profit button
-            st.button(
-                "🛡️ Protect Profit", 
-                type="secondary", 
-                use_container_width=True, 
-                key="protect_profit_btn",
-                on_click=bot.protect_profit
-            )
+            st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
+            col_exit, col_protect = st.columns(2)
+            with col_exit:
+                st.button(
+                    "🛑 EXIT TRADE INSTANTLY", 
+                    type="primary", 
+                    use_container_width=True, 
+                    key="global_exit_btn",
+                    on_click=bot.force_exit
+                )
+            with col_protect:
+                st.button(
+                    "🛡️ Protect Profit", 
+                    type="secondary", 
+                    use_container_width=True, 
+                    key="protect_profit_btn",
+                    on_click=bot.protect_profit
+                )
+            st.markdown('</div>', unsafe_allow_html=True)
 
         ltp_val = round(bot.state['spot'], 4)
         trend_val = bot.state['current_trend']
@@ -7123,57 +7274,57 @@ elif st.session_state.page == "dashboard":
                 with col_hz1:
                     min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
                 with col_hz2:
-                    st.info("Scan now (auto‑cached daily)")
-                if st.button("🔍 Scan Hero/Zero Now", use_container_width=True):
-                    with st.spinner("Scanning for Hero/Zero patterns..."):
-                        st.markdown("### Nifty 50 Stocks")
-                        nifty_results = bot.scan_hero_zero_indian_stocks()
-                        if not nifty_results.empty:
-                            st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
-                            styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
-                            st.dataframe(styled_results, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
+                    st.info("Auto‑scan (cached every 5 min)")
+                # Auto‑run the scanner without button
+                with st.spinner("Scanning for Hero/Zero patterns..."):
+                    st.markdown("### Nifty 50 Stocks")
+                    nifty_results = bot.scan_hero_zero_indian_stocks()
+                    if not nifty_results.empty:
+                        st.success(f"Found {len(nifty_results)} Hero/Zero opportunities in Nifty 50!")
+                        styled_results = nifty_results.style.map(color_direction, subset=['Direction'])
+                        st.dataframe(styled_results, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
 
-                        st.markdown("### Penny Stocks")
-                        penny_results = bot.scan_penny_stocks()
-                        if not penny_results.empty:
-                            st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
-                            penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
-                            st.dataframe(penny_styled, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
+                    st.markdown("### Penny Stocks")
+                    penny_results = bot.scan_penny_stocks()
+                    if not penny_results.empty:
+                        st.success(f"Found {len(penny_results)} Hero/Zero opportunities in Penny Stocks!")
+                        penny_styled = penny_results.style.map(color_direction, subset=['Direction'])
+                        st.dataframe(penny_styled, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
 
-                        st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
-                        pin_results = bot.scan_pin_bars()
-                        if pin_results:
-                            pin_df = pd.DataFrame(pin_results)
-                            st.dataframe(pin_df, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No pin bar reversals detected at this moment")
+                    st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
+                    pin_results = bot.scan_pin_bars()
+                    if pin_results:
+                        pin_df = pd.DataFrame(pin_results)
+                        st.dataframe(pin_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No pin bar reversals detected at this moment")
 
-                    st.markdown("### 📝 Entry Instructions")
-                    st.info("""
-                    **For HERO (BUY):**
-                    - **Entry:** Current price
-                    - **Stop Loss:** 1.5x ATR below entry
-                    - **Target 1:** 3x ATR above entry (Book 50%)
-                    - **Target 2:** 5x ATR above entry (Book remaining)
-                    - **Risk/Reward:** 1:2
-                    **For ZERO (SELL):**
-                    - **Entry:** Current price
-                    - **Stop Loss:** 1.5x ATR above entry
-                    - **Target 1:** 3x ATR below entry (Book 50%)
-                    - **Target 2:** 5x ATR below entry (Book remaining)
-                    - **Risk/Reward:** 1:2
-                    """)
-                    st.markdown("### ⏰ Best Trading Times (IST)")
-                    st.markdown("""
-                    - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
-                    - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
-                    - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
-                    - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
-                    """)
+                st.markdown("### 📝 Entry Instructions")
+                st.info("""
+                **For HERO (BUY):**
+                - **Entry:** Current price
+                - **Stop Loss:** 1.5x ATR below entry
+                - **Target 1:** 3x ATR above entry (Book 50%)
+                - **Target 2:** 5x ATR above entry (Book remaining)
+                - **Risk/Reward:** 1:2
+                **For ZERO (SELL):**
+                - **Entry:** Current price
+                - **Stop Loss:** 1.5x ATR above entry
+                - **Target 1:** 3x ATR below entry (Book 50%)
+                - **Target 2:** 5x ATR below entry (Book remaining)
+                - **Risk/Reward:** 1:2
+                """)
+                st.markdown("### ⏰ Best Trading Times (IST)")
+                st.markdown("""
+                - **Opening Range:** 9:15 AM - 10:00 AM (Best momentum)
+                - **Mid-Morning:** 10:30 AM - 11:30 AM (Good follow-through)
+                - **Closing Range:** 2:00 PM - 3:15 PM (Strong moves)
+                - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
+                """)
 
     # ---------- TAB 3: LOGS (FIXED CLEAR BUTTON & IMPROVED LEDGER/TAX) ----------
     with tab3:
@@ -7617,6 +7768,30 @@ elif st.session_state.page == "dashboard":
                 st.line_chart(res['equity'])
         else:
             st.info("Click 'Run Backtest' to start.")
+
+    # ---------- TAB 8: ADMIN (if developer) ----------
+    if st.session_state.is_developer:
+        with tab8:
+            st.markdown('<div class="admin-card">', unsafe_allow_html=True)
+            st.header("🛡️ Admin Panel")
+            st.subheader("User Management")
+            if HAS_DB:
+                try:
+                    users = supabase.table("user_credentials").select("*").execute()
+                    if users.data:
+                        df_users = pd.DataFrame(users.data)
+                        st.dataframe(df_users, use_container_width=True)
+                        selected_user = st.selectbox("Select User to Manage", df_users['user_id'].tolist())
+                        new_role = st.selectbox("Set Role", ["trader", "admin"], index=0)
+                        if st.button("Update Role", on_click=lambda: play_sound_now("click")):
+                            supabase.table("user_credentials").update({"role": new_role}).eq("user_id", selected_user).execute()
+                            st.success(f"Role updated for {selected_user}")
+                            st.rerun()
+                except Exception as e:
+                    st.error(f"Error fetching users: {e}")
+            else:
+                st.warning("Database not connected.")
+            st.markdown('</div>', unsafe_allow_html=True)
 
     # ---------- BOTTOM DOCK ----------
     st.markdown('<div class="bottom-dock">', unsafe_allow_html=True)
