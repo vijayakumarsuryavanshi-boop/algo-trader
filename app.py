@@ -4915,16 +4915,31 @@ class SniperBot:
                 self.log(f"Calculated quantity for {symbol}: {clean_qty} (price={price}, cap={max_cap}, lev={leverage})")
                 self.settings.setdefault("profit_thresholds", [(500, 0), (1000, 500), (1500, 1000)])
 
-                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5).json()
+                exchange_response = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5)
                 market_symbol = None
-                for mkt in exchange_info:
-                    if mkt['cointype'].upper() == base_coin.upper() and mkt['currency'].upper() in ['USDT', 'INR']:
-                        if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
-                            market_symbol = mkt['symbol']
-                            break
-                        elif market_type == "Spot" and not mkt.get('is_future', False):
-                            market_symbol = mkt['symbol']
-                            break
+                
+                if exchange_response.status_code == 200:
+                    exchange_info = exchange_response.json()
+                    
+                    # Validate that the response is actually a list of markets
+                    if isinstance(exchange_info, list):
+                        for mkt in exchange_info:
+                            # Double check that the item is a dictionary to prevent string indexing errors
+                            if isinstance(mkt, dict):
+                                cointype = mkt.get('cointype', '')
+                                currency = mkt.get('currency', '')
+                                
+                                if cointype.upper() == base_coin.upper() and currency.upper() in ['USDT', 'INR']:
+                                    if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
+                                        market_symbol = mkt.get('symbol')
+                                        break
+                                    elif market_type == "Spot" and not mkt.get('is_future', False):
+                                        market_symbol = mkt.get('symbol')
+                                        break
+                    else:
+                        self.log(f"⚠️ Unexpected CoinDCX API format: {exchange_info}")
+                else:
+                    self.log(f"⚠️ Failed to fetch CoinDCX markets. HTTP {exchange_response.status_code}")
                 if not market_symbol:
                     if market_type in ["Futures", "Options"]:
                         market_symbol = f"B-{base_coin}_USDT"
