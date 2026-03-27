@@ -4890,7 +4890,7 @@ class SniperBot:
                 return None, f"Delta exception: {str(e)}"
 
         if exchange == "COINDCX" and self.coindcx_api:
-    try:
+        try:
         ts = int(round(time.time() * 1000))
         market_type = self.settings.get("crypto_mode", "Spot")
         base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
