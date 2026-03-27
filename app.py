@@ -4890,132 +4890,100 @@ class SniperBot:
                 return None, f"Delta exception: {str(e)}"
 
         if exchange == "COINDCX" and self.coindcx_api:
-        try:
-        ts = int(round(time.time() * 1000))
-        market_type = self.settings.get("crypto_mode", "Spot")
-        base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-        price_live = self.get_live_price(exchange, symbol, token)
-        if not price_live and not price:
-            self.log("❌ Cannot place CoinDCX order: price not available")
-            return None, "Price not available"
-        if not price:
-            price = price_live
-        max_cap = self.settings.get('max_capital', 15000)
-        leverage = self.settings.get('leverage', 1)
-        position_value = max_cap * leverage
-        raw_qty = position_value / price
-        if "BTC" in symbol or "ETH" in symbol:
-            clean_qty = round(raw_qty, 4)
-        elif "XRP" in symbol or "ADA" in symbol or "SOL" in symbol or "DOT" in symbol or "LINK" in symbol:
-            clean_qty = round(raw_qty, 1)
-        else:
-            clean_qty = round(raw_qty, 0)
-        if clean_qty < 0.0001:
-            clean_qty = 0.0001
-        self.log(f"Calculated quantity for {symbol}: {clean_qty} (price={price}, cap={max_cap}, lev={leverage})")
-
-        # Fetch market info to get correct symbol
-        exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5).json()
-        market_symbol = None
-        for mkt in exchange_info:
-            if mkt['cointype'].upper() == base_coin.upper() and mkt['currency'].upper() in ['USDT', 'INR']:
-                if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
-                    market_symbol = mkt['symbol']
-                    break
-                elif market_type == "Spot" and not mkt.get('is_future', False):
-                    market_symbol = mkt['symbol']
-                    break
-        if not market_symbol:
-            # Fallback – use the correct format: B-<coin>USDT for futures, <coin>USDT for spot
-            if market_type in ["Futures", "Options"]:
-                market_symbol = f"B-{base_coin}USDT"   # e.g., B-BTCUSDT (no underscore)
-            else:
-                market_symbol = f"{base_coin}USDT"
-            self.log(f"⚠️ CoinDCX market symbol not found, using constructed: {market_symbol}")
-
-        # Prepare payload
-        if market_type in ["Futures", "Options"]:
-            coin_side = "long" if side.lower() == "buy" else "short"
-            payload = {
-                "side": coin_side,
-                "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order",
-                "pair": market_symbol,
-                "total_quantity": clean_qty,
-                "timestamp": ts
-            }
-            if order_type.upper() == "LIMIT" and price:
-                payload["price"] = price
-            endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
-        else:
-            payload = {
-                "side": side.lower(),
-                "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order",
-                "market": market_symbol,
-                "total_quantity": clean_qty,
-                "timestamp": ts
-            }
-            if order_type.upper() == "LIMIT" and price:
-                payload["price"] = price
-            endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
-
-        payload_str = json.dumps(payload, separators=(',', ':'))
-        secret_bytes = bytes(self.coindcx_secret, 'utf-8')
-        signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
-        headers = {
-            'X-AUTH-APIKEY': self.coindcx_api,
-            'X-AUTH-SIGNATURE': signature,
-            'Content-Type': 'application/json'
-        }
-        self.log(f"📡 CoinDCX payload: {payload_str}")
-        res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
-
-        if res.status_code == 200:
-            response_data = res.json()
-            # Handle different response types
-            if isinstance(response_data, dict):
-                if response_data.get('status') == 'success' or 'id' in response_data or 'order_id' in response_data:
-                    order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
+            try:
+                ts = int(round(time.time() * 1000))
+                market_type = self.settings.get("crypto_mode", "Spot")
+                base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
+                price_live = self.get_live_price(exchange, symbol, token)
+                if not price_live and not price:
+                    self.log("❌ Cannot place CoinDCX order: price not available")
+                    return None, "Price not available"
+                if not price:
+                    price = price_live
+                max_cap = self.settings.get('max_capital', 15000)
+                leverage = self.settings.get('leverage', 1)
+                position_value = max_cap * leverage
+                raw_qty = position_value / price
+                if "BTC" in symbol or "ETH" in symbol:
+                    clean_qty = round(raw_qty, 4)
+                elif "XRP" in symbol or "ADA" in symbol or "SOL" in symbol or "DOT" in symbol or "LINK" in symbol:
+                    clean_qty = round(raw_qty, 1)
                 else:
-                    error_msg = response_data.get('message', 'Unknown error')
-                    self.log(f"❌ CoinDCX API returned error: {error_msg}")
-                    return None, f"CoinDCX error: {error_msg}"
-            elif isinstance(response_data, list):
-                if len(response_data) > 0:
-                    first_item = response_data[0]
-                    if isinstance(first_item, dict):
-                        order_id = first_item.get('id', 'DCX_ORDER_OK')
+                    clean_qty = round(raw_qty, 0)
+                if clean_qty < 0.0001:
+                    clean_qty = 0.0001
+                self.log(f"Calculated quantity for {symbol}: {clean_qty} (price={price}, cap={max_cap}, lev={leverage})")
+                self.settings.setdefault("profit_thresholds", [(500, 0), (1000, 500), (1500, 1000)])
+
+                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5).json()
+                market_symbol = None
+                for mkt in exchange_info:
+                    if mkt['cointype'].upper() == base_coin.upper() and mkt['currency'].upper() in ['USDT', 'INR']:
+                        if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
+                            market_symbol = mkt['symbol']
+                            break
+                        elif market_type == "Spot" and not mkt.get('is_future', False):
+                            market_symbol = mkt['symbol']
+                            break
+                if not market_symbol:
+                    if market_type in ["Futures", "Options"]:
+                        market_symbol = f"B-{base_coin}_USDT"
+                    else:
+                        market_symbol = f"{base_coin}USDT"
+                    self.log(f"⚠️ CoinDCX market symbol not found, using constructed: {market_symbol}")
+
+                if market_type in ["Futures", "Options"]:
+                    coin_side = "long" if side.lower() == "buy" else "short"
+                    payload = {
+                        "side": coin_side,
+                        "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order",
+                        "pair": market_symbol,
+                        "total_quantity": clean_qty,
+                        "timestamp": ts
+                    }
+                    if order_type.upper() == "LIMIT" and price:
+                        payload["price"] = price
+                    endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
+                else:
+                    payload = {
+                        "side": side.lower(),
+                        "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order",
+                        "market": market_symbol,
+                        "total_quantity": clean_qty,
+                        "timestamp": ts
+                    }
+                    if order_type.upper() == "LIMIT" and price:
+                        payload["price"] = price
+                    endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
+
+                payload_str = json.dumps(payload, separators=(',', ':'))
+                secret_bytes = bytes(self.coindcx_secret, 'utf-8')
+                signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+                headers = {
+                    'X-AUTH-APIKEY': self.coindcx_api,
+                    'X-AUTH-SIGNATURE': signature,
+                    'Content-Type': 'application/json'
+                }
+                self.log(f"📡 CoinDCX payload: {payload_str}")
+                res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
+                if res.status_code == 200:
+                    response_data = res.json()
+                    if isinstance(response_data, list) and len(response_data) > 0:
+                        order_id = response_data[0].get('id', 'DCX_ORDER_OK')
+                    elif isinstance(response_data, dict):
+                        order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
                     else:
                         order_id = 'DCX_ORDER_OK'
+                    self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
+                    return order_id, None
                 else:
-                    order_id = 'DCX_ORDER_OK'
-            elif isinstance(response_data, str):
-                self.log(f"✅ CoinDCX order placed, response string: {response_data}")
-                order_id = 'DCX_ORDER_OK'
-            else:
-                order_id = 'DCX_ORDER_OK'
-            self.log(f"✅ CoinDCX Order Success! ID: {order_id}")
-            return order_id, None
-        else:
-            # Enhanced error logging
-            try:
-                error_json = res.json()
-                error_msg = error_json.get('message', 'Unknown error')
-                # Some APIs return nested error
-                if 'data' in error_json and 'message' in error_json['data']:
-                    error_msg = error_json['data']['message']
-                elif 'error' in error_json and isinstance(error_json['error'], dict):
-                    error_msg = error_json['error'].get('message', 'Unknown error')
-            except:
-                error_msg = res.text.strip() if res.text else "Unknown error"
-                if not error_msg:
-                    error_msg = f"HTTP {res.status_code}"
-            self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {error_msg}")
-            # Log full response for debugging (truncated)
-            self.log(f"Full response: {res.text[:500]}")
-            return None, f"CoinDCX rejected: {error_msg}"
-    except Exception as e:
-        self.log(f"❌ CoinDCX Exception: {e}")
-        return None, f"CoinDCX exception: {str(e)}"
+                    error_msg = res.text if res.text else "Unknown error"
+                    self.log(f"❌ CoinDCX API Rejected [{res.status_code}]: {error_msg}")
+                    return None, f"CoinDCX rejected: {error_msg}"
+            except Exception as e:
+                self.log(f"❌ CoinDCX Exception: {e}")
+                return None, f"CoinDCX exception: {str(e)}"
+
         if broker == "Zerodha" and self.kite:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
