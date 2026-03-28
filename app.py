@@ -38,6 +38,8 @@ import functools
 import random
 import socketio
 import asyncio
+from datetime import datetime, timedelta
+
 
 # ---------- Optional imports with fallbacks ----------
 try:
@@ -5871,14 +5873,15 @@ class SniperBot:
 # ==========================================
 if st.session_state.page == "landing":
     # Holiday and event info for tomorrow
+    tomorrow_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     tomorrow_holiday, tomorrow_event = get_tomorrow_info()
     info_line = ""
     if tomorrow_holiday:
-        info_line += f"📅 Tomorrow: {tomorrow_holiday} (Market Closed)"
+        info_line += f"📅 Tomorrow ({tomorrow_date}): {tomorrow_holiday} (Market Closed)"
     if tomorrow_event:
         if info_line:
             info_line += " | "
-        info_line += f"📊 Tomorrow: {tomorrow_event}"
+        info_line += f"📊 Tomorrow ({tomorrow_date}): {tomorrow_event}"
     if info_line:
         st.info(info_line)
 
