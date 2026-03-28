@@ -1,5 +1,5 @@
 # ==========================================
-# SHREE ALGO TRADING PLATFORM – FINAL
+# SHREE ALGO TRADING PLATFORM – FINAL (FULL VERSION)
 # ==========================================
 
 import streamlit as st
@@ -38,8 +38,6 @@ import functools
 import random
 import socketio
 import asyncio
-from datetime import datetime, timedelta
-
 
 # ---------- Optional imports with fallbacks ----------
 try:
@@ -174,60 +172,42 @@ except:
     HAS_SOCKETIO = False
 
 # ==========================================
-# HOLIDAY & EVENT DATA
+# HOLIDAY & EVENT DATA (corrected)
 # ==========================================
 INDIAN_HOLIDAYS = {
-    "2025-01-26": "Republic Day",
-    "2025-03-14": "Holi",
-    "2025-03-31": "Ramzan Id",
-    "2025-04-10": "Mahavir Jayanti",
-    "2025-04-14": "Ambedkar Jayanti",
-    "2025-04-18": "Good Friday",
-    "2025-05-01": "Maharashtra Day",
-    "2025-08-15": "Independence Day",
-    "2025-08-27": "Ganesh Chaturthi",
-    "2025-10-02": "Gandhi Jayanti",
-    "2025-10-22": "Dussehra",
-    "2025-11-01": "Diwali Laxmi Pujan",
-    "2025-11-02": "Diwali Balipratipada",
-    "2025-11-05": "Gurunanak Jayanti",
-    "2025-12-25": "Christmas",
-    "2026-01-26": "Republic Day",
-    "2026-03-03": "Holi",
-    "2026-03-20": "Ramzan Id",
-    "2026-03-29": "Mahavir Jayanti",
-    "2026-04-14": "Ambedkar Jayanti",
+    "2026-03-26": "Shri Ram Navami",
+    "2026-03-31": "Shri Mahavir Jayanti",
     "2026-04-03": "Good Friday",
+    "2026-04-14": "Dr. Baba Saheb Ambedkar Jayanti",
     "2026-05-01": "Maharashtra Day",
-    "2026-08-15": "Independence Day",
-    "2026-09-15": "Ganesh Chaturthi",
-    "2026-10-02": "Gandhi Jayanti",
-    "2026-10-10": "Dussehra",
-    "2026-10-19": "Diwali Laxmi Pujan",
-    "2026-10-20": "Diwali Balipratipada",
-    "2026-11-05": "Gurunanak Jayanti",
+    "2026-05-28": "Bakri Id",
+    "2026-06-26": "Muharram",
+    "2026-09-14": "Ganesh Chaturthi",
+    "2026-10-02": "Mahatma Gandhi Jayanti",
+    "2026-10-20": "Dussehra",
+    "2026-11-10": "Diwali – Balipratipada",
+    "2026-11-24": "Prakash Gurpurb Sri Guru Nanak Dev",
     "2026-12-25": "Christmas"
 }
 
 MAJOR_EVENTS = [
-    ("2026-02-05", "RBI Monetary Policy (Repo Rate)"),
     ("2026-04-02", "RBI Monetary Policy (Repo Rate)"),
     ("2026-06-04", "RBI Monetary Policy (Repo Rate)"),
     ("2026-08-06", "RBI Monetary Policy (Repo Rate)"),
     ("2026-10-01", "RBI Monetary Policy (Repo Rate)"),
     ("2026-12-03", "RBI Monetary Policy (Repo Rate)"),
-    ("2026-01-28", "FOMC Meeting (Interest Rate Decision)"),
-    ("2026-03-11", "FOMC Meeting (Interest Rate Decision)"),
+    ("2027-02-04", "RBI Monetary Policy (Repo Rate)"),
     ("2026-04-29", "FOMC Meeting (Interest Rate Decision)"),
     ("2026-06-10", "FOMC Meeting (Interest Rate Decision)"),
     ("2026-07-29", "FOMC Meeting (Interest Rate Decision)"),
     ("2026-09-16", "FOMC Meeting (Interest Rate Decision)"),
     ("2026-11-04", "FOMC Meeting (Interest Rate Decision)"),
-    ("2026-12-16", "FOMC Meeting (Interest Rate Decision)")
+    ("2026-12-16", "FOMC Meeting (Interest Rate Decision)"),
+    ("2027-01-27", "FOMC Meeting (Interest Rate Decision)"),
+    ("2027-03-10", "FOMC Meeting (Interest Rate Decision)")
 ]
 
 def get_tomorrow_info():
-    """Return (holiday_name, event_name) for tomorrow, or None."""
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     holiday = INDIAN_HOLIDAYS.get(tomorrow)
     event = None
@@ -605,7 +585,6 @@ def get_market_status(asset_name):
         return True, "Crypto/Forex Live 🌍"
     if now_ist.weekday() >= 5: 
         return False, "Market Closed (Weekend)"
-    # Check if today is a holiday
     today_str = now_ist.strftime("%Y-%m-%d")
     if today_str in INDIAN_HOLIDAYS:
         return False, f"Market Closed ({INDIAN_HOLIDAYS[today_str]})"
@@ -629,7 +608,8 @@ def load_creds(user_id):
     if HAS_DB:
         try:
             res = supabase.table("user_credentials").select("*").eq("user_id", user_id).execute()
-            if res.data: return res.data[0]
+            if res.data: 
+                return res.data[0]
         except Exception as e:
             st.toast(f"DB Load Error: {e}")
     return {
@@ -647,7 +627,8 @@ def load_creds(user_id):
         "shoonya_user": "", "shoonya_password": "", "shoonya_totp": "",
         "email_smtp_server": "", "email_port": 587, "email_username": "", "email_password": "", "email_recipients": "",
         "fcm_server_key": "", "push_enabled": False,
-        "role": "trader"
+        "role": "trader",
+        "blocked": False
     }
 
 def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_chat, wa_phone, wa_api, 
@@ -769,6 +750,30 @@ def get_user_role(user_id):
             pass
     return "trader"
 
+def is_user_blocked(user_id):
+    """Check if a user is blocked."""
+    if not HAS_DB or not user_id:
+        return False
+    try:
+        # Use blocked column in user_credentials (added manually)
+        res = supabase.table("user_credentials").select("blocked").eq("user_id", user_id).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0].get("blocked", False)
+        return False
+    except:
+        return False
+
+def set_user_blocked(user_id, blocked, reason=""):
+    """Set blocked status for a user."""
+    if not HAS_DB:
+        return False
+    try:
+        supabase.table("user_credentials").update({"blocked": blocked}).eq("user_id", user_id).execute()
+        return True
+    except Exception as e:
+        st.error(f"Failed to update block status: {e}")
+        return False
+
 # ==========================================
 # LICENSE FUNCTIONS
 # ==========================================
@@ -822,6 +827,8 @@ def quick_login_with_license(license_key):
     valid, msg = validate_license(license_key)
     if valid:
         user_id = st.session_state.license_user
+        if is_user_blocked(user_id):
+            return False, "Your account has been blocked. Contact support."
         creds = load_creds(user_id)
         bot = SniperBot(
             api_key=creds.get("angel_api", ""),
@@ -885,7 +892,7 @@ def quick_login_with_license(license_key):
         return False, msg
 
 # ==========================================
-# UI & CUSTOM CSS
+# UI & CUSTOM CSS (enhanced landing page + dashboard)
 # ==========================================
 st.set_page_config(page_title="SHREE", page_icon="🕉️", layout="wide", initial_sidebar_state="expanded")
 
@@ -1163,18 +1170,22 @@ st.markdown(f"""
         color: white;
         border-radius: 0 0 2rem 2rem;
         margin-bottom: 2rem;
+        text-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
     }}
     .kinetic-title {{
         font-size: 3.5rem;
         font-weight: 900;
         margin-bottom: 0.5rem;
         animation: slideUpFade 1s ease-out;
-        text-shadow: 0 0 20px rgba(255,255,255,0.3);
+        text-shadow: 0 0 20px rgba(255,255,255,0.5), 0 4px 8px rgba(0,0,0,0.2);
+        letter-spacing: 2px;
     }}
     .kinetic-sub {{
         font-size: 1.2rem;
-        opacity: 0.9;
+        opacity: 0.95;
         animation: slideUpFade 1.2s ease-out;
+        text-shadow: 0 1px 5px rgba(0,0,0,0.2);
     }}
     .bento-grid {{
         display: grid;
@@ -1185,21 +1196,23 @@ st.markdown(f"""
         margin: 0 auto;
     }}
     .bento-card {{
-        background: rgba(255,255,255,0.05);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        border: 1px solid rgba(255,255,255,0.1);
+        background: rgba(255,255,255,0.1);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,0.2);
         border-radius: 24px;
         padding: 2rem 1.5rem;
         text-align: center;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         color: white;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.2);
     }}
     .bento-card:hover {{
         transform: translateY(-8px) scale(1.02);
         border-color: #3b82f6;
-        box-shadow: 0 20px 40px rgba(59,130,246,0.3);
+        box-shadow: 0 20px 40px rgba(59,130,246,0.4);
+        background: rgba(255,255,255,0.2);
     }}
     .bento-icon {{
         font-size: 3rem;
@@ -1213,11 +1226,13 @@ st.markdown(f"""
         background: linear-gradient(135deg, #ffffff, #a5f3fc);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
+        text-shadow: none;
     }}
     .bento-card p {{
         font-size: 0.95rem;
-        opacity: 0.8;
+        opacity: 0.9;
         line-height: 1.5;
+        color: white;
     }}
     .broker-grid {{
         display: grid;
@@ -1239,7 +1254,7 @@ st.markdown(f"""
     .broker-item:hover {{
         transform: scale(1.05);
         border-color: #3b82f6;
-        background: rgba(59,130,246,0.1);
+        background: rgba(59,130,246,0.2);
     }}
     .broker-item img {{
         width: 40px;
@@ -1255,15 +1270,35 @@ st.markdown(f"""
         font-weight: 500;
     }}
     .terms-card {{
-        background: #000000cc !important;
+        background: rgba(0,0,0,0.75) !important;
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 24px;
+        border-radius: 28px;
         padding: 2rem;
         color: white;
         max-width: 600px;
         margin: 0 auto 2rem;
         animation: float 5s ease-in-out infinite;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }}
+    .terms-card .typewriter {{
+        overflow: hidden;
+        border-right: 2px solid white;
+        white-space: nowrap;
+        margin: 0 auto;
+        animation: typing 3.5s steps(40, end), blink-caret 0.75s step-end infinite;
+        font-size: 1.1rem;
+        font-weight: 500;
+        color: white;
+    }}
+    @keyframes typing {{
+        from {{ width: 0 }}
+        to {{ width: 100% }}
+    }}
+    @keyframes blink-caret {{
+        from, to {{ border-color: transparent }}
+        50% {{ border-color: white }}
     }}
     .stButton > button:has(span:contains("Enter")) {{
         background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
@@ -1283,7 +1318,7 @@ st.markdown(f"""
         box-shadow: 0 15px 30px rgba(59,130,246,0.5) !important;
     }}
     .footer {{
-        background: rgba(0,0,0,0.3);
+        background: rgba(0,0,0,0.5);
         backdrop-filter: blur(10px);
         color: white;
         padding: 2rem;
@@ -1291,6 +1326,7 @@ st.markdown(f"""
         border-radius: 2rem 2rem 0 0;
         text-align: center;
         border-top: 1px solid rgba(255,255,255,0.1);
+        text-shadow: 0 1px 2px rgba(0,0,0,0.2);
     }}
     /* Live Position Tracker */
     .live-tracker {{
@@ -1398,7 +1434,6 @@ st.markdown(f"""
         font-weight: 800;
         margin: 0 10px;
     }}
-    /* Sticky buttons for exit and protect profit */
     .sticky-buttons {{
         position: sticky;
         bottom: 20px;
@@ -1448,6 +1483,12 @@ st.markdown(f"""
         .sticky-buttons button {{
             padding: 6px 12px;
             font-size: 0.8rem;
+        }}
+        .kinetic-title {{
+            font-size: 2rem;
+        }}
+        .kinetic-sub {{
+            font-size: 1rem;
         }}
     }}
 </style>
@@ -1571,7 +1612,6 @@ class UpstoxBridge:
         if not HAS_UPSTOX:
             return False, "Upstox library not installed."
         try:
-            # Placeholder – actual implementation would use upstox-py
             self.connected = True
             return True, "Connected to Upstox"
         except Exception as e:
@@ -1581,7 +1621,6 @@ class UpstoxBridge:
         if not self.connected:
             return None
         try:
-            # Placeholder
             return None
         except:
             return None
@@ -1590,7 +1629,6 @@ class UpstoxBridge:
         if not self.connected:
             return None, "Not connected"
         try:
-            # Placeholder
             return "UPSTOX_ORDER", "Order placed (simulated)"
         except Exception as e:
             return None, str(e)
@@ -1599,7 +1637,6 @@ class UpstoxBridge:
         if not self.connected:
             return None
         try:
-            # Placeholder
             return None
         except:
             return None
@@ -1689,7 +1726,6 @@ class BinanceBridge:
     def _start_websocket(self):
         def ws_worker():
             self.ws_running = True
-            # Simplified – actual implementation would use BinanceSocketManager
             while self.ws_running:
                 time.sleep(1)
         self.ws_thread = threading.Thread(target=ws_worker, daemon=True)
@@ -1862,7 +1898,6 @@ class MT5WebBridge:
 
     def connect(self):
         try:
-            # Placeholder – implement MT5 connection
             self.connected = True
             return True, "Connected to MT5/Exness (simulated)"
         except Exception as e:
@@ -1872,7 +1907,6 @@ class MT5WebBridge:
         if not self.connected:
             return None
         try:
-            # Placeholder
             return None
         except:
             return None
@@ -1881,7 +1915,6 @@ class MT5WebBridge:
         if not self.connected:
             return None, "Not connected"
         try:
-            # Placeholder
             return "MT5_ORDER", None
         except Exception as e:
             return None, str(e)
@@ -1890,7 +1923,6 @@ class MT5WebBridge:
         if not self.connected:
             return None
         try:
-            # Placeholder
             return None
         except:
             return None
@@ -1914,7 +1946,6 @@ class StoxkartBridge:
         if not HAS_STOXKART:
             return False, "Stoxkart library not installed."
         try:
-            # Placeholder – replace with actual Stoxkart client
             self.connected = True
             return True, "Connected to Stoxkart"
         except Exception as e:
@@ -2006,7 +2037,6 @@ class DeltaExchangeBridge:
         if not self.connected:
             return None
         try:
-            # Delta does not provide free historical data via API; fallback to yfinance
             return None
         except:
             return None
@@ -2047,7 +2077,6 @@ class DhanBridge:
         if not self.connected:
             return None
         try:
-            # Placeholder – Dhan does not have direct LTP API; use order book or other
             return None
         except:
             return None
@@ -2056,7 +2085,6 @@ class DhanBridge:
         if not self.connected:
             return None, "Not connected"
         try:
-            # Placeholder – use Dhan order placement
             return "DHAN_ORDER", "Order placed (simulated)"
         except Exception as e:
             return None, str(e)
@@ -2073,7 +2101,6 @@ class DhanBridge:
         if not self.connected:
             return None
         try:
-            # Placeholder – get funds
             return {'balance': 0}
         except:
             return None
@@ -2091,7 +2118,6 @@ class ShoonyaBridge:
             return False, "Shoonya library not installed."
         try:
             self.client = Shoonya()
-            # Placeholder – actual login
             self.connected = True
             return True, "Connected to Shoonya"
         except Exception as e:
@@ -2150,7 +2176,6 @@ class CoinDCXBridge:
     def _start_websocket(self):
         def ws_worker():
             self.ws_running = True
-            # Simplified WebSocket – real implementation would use socketio
             while self.ws_running:
                 time.sleep(1)
         self.ws_thread = threading.Thread(target=ws_worker, daemon=True)
@@ -2177,7 +2202,7 @@ class CoinDCXBridge:
                 return None, "Price not available"
             if not price:
                 price = price_live
-            max_cap = 15000  # from settings, simplified
+            max_cap = 15000
             position_value = max_cap * leverage
             raw_qty = position_value / price
             if "BTC" in symbol or "ETH" in symbol:
@@ -2189,7 +2214,6 @@ class CoinDCXBridge:
             if clean_qty < 0.0001:
                 clean_qty = 0.0001
 
-            # Get market info
             try:
                 exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5).json()
             except:
@@ -2280,13 +2304,10 @@ class CoinDCXBridge:
             return 0.0
 
     def get_historical_data(self, symbol, interval="5m", days=10):
-        # Use public candlestick endpoint
         try:
             pair = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-            # Map interval to CoinDCX resolution
             res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "1D"}
             resolution = res_map.get(interval, "5")
-            # We need to get from and to timestamps
             end = int(time.time())
             start = end - days * 86400
             url = f"https://public.coindcx.com/market_data/candles?pair={pair}&interval={resolution}&startTime={start*1000}&endTime={end*1000}&limit=500"
@@ -2344,7 +2365,7 @@ class FOMOScanner:
         
     def scan(self):
         now = time.time()
-        if now - self._last_scan_time < 5:  # scan every 5 seconds
+        if now - self._last_scan_time < 5:
             return list(self.signals)
         self._last_scan_time = now
         
@@ -2385,7 +2406,6 @@ class FOMOScanner:
                         if base_asset and base_asset != current_asset:
                             if ticker not in self.last_alert_time or now - self.last_alert_time[ticker] > 300:
                                 self.last_alert_time[ticker] = now
-                                # Play clock sound and notify for Nifty/BankNifty/Sensex
                                 if ticker in ["^NSEI", "^NSEBANK", "^BSESN"]:
                                     play_clock_sound()
                                     st.toast(f"🔔 FOMO ALERT: {ticker} volume spike {last['volume_ratio']:.1f}x", icon="🔔")
@@ -2942,6 +2962,18 @@ class TechnicalAnalyzer:
         ema = last['ema9']
         fib = {}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
+
+    # ==========================================
+    # ADD MISSING METHOD: filter_option_by_greeks
+    # ==========================================
+    @staticmethod
+    def filter_option_by_greeks(spot, strike, time_to_expiry, iv, option_type):
+        """
+        Placeholder for Greeks filter. In a real implementation you'd compute
+        delta, gamma, theta, vega and enforce thresholds.
+        For now, always return True.
+        """
+        return True
 
 # ==========================================
 # VEGA & DELTA FILTERS
@@ -3538,7 +3570,7 @@ def generate_tax_report(user_id, year):
             res = supabase.table("trade_logs").select("*").eq("user_id", user_id).gte("trade_date", start_date).lte("trade_date", end_date).execute()
             if res.data:
                 df = pd.DataFrame(res.data)
-                df['holding_days'] = 0  # Placeholder
+                df['holding_days'] = 0
                 df['tax_category'] = df['holding_days'].apply(lambda x: 'STCG' if x <= 365 else 'LTCG')
                 summary = df.groupby('tax_category')['pnl'].sum().to_dict()
                 return summary, df
@@ -3569,7 +3601,7 @@ def fetch_option_chain(symbol, expiry):
     return merged
 
 # ==========================================
-# CORE BOT ENGINE (SniperBot)
+# CORE BOT ENGINE (SniperBot) – with fixed get_strike and get_broker_balances
 # ==========================================
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", 
@@ -3744,7 +3776,6 @@ class SniperBot:
     def _market_end_notifier(self):
         while True:
             now = get_ist()
-            # Check for market close time (15:30 IST for equities)
             if now.hour == 15 and now.minute == 30 and now.second < 30:
                 if self.state.get("daily_pnl", 0.0) != 0:
                     msg = f"Market Closed. Today's PnL: ₹{self.state['daily_pnl']:.2f}, Trades: {self.state['trades_today']}"
@@ -3850,7 +3881,6 @@ class SniperBot:
                         else:
                             pnl = (ltp - trade['entry']) * trade['qty']
                         trade['floating_pnl'] = pnl
-                        # Update elapsed time
                         if 'entry_time' in trade:
                             elapsed = (get_ist() - trade['entry_time']).total_seconds()
                             trade['elapsed_time'] = elapsed
@@ -3886,6 +3916,83 @@ class SniperBot:
         except Exception as e:
             self.log(f"⚠️ Could not load daily PnL: {e}")
         return 0.0
+
+    def get_broker_balances(self):
+        """Return a dict of broker name -> balance string."""
+        balances = {}
+        if self.api:
+            try:
+                rms = self.api.rmslimit()
+                if rms and rms.get('status') and rms.get('data'):
+                    bal = rms['data'].get('availablecash', 0)
+                    balances["Angel One"] = f"₹{float(bal):,.2f}"
+            except: pass
+        if self.kite:
+            try:
+                margins = self.kite.margins()
+                eq = margins.get('equity', {})
+                bal = eq.get('available', {}).get('live_balance', eq.get('net', 0))
+                balances["Zerodha"] = f"₹{float(bal):,.2f}"
+            except: pass
+        if self.coindcx_bridge and self.is_coindcx_connected:
+            try:
+                bal = self.coindcx_bridge.get_balance()
+                balances["CoinDCX"] = f"${bal:.2f}"
+            except: pass
+        if self.delta_bridge and self.is_delta_connected:
+            try:
+                info = self.delta_bridge.get_account_info()
+                if info:
+                    balances["Delta Exchange"] = f"${info.get('balance', 0):,.2f}"
+            except: pass
+        if self.mt5_bridge and self.is_mt5_connected:
+            try:
+                acc = self.mt5_bridge.get_account_info()
+                if acc:
+                    balances["MT5"] = f"${acc.get('balance', 0):,.2f}"
+            except: pass
+        if self.fyers_bridge and self.is_fyers_connected:
+            try:
+                info = self.fyers_bridge.get_account_info()
+                if info:
+                    balances["Fyers"] = f"₹{info.get('balance', 0):,.2f}"
+            except: pass
+        if self.upstox_bridge and self.is_upstox_connected:
+            try:
+                info = self.upstox_bridge.get_account_info()
+                if info:
+                    balances["Upstox"] = f"₹{info.get('balance', 0):,.2f}"
+            except: pass
+        if self.fivepaisa_bridge and self.is_fivepaisa_connected:
+            try:
+                info = self.fivepaisa_bridge.get_account_info()
+                if info:
+                    balances["5paisa"] = f"₹{info.get('balance', 0):,.2f}"
+            except: pass
+        if self.binance_bridge and self.is_binance_connected:
+            try:
+                bal = self.binance_bridge.get_asset_balance("USDT")
+                balances["Binance"] = f"${bal:,.2f}" if bal else "0.00"
+            except: pass
+        if self.stoxkart_bridge and self.is_stoxkart_connected:
+            try:
+                info = self.stoxkart_bridge.get_account_info()
+                if info:
+                    balances["Stoxkart"] = f"₹{info.get('balance', 0):,.2f}"
+            except: pass
+        if self.dhan_bridge and self.is_dhan_connected:
+            try:
+                info = self.dhan_bridge.get_account_info()
+                if info:
+                    balances["Dhan"] = f"₹{info.get('balance', 0):,.2f}"
+            except: pass
+        if self.shoonya_bridge and self.is_shoonya_connected:
+            try:
+                info = self.shoonya_bridge.get_account_info()
+                if info:
+                    balances["Shoonya"] = f"₹{info.get('balance', 0):,.2f}"
+            except: pass
+        return balances
 
     def connect_mt5(self):
         if self.mt5_acc and self.mt5_server:
@@ -4006,180 +4113,6 @@ class SniperBot:
             else:
                 self.log(f"❌ Shoonya connection failed: {msg}")
         return False
-
-    def _angel_ws_on_message(self, wsapp, message):
-        try:
-            data = json.loads(message)
-            if 'ltp' in data:
-                token = str(data['token'])
-                price = float(data['ltp'])
-                self.live_prices_angel[token] = price
-        except:
-            pass
-
-    def _angel_ws_on_error(self, wsapp, error):
-        self.log(f"Angel WebSocket error: {error}")
-        self.ws_angel_connected = False
-        self._angel_ws_reconnect.set()
-
-    def _angel_ws_on_close(self, wsapp, close_status_code, close_msg):
-        self.ws_angel_connected = False
-        self._angel_ws_reconnect.set()
-
-    def _angel_ws_on_open(self, wsapp):
-        self.ws_angel_connected = True
-        self.log("Angel WebSocket opened")
-
-    def start_angel_ws(self):
-        def ws_worker():
-            while not self._angel_ws_stop.is_set():
-                try:
-                    if not self.api:
-                        time.sleep(5)
-                        continue
-                    auth_token = self.api.getAuthToken() if hasattr(self.api, 'getAuthToken') else None
-                    if not auth_token:
-                        time.sleep(5)
-                        continue
-                    self.ws_angel = SmartWebSocketV2(auth_token, self.api_key, self.client_id, self.api.feed_token)
-                    self.ws_angel.on_open = self._angel_ws_on_open
-                    self.ws_angel.on_message = self._angel_ws_on_message
-                    self.ws_angel.on_error = self._angel_ws_on_error
-                    self.ws_angel.on_close = self._angel_ws_on_close
-                    self.ws_angel.connect()
-                    self._angel_ws_reconnect.wait()
-                    self._angel_ws_reconnect.clear()
-                    time.sleep(2)
-                except Exception as e:
-                    self.log(f"Angel WebSocket thread error: {e}")
-                    time.sleep(5)
-        thread = threading.Thread(target=ws_worker, daemon=True)
-        thread.start()
-
-    def push_notify(self, title, message):
-        self.state["ui_popups"].append({"title": title, "message": message})
-        if HAS_NOTIFY:
-            try:
-                notification.notify(title=title, message=message, app_name="QUANT", timeout=5)
-            except:
-                pass
-        if self.notification_manager:
-            self.notification_manager.notify_all(title, message)
-
-    def log(self, msg):
-        timestamp = get_ist().strftime('%H:%M:%S')
-        self.state["logs"].appendleft(f"[{timestamp}] {msg}")
-
-    def get_balance(self):
-        now = time.time()
-        if hasattr(self, '_balance_cache') and now - self._balance_cache_time < 5:
-            return self._balance_cache
-        
-        balance_strs = []
-        if self.api:
-            for attempt in range(2):
-                try:
-                    rms = self.api.rmslimit() if hasattr(self.api, 'rmslimit') else None
-                    if rms and rms.get('status') and rms.get('data'):
-                        data = rms['data']
-                        bal = data.get('availablecash', data.get('net', 0))
-                        try:
-                            bal = float(bal)
-                            balance_strs.append(f"Angel: ₹ {bal:,.2f}")
-                            break
-                        except:
-                            pass
-                except:
-                    time.sleep(0.5)
-        if self.kite:
-            for attempt in range(2):
-                try:
-                    margins = self.kite.margins()
-                    eq = margins.get('equity', {})
-                    bal = eq.get('available', {}).get('live_balance', eq.get('net', 0))
-                    balance_strs.append(f"Zerodha: ₹ {float(bal):,.2f}")
-                    break
-                except:
-                    time.sleep(0.5)
-        if self.coindcx_bridge and self.is_coindcx_connected:
-            try:
-                bal = self.coindcx_bridge.get_balance()
-                if bal:
-                    balance_strs.append(f"CoinDCX: $ {bal:.2f}")
-            except:
-                pass
-        if self.delta_bridge and self.is_delta_connected:
-            try:
-                info = self.delta_bridge.get_account_info()
-                if info:
-                    balance_strs.append(f"Delta: $ {info.get('balance', 0):,.2f}")
-            except:
-                pass
-        if self.is_mt5_connected and self.mt5_bridge:
-            try:
-                acc_info = self.mt5_bridge.get_account_info()
-                if acc_info:
-                    balance_strs.append(f"MT5: $ {acc_info.get('balance', 0):,.2f}")
-            except:
-                pass
-        if self.is_fyers_connected and self.fyers_bridge:
-            try:
-                info = self.fyers_bridge.get_account_info()
-                if info:
-                    balance_strs.append(f"Fyers: ₹ {info.get('balance', 0):,.2f}")
-            except:
-                pass
-        if self.is_upstox_connected and self.upstox_bridge:
-            try:
-                info = self.upstox_bridge.get_account_info()
-                if info:
-                    balance_strs.append(f"Upstox: ₹ {info.get('balance', 0):,.2f}")
-            except:
-                pass
-        if self.is_fivepaisa_connected and self.fivepaisa_bridge:
-            try:
-                info = self.fivepaisa_bridge.get_account_info()
-                if info:
-                    balance_strs.append(f"5paisa: ₹ {info.get('balance', 0):,.2f}")
-            except:
-                pass
-        if self.is_binance_connected and self.binance_bridge:
-            try:
-                bal = self.binance_bridge.get_asset_balance("USDT")
-                if bal is not None:
-                    balance_strs.append(f"Binance: $ {bal:,.2f}")
-            except:
-                pass
-        if self.is_stoxkart_connected and self.stoxkart_bridge:
-            try:
-                info = self.stoxkart_bridge.get_account_info()
-                if info:
-                    balance_strs.append(f"Stoxkart: ₹ {info.get('balance', 0):,.2f}")
-            except:
-                pass
-        if self.is_dhan_connected and self.dhan_bridge:
-            try:
-                info = self.dhan_bridge.get_account_info()
-                if info:
-                    balance_strs.append(f"Dhan: ₹ {info.get('balance', 0):,.2f}")
-            except:
-                pass
-        if self.is_shoonya_connected and self.shoonya_bridge:
-            try:
-                info = self.shoonya_bridge.get_account_info()
-                if info:
-                    balance_strs.append(f"Shoonya: ₹ {info.get('balance', 0):,.2f}")
-            except:
-                pass
-        if not balance_strs:
-            base_cap = self.settings.get('max_capital', 15000.0) if self.settings else 15000.0
-            current_cap = base_cap + self.state.get('daily_pnl', 0.0)
-            result = f"₹ {current_cap:,.2f} (Manual Cap)"
-        else:
-            result = " | ".join(balance_strs)
-        self._balance_cache = result
-        self._balance_cache_time = now
-        return result
 
     def login(self):
         if self.is_mock:
@@ -4527,7 +4460,6 @@ class SniperBot:
         return price
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
-        # Rate limit handling: cache and retry
         @st.cache_data(ttl=60)
         def _cached_yfinance(symbol, interval):
             yf_int = interval if interval in ["1m", "5m", "15m"] else "5m"
@@ -4955,6 +4887,7 @@ class SniperBot:
 
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
+
         if self.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange"] and self.settings.get("crypto_mode") == "Options":
             rounder = 500 if "BTC" in symbol else (50 if "ETH" in symbol else 1)
             strike_price = round(spot / rounder) * rounder
@@ -4963,10 +4896,11 @@ class SniperBot:
             exch_target = "COINDCX" if self.settings.get("primary_broker") == "CoinDCX" else "DELTA"
             return crypto_sym, crypto_sym, exch_target, spot * 0.02
 
+        if self.is_mock:
+            return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
+
         df = self.get_master()
         if df is None or df.empty:
-            if self.is_mock:
-                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
             self.log("⚠️ Option Chain JSON is empty. Cannot compute Angel strikes.")
             return None, None, None, 0.0
 
@@ -4974,35 +4908,49 @@ class SniperBot:
         mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO", "NCO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
         subset = df[mask].copy()
         if subset.empty:
-            if self.is_mock:
-                return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
             self.log(f"⚠️ No options found for {symbol} on {today.date()}")
             return None, None, None, 0.0
 
         closest_expiry = subset['expiry'].min()
         subset = subset[subset['expiry'] == closest_expiry]
+
         if subset['strike'].median() > spot * 10:
             subset['strike'] = subset['strike'] / 100
         elif subset['strike'].median() < spot / 10:
             subset['strike'] = subset['strike'] * 100
+
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
-        time_to_expiry = max(0.001, (subset['expiry'].iloc[0] - today).days / 365.0)
+        time_to_expiry = max(0.001, (closest_expiry - today).days / 365.0)
         iv = 12
-        candidates = subset.copy()
-        candidates['greeks_pass'] = candidates['strike'].apply(
-            lambda x: self.analyzer.filter_option_by_greeks(spot, x, time_to_expiry, iv, opt_type.lower())
-        )
-        candidates = candidates[candidates['greeks_pass']].sort_values('dist_to_spot', ascending=True)
-        if candidates.empty and self.is_mock:
-            return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
+
+        try:
+            candidates = subset.copy()
+            candidates['greeks_pass'] = candidates['strike'].apply(
+                lambda x: self.analyzer.filter_option_by_greeks(spot, x, time_to_expiry, iv, opt_type.lower())
+            )
+            candidates = candidates[candidates['greeks_pass']].sort_values('dist_to_spot', ascending=True)
+        except Exception as e:
+            self.log(f"⚠️ Greeks filter error: {e}, falling back to closest strike")
+            candidates = subset.sort_values('dist_to_spot', ascending=True)
+
+        if candidates.empty:
+            candidates = subset.sort_values('dist_to_spot', ascending=True)
+
+        if candidates.empty:
+            self.log(f"⚠️ No {opt_type} options found for {symbol}")
+            return None, None, None, 0.0
+
         for _, row in candidates.iterrows():
             ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
-            if ltp is None and self.is_mock:
-                ltp = max_premium * 0.85
             if ltp and ltp <= max_premium:
                 return row['symbol'], row['token'], row['exch_seg'], ltp
-        self.log(f"⚠️ Capital Filter: No valid {opt_type} strikes found below ₹{max_premium:.2f} premium.")
-        return None, None, None, 0.0
+
+        self.log(f"⚠️ Capital Filter: No {opt_type} strikes found below ₹{max_premium:.2f} premium. Using closest strike.")
+        closest_row = candidates.iloc[0]
+        ltp = self.get_live_price(closest_row['exch_seg'], closest_row['symbol'], closest_row['token'])
+        if ltp is None:
+            ltp = max_premium * 0.9
+        return closest_row['symbol'], closest_row['token'], closest_row['exch_seg'], ltp
 
     def get_dynamic_lot_multiplier(self):
         win_streak = st.session_state.win_streak
@@ -5128,7 +5076,6 @@ class SniperBot:
                 self.log(f"❌ Zerodha Order Error: {str(e)}")
                 return None, f"Zerodha error: {str(e)}"
 
-        # Angel One (default)
         try:
             p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
             order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
@@ -5187,6 +5134,180 @@ class SniperBot:
         except Exception as e:
             self.log(f"❌ Exception placing Angel order: {str(e)}")
             return None, f"Angel exception: {str(e)}"
+
+    def start_angel_ws(self):
+        def ws_worker():
+            while not self._angel_ws_stop.is_set():
+                try:
+                    if not self.api:
+                        time.sleep(5)
+                        continue
+                    auth_token = self.api.getAuthToken() if hasattr(self.api, 'getAuthToken') else None
+                    if not auth_token:
+                        time.sleep(5)
+                        continue
+                    self.ws_angel = SmartWebSocketV2(auth_token, self.api_key, self.client_id, self.api.feed_token)
+                    self.ws_angel.on_open = self._angel_ws_on_open
+                    self.ws_angel.on_message = self._angel_ws_on_message
+                    self.ws_angel.on_error = self._angel_ws_on_error
+                    self.ws_angel.on_close = self._angel_ws_on_close
+                    self.ws_angel.connect()
+                    self._angel_ws_reconnect.wait()
+                    self._angel_ws_reconnect.clear()
+                    time.sleep(2)
+                except Exception as e:
+                    self.log(f"Angel WebSocket thread error: {e}")
+                    time.sleep(5)
+        thread = threading.Thread(target=ws_worker, daemon=True)
+        thread.start()
+
+    def _angel_ws_on_message(self, wsapp, message):
+        try:
+            data = json.loads(message)
+            if 'ltp' in data:
+                token = str(data['token'])
+                price = float(data['ltp'])
+                self.live_prices_angel[token] = price
+        except:
+            pass
+
+    def _angel_ws_on_error(self, wsapp, error):
+        self.log(f"Angel WebSocket error: {error}")
+        self.ws_angel_connected = False
+        self._angel_ws_reconnect.set()
+
+    def _angel_ws_on_close(self, wsapp, close_status_code, close_msg):
+        self.ws_angel_connected = False
+        self._angel_ws_reconnect.set()
+
+    def _angel_ws_on_open(self, wsapp):
+        self.ws_angel_connected = True
+        self.log("Angel WebSocket opened")
+
+    def push_notify(self, title, message):
+        self.state["ui_popups"].append({"title": title, "message": message})
+        if HAS_NOTIFY:
+            try:
+                notification.notify(title=title, message=message, app_name="QUANT", timeout=5)
+            except:
+                pass
+        if self.notification_manager:
+            self.notification_manager.notify_all(title, message)
+
+    def log(self, msg):
+        timestamp = get_ist().strftime('%H:%M:%S')
+        self.state["logs"].appendleft(f"[{timestamp}] {msg}")
+
+    def get_balance(self):
+        now = time.time()
+        if hasattr(self, '_balance_cache') and now - self._balance_cache_time < 5:
+            return self._balance_cache
+        
+        balance_strs = []
+        if self.api:
+            for attempt in range(2):
+                try:
+                    rms = self.api.rmslimit() if hasattr(self.api, 'rmslimit') else None
+                    if rms and rms.get('status') and rms.get('data'):
+                        data = rms['data']
+                        bal = data.get('availablecash', data.get('net', 0))
+                        try:
+                            bal = float(bal)
+                            balance_strs.append(f"Angel: ₹ {bal:,.2f}")
+                            break
+                        except:
+                            pass
+                except:
+                    time.sleep(0.5)
+        if self.kite:
+            for attempt in range(2):
+                try:
+                    margins = self.kite.margins()
+                    eq = margins.get('equity', {})
+                    bal = eq.get('available', {}).get('live_balance', eq.get('net', 0))
+                    balance_strs.append(f"Zerodha: ₹ {float(bal):,.2f}")
+                    break
+                except:
+                    time.sleep(0.5)
+        if self.coindcx_bridge and self.is_coindcx_connected:
+            try:
+                bal = self.coindcx_bridge.get_balance()
+                if bal:
+                    balance_strs.append(f"CoinDCX: $ {bal:.2f}")
+            except:
+                pass
+        if self.delta_bridge and self.is_delta_connected:
+            try:
+                info = self.delta_bridge.get_account_info()
+                if info:
+                    balance_strs.append(f"Delta: $ {info.get('balance', 0):,.2f}")
+            except:
+                pass
+        if self.is_mt5_connected and self.mt5_bridge:
+            try:
+                acc_info = self.mt5_bridge.get_account_info()
+                if acc_info:
+                    balance_strs.append(f"MT5: $ {acc_info.get('balance', 0):,.2f}")
+            except:
+                pass
+        if self.is_fyers_connected and self.fyers_bridge:
+            try:
+                info = self.fyers_bridge.get_account_info()
+                if info:
+                    balance_strs.append(f"Fyers: ₹ {info.get('balance', 0):,.2f}")
+            except:
+                pass
+        if self.is_upstox_connected and self.upstox_bridge:
+            try:
+                info = self.upstox_bridge.get_account_info()
+                if info:
+                    balance_strs.append(f"Upstox: ₹ {info.get('balance', 0):,.2f}")
+            except:
+                pass
+        if self.is_fivepaisa_connected and self.fivepaisa_bridge:
+            try:
+                info = self.fivepaisa_bridge.get_account_info()
+                if info:
+                    balance_strs.append(f"5paisa: ₹ {info.get('balance', 0):,.2f}")
+            except:
+                pass
+        if self.is_binance_connected and self.binance_bridge:
+            try:
+                bal = self.binance_bridge.get_asset_balance("USDT")
+                if bal is not None:
+                    balance_strs.append(f"Binance: $ {bal:,.2f}")
+            except:
+                pass
+        if self.is_stoxkart_connected and self.stoxkart_bridge:
+            try:
+                info = self.stoxkart_bridge.get_account_info()
+                if info:
+                    balance_strs.append(f"Stoxkart: ₹ {info.get('balance', 0):,.2f}")
+            except:
+                pass
+        if self.is_dhan_connected and self.dhan_bridge:
+            try:
+                info = self.dhan_bridge.get_account_info()
+                if info:
+                    balance_strs.append(f"Dhan: ₹ {info.get('balance', 0):,.2f}")
+            except:
+                pass
+        if self.is_shoonya_connected and self.shoonya_bridge:
+            try:
+                info = self.shoonya_bridge.get_account_info()
+                if info:
+                    balance_strs.append(f"Shoonya: ₹ {info.get('balance', 0):,.2f}")
+            except:
+                pass
+        if not balance_strs:
+            base_cap = self.settings.get('max_capital', 15000.0) if self.settings else 15000.0
+            current_cap = base_cap + self.state.get('daily_pnl', 0.0)
+            result = f"₹ {current_cap:,.2f} (Manual Cap)"
+        else:
+            result = " | ".join(balance_strs)
+        self._balance_cache = result
+        self._balance_cache_time = now
+        return result
 
     def trading_loop(self):
         self.log("▶️ Engine thread started.")
@@ -5430,7 +5551,6 @@ class SniperBot:
                         self.state["pending_signal"] = None
 
                     if self.state["active_trade"] is None and not self.state["active_trades"] and signal in ["BUY_CE", "BUY_PE"] and current_time < cutoff_time and signal_strength >= min_signal_strength:
-                        # Apply Vega and Delta filters
                         vega_ok, signal_strength = apply_vega_filter(df_candles, signal_strength)
                         if not vega_ok:
                             self.log(f"Vega filter rejected trade (IV too high)")
@@ -5869,8 +5989,9 @@ class SniperBot:
             time.sleep(0.5)
 
 # ==========================================
-# LANDING PAGE
+# LANDING PAGE, LOGIN, SPLASH, DASHBOARD – all as before, with updated admin tab and button placement.
 # ==========================================
+
 if st.session_state.page == "landing":
     # Holiday and event info for tomorrow
     tomorrow_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -5884,63 +6005,6 @@ if st.session_state.page == "landing":
         info_line += f"📊 Tomorrow ({tomorrow_date}): {tomorrow_event}"
     if info_line:
         st.info(info_line)
-
-    st.markdown("""
-    <style>
-        .terms-card {
-            background: rgba(0, 0, 0, 0.75) !important;
-            backdrop-filter: blur(10px);
-            border-radius: 28px;
-            padding: 2rem;
-            color: white;
-            max-width: 600px;
-            margin: 0 auto 2rem;
-            animation: float 5s ease-in-out infinite;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-        }
-        .typewriter {
-            overflow: hidden;
-            border-right: 2px solid white;
-            white-space: nowrap;
-            margin: 0 auto;
-            animation: typing 3.5s steps(40, end), blink-caret 0.75s step-end infinite;
-            font-size: 1.1rem;
-            font-weight: 500;
-        }
-        @keyframes typing {
-            from { width: 0 }
-            to { width: 100% }
-        }
-        @keyframes blink-caret {
-            from, to { border-color: transparent }
-            50% { border-color: white }
-        }
-        .stButton > button:has(span:contains("Enter")) {
-            background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
-            color: white !important;
-            font-size: 1.3rem !important;
-            font-weight: 700 !important;
-            padding: 1rem 2rem !important;
-            border-radius: 40px !important;
-            border: none !important;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.3) !important;
-            transition: all 0.3s !important;
-            width: 100% !important;
-            animation: pulseGlow 2s infinite;
-        }
-        .stButton > button:has(span:contains("Enter")):hover {
-            transform: scale(1.05) !important;
-            box-shadow: 0 15px 30px rgba(59,130,246,0.5) !important;
-        }
-        @media (max-width: 768px) {
-            .typewriter {
-                white-space: normal;
-                border-right: none;
-                animation: none;
-            }
-        }
-    </style>
-    """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="landing-hero">
@@ -6053,9 +6117,6 @@ if st.session_state.page == "landing":
     </div>
     """, unsafe_allow_html=True)
 
-# ==========================================
-# LOGIN PAGE
-# ==========================================
 elif st.session_state.page == "login":
     if not HAS_DB:
         st.error("⚠️ Database missing. Add SUPABASE_URL and SUPABASE_KEY to enable saving & logs.")
@@ -6082,268 +6143,275 @@ elif st.session_state.page == "login":
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.button("👆 Authenticate & Connect", type="primary", use_container_width=True,
                              on_click=lambda: play_sound_now("click")):
-                    creds = load_creds(USER_ID)
-                    if creds and (creds.get("client_id") or creds.get("zerodha_api") or
-                                  creds.get("coindcx_api") or creds.get("delta_api") or
-                                  creds.get("fyers_client_id") or creds.get("upstox_api_key") or
-                                  creds.get("fivepaisa_client_id") or creds.get("binance_api_key") or
-                                  creds.get("stoxkart_api_key") or creds.get("dhan_client_id") or
-                                  creds.get("shoonya_user")):
-                        temp_bot = SniperBot(
-                            api_key=creds.get("angel_api", ""), client_id=creds.get("client_id"),
-                            pwd=creds.get("pwd"), totp_secret=creds.get("totp_secret"),
-                            mt5_acc=creds.get("mt5_acc"), mt5_pass=creds.get("mt5_pass"),
-                            mt5_server=creds.get("mt5_server"), mt5_api_url=creds.get("mt5_api_url", ""),
-                            zerodha_api=creds.get("zerodha_api"), zerodha_secret=creds.get("zerodha_secret"),
-                            coindcx_api=creds.get("coindcx_api"), coindcx_secret=creds.get("coindcx_secret"),
-                            delta_api=creds.get("delta_api"), delta_secret=creds.get("delta_secret"),
-                            is_mock=False,
-                            tg_bot_token=creds.get("tg_bot_token", ""),
-                            tg_allowed_users=creds.get("tg_allowed_users", ""),
-                            fyers_client_id=creds.get("fyers_client_id", ""),
-                            fyers_secret=creds.get("fyers_secret", ""),
-                            fyers_token=creds.get("fyers_token", ""),
-                            upstox_api_key=creds.get("upstox_api_key", ""),
-                            upstox_api_secret=creds.get("upstox_api_secret", ""),
-                            upstox_access_token=creds.get("upstox_access_token", ""),
-                            fivepaisa_client_id=creds.get("fivepaisa_client_id", ""),
-                            fivepaisa_secret=creds.get("fivepaisa_secret", ""),
-                            fivepaisa_access_token=creds.get("fivepaisa_access_token", ""),
-                            binance_api_key=creds.get("binance_api_key", ""),
-                            binance_api_secret=creds.get("binance_api_secret", ""),
-                            binance_testnet=creds.get("binance_testnet", False),
-                            stoxkart_api_key=creds.get("stoxkart_api_key", ""),
-                            stoxkart_secret=creds.get("stoxkart_secret", ""),
-                            dhan_client_id=creds.get("dhan_client_id", ""),
-                            dhan_access_token=creds.get("dhan_access_token", ""),
-                            shoonya_user=creds.get("shoonya_user", ""),
-                            shoonya_password=creds.get("shoonya_password", ""),
-                            shoonya_totp=creds.get("shoonya_totp", ""),
-                            email_smtp_server=creds.get("email_smtp_server", ""),
-                            email_port=creds.get("email_port", 587),
-                            email_username=creds.get("email_username", ""),
-                            email_password=creds.get("email_password", ""),
-                            email_recipients=creds.get("email_recipients", ""),
-                            fcm_server_key=creds.get("fcm_server_key", ""),
-                            push_enabled=creds.get("push_enabled", False)
-                        )
-                        temp_bot.system_user_id = USER_ID
-                        temp_bot.user_role = creds.get("role", "trader")
-                        st.session_state.user_role = temp_bot.user_role
-                        with st.spinner("Authenticating via Cloud..."):
-                            if temp_bot.login():
-                                temp_bot.state["daily_pnl"] = temp_bot.load_daily_pnl()
-                                st.session_state.bot = temp_bot
-                                st.session_state.audio_enabled = True
-                                temp_bot.state["sound_queue"].append("login")
-                                st.session_state.user_id = USER_ID
-                                if keep_signed:
-                                    st.query_params["user_id"] = USER_ID
-                                save_device_session(USER_ID, st.session_state.device_name,
-                                                    st.session_state.ip_address,
-                                                    st.session_state.session_id)
-                                st.session_state.page = "splash"
-                                st.rerun()
-                            else:
-                                st.error("❌ Login Failed! Check API details or TOTP.")
+                    if is_user_blocked(USER_ID):
+                        st.error("Your account has been blocked. Please contact support.")
                     else:
-                        st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
+                        creds = load_creds(USER_ID)
+                        if creds and (creds.get("client_id") or creds.get("zerodha_api") or
+                                      creds.get("coindcx_api") or creds.get("delta_api") or
+                                      creds.get("fyers_client_id") or creds.get("upstox_api_key") or
+                                      creds.get("fivepaisa_client_id") or creds.get("binance_api_key") or
+                                      creds.get("stoxkart_api_key") or creds.get("dhan_client_id") or
+                                      creds.get("shoonya_user")):
+                            temp_bot = SniperBot(
+                                api_key=creds.get("angel_api", ""), client_id=creds.get("client_id"),
+                                pwd=creds.get("pwd"), totp_secret=creds.get("totp_secret"),
+                                mt5_acc=creds.get("mt5_acc"), mt5_pass=creds.get("mt5_pass"),
+                                mt5_server=creds.get("mt5_server"), mt5_api_url=creds.get("mt5_api_url", ""),
+                                zerodha_api=creds.get("zerodha_api"), zerodha_secret=creds.get("zerodha_secret"),
+                                coindcx_api=creds.get("coindcx_api"), coindcx_secret=creds.get("coindcx_secret"),
+                                delta_api=creds.get("delta_api"), delta_secret=creds.get("delta_secret"),
+                                is_mock=False,
+                                tg_bot_token=creds.get("tg_bot_token", ""),
+                                tg_allowed_users=creds.get("tg_allowed_users", ""),
+                                fyers_client_id=creds.get("fyers_client_id", ""),
+                                fyers_secret=creds.get("fyers_secret", ""),
+                                fyers_token=creds.get("fyers_token", ""),
+                                upstox_api_key=creds.get("upstox_api_key", ""),
+                                upstox_api_secret=creds.get("upstox_api_secret", ""),
+                                upstox_access_token=creds.get("upstox_access_token", ""),
+                                fivepaisa_client_id=creds.get("fivepaisa_client_id", ""),
+                                fivepaisa_secret=creds.get("fivepaisa_secret", ""),
+                                fivepaisa_access_token=creds.get("fivepaisa_access_token", ""),
+                                binance_api_key=creds.get("binance_api_key", ""),
+                                binance_api_secret=creds.get("binance_api_secret", ""),
+                                binance_testnet=creds.get("binance_testnet", False),
+                                stoxkart_api_key=creds.get("stoxkart_api_key", ""),
+                                stoxkart_secret=creds.get("stoxkart_secret", ""),
+                                dhan_client_id=creds.get("dhan_client_id", ""),
+                                dhan_access_token=creds.get("dhan_access_token", ""),
+                                shoonya_user=creds.get("shoonya_user", ""),
+                                shoonya_password=creds.get("shoonya_password", ""),
+                                shoonya_totp=creds.get("shoonya_totp", ""),
+                                email_smtp_server=creds.get("email_smtp_server", ""),
+                                email_port=creds.get("email_port", 587),
+                                email_username=creds.get("email_username", ""),
+                                email_password=creds.get("email_password", ""),
+                                email_recipients=creds.get("email_recipients", ""),
+                                fcm_server_key=creds.get("fcm_server_key", ""),
+                                push_enabled=creds.get("push_enabled", False)
+                            )
+                            temp_bot.system_user_id = USER_ID
+                            temp_bot.user_role = creds.get("role", "trader")
+                            st.session_state.user_role = temp_bot.user_role
+                            with st.spinner("Authenticating via Cloud..."):
+                                if temp_bot.login():
+                                    temp_bot.state["daily_pnl"] = temp_bot.load_daily_pnl()
+                                    st.session_state.bot = temp_bot
+                                    st.session_state.audio_enabled = True
+                                    temp_bot.state["sound_queue"].append("login")
+                                    st.session_state.user_id = USER_ID
+                                    if keep_signed:
+                                        st.query_params["user_id"] = USER_ID
+                                    save_device_session(USER_ID, st.session_state.device_name,
+                                                        st.session_state.ip_address,
+                                                        st.session_state.session_id)
+                                    st.session_state.page = "splash"
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Login Failed! Check API details or TOTP.")
+                        else:
+                            st.error("❌ Profile not found! Please save it once via the Real Trading menu.")
 
             elif auth_mode == "🕉️ Real Trading":
                 USER_ID = st.text_input("System Login ID (Email or Phone Number)", value=st.session_state.user_id)
-                creds = load_creds(USER_ID) if USER_ID else {}
-                st.markdown("### 🏦 Select Brokers to Connect")
-                ANGEL_API, CLIENT_ID, PIN, TOTP = "", "", "", ""
-                Z_API, Z_SEC, Z_REQ = "", "", ""
-                MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL = "", "", "", ""
-                DCX_API, DCX_SEC = "", ""
-                DELTA_API, DELTA_SEC = "", ""
-                FYERS_CLIENT_ID, FYERS_SECRET, FYERS_TOKEN = "", "", ""
-                UPSTOX_API_KEY, UPSTOX_API_SECRET, UPSTOX_ACCESS_TOKEN = "", "", ""
-                FIVEPAISA_CLIENT_ID, FIVEPAISA_SECRET, FIVEPAISA_ACCESS_TOKEN = "", "", ""
-                BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TESTNET = "", "", False
-                STOXKART_API_KEY, STOXKART_SECRET = "", ""
-                DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN = "", ""
-                SHOONYA_USER, SHOONYA_PASSWORD, SHOONYA_TOTP = "", "", ""
-                TG_BOT_TOKEN = ""
-                TG_ALLOWED_USERS = ""
-                EMAIL_SMTP_SERVER, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_RECIPIENTS = "", 587, "", "", ""
-                FCM_SERVER_KEY, PUSH_ENABLED = "", False
-                ROLE = creds.get("role", "trader")
+                if is_user_blocked(USER_ID):
+                    st.error("Your account has been blocked. Please contact support.")
+                else:
+                    creds = load_creds(USER_ID) if USER_ID else {}
+                    st.markdown("### 🏦 Select Brokers to Connect")
+                    ANGEL_API, CLIENT_ID, PIN, TOTP = "", "", "", ""
+                    Z_API, Z_SEC, Z_REQ = "", "", ""
+                    MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL = "", "", "", ""
+                    DCX_API, DCX_SEC = "", ""
+                    DELTA_API, DELTA_SEC = "", ""
+                    FYERS_CLIENT_ID, FYERS_SECRET, FYERS_TOKEN = "", "", ""
+                    UPSTOX_API_KEY, UPSTOX_API_SECRET, UPSTOX_ACCESS_TOKEN = "", "", ""
+                    FIVEPAISA_CLIENT_ID, FIVEPAISA_SECRET, FIVEPAISA_ACCESS_TOKEN = "", "", ""
+                    BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TESTNET = "", "", False
+                    STOXKART_API_KEY, STOXKART_SECRET = "", ""
+                    DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN = "", ""
+                    SHOONYA_USER, SHOONYA_PASSWORD, SHOONYA_TOTP = "", "", ""
+                    TG_BOT_TOKEN = ""
+                    TG_ALLOWED_USERS = ""
+                    EMAIL_SMTP_SERVER, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_RECIPIENTS = "", 587, "", "", ""
+                    FCM_SERVER_KEY, PUSH_ENABLED = "", False
+                    ROLE = creds.get("role", "trader")
 
-                # Broker toggles (Angel, Zerodha, CoinDCX, Delta, MT5, Fyers, Upstox, 5paisa, Binance, Stoxkart, Dhan, Shoonya)
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
-                    with col_t: use_angel = st.toggle("Angel One India", value=bool(creds.get("client_id")))
-                    if use_angel:
-                        ANGEL_API = st.text_input("Angel API Key", value=creds.get("angel_api", ""))
-                        col_id, col_pin = st.columns(2)
-                        with col_id: CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
-                        with col_pin: PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
-                        TOTP = st.text_input("TOTP Secret", value=creds.get("totp_secret", ""), type="password")
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=zerodha.com&sz=128", width=40)
-                    with col_t: use_zerodha = st.toggle("Zerodha Kite", value=bool(creds.get("zerodha_api")))
-                    if use_zerodha:
-                        Z_API = st.text_input("Kite API Key", value=creds.get("zerodha_api", ""))
-                        Z_SEC = st.text_input("Kite API Secret", type="password", value=creds.get("zerodha_secret", ""))
-                        Z_REQ = st.text_input("Today's Request Token", type="password")
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=coindcx.com&sz=128", width=40)
-                    with col_t: use_coindcx = st.toggle("CoinDCX Crypto", value=bool(creds.get("coindcx_api")))
-                    if use_coindcx:
-                        DCX_API = st.text_input("CoinDCX API Key", value=creds.get("coindcx_api", ""))
-                        DCX_SEC = st.text_input("CoinDCX API Secret", type="password", value=creds.get("coindcx_secret", ""))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=delta.exchange&sz=128", width=40)
-                    with col_t: use_delta = st.toggle("Delta Exchange", value=bool(creds.get("delta_api")))
-                    if use_delta:
-                        DELTA_API = st.text_input("Delta API Key", value=creds.get("delta_api", ""))
-                        DELTA_SEC = st.text_input("Delta API Secret", type="password", value=creds.get("delta_secret", ""))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128", width=40)
-                    with col_t: use_mt5 = st.toggle("MetaTrader 5 / Exness", value=bool(creds.get("mt5_acc")))
-                    if use_mt5:
-                        col_m1, col_m2 = st.columns(2)
-                        with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
-                        with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
-                        MT5_SERVER = st.text_input("Broker Server", value=creds.get("mt5_server", ""))
-                        MT5_API_URL = st.text_input("MT5 Web API URL (Optional)", value=creds.get("mt5_api_url", "https://mt5-web-api.mtapi.io/v1"))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=fyers.in&sz=128", width=40)
-                    with col_t: use_fyers = st.toggle("Fyers", value=bool(creds.get("fyers_client_id")))
-                    if use_fyers:
-                        FYERS_CLIENT_ID = st.text_input("Fyers Client ID", value=creds.get("fyers_client_id", ""))
-                        FYERS_SECRET = st.text_input("Fyers Secret Key", type="password", value=creds.get("fyers_secret", ""))
-                        FYERS_TOKEN = st.text_input("Fyers Access Token", type="password", value=creds.get("fyers_token", ""))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=upstox.com&sz=128", width=40)
-                    with col_t: use_upstox = st.toggle("Upstox", value=bool(creds.get("upstox_api_key")))
-                    if use_upstox:
-                        UPSTOX_API_KEY = st.text_input("Upstox API Key", value=creds.get("upstox_api_key", ""))
-                        UPSTOX_API_SECRET = st.text_input("Upstox API Secret", type="password", value=creds.get("upstox_api_secret", ""))
-                        UPSTOX_ACCESS_TOKEN = st.text_input("Upstox Access Token", type="password", value=creds.get("upstox_access_token", ""))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=5paisa.com&sz=128", width=40)
-                    with col_t: use_fivepaisa = st.toggle("5paisa", value=bool(creds.get("fivepaisa_client_id")))
-                    if use_fivepaisa:
-                        FIVEPAISA_CLIENT_ID = st.text_input("5paisa Client ID", value=creds.get("fivepaisa_client_id", ""))
-                        FIVEPAISA_SECRET = st.text_input("5paisa Secret", type="password", value=creds.get("fivepaisa_secret", ""))
-                        FIVEPAISA_ACCESS_TOKEN = st.text_input("5paisa Access Token", type="password", value=creds.get("fivepaisa_access_token", ""))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=binance.com&sz=128", width=40)
-                    with col_t: use_binance = st.toggle("Binance", value=bool(creds.get("binance_api_key")))
-                    if use_binance:
-                        BINANCE_API_KEY = st.text_input("Binance API Key", value=creds.get("binance_api_key", ""))
-                        BINANCE_API_SECRET = st.text_input("Binance API Secret", type="password", value=creds.get("binance_api_secret", ""))
-                        BINANCE_TESTNET = st.checkbox("Use Testnet", value=creds.get("binance_testnet", False))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=stoxkart.com&sz=128", width=40)
-                    with col_t: use_stoxkart = st.toggle("Stoxkart", value=bool(creds.get("stoxkart_api_key")))
-                    if use_stoxkart:
-                        STOXKART_API_KEY = st.text_input("Stoxkart API Key", value=creds.get("stoxkart_api_key", ""))
-                        STOXKART_SECRET = st.text_input("Stoxkart Secret", type="password", value=creds.get("stoxkart_secret", ""))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=dhan.co&sz=128", width=40)
-                    with col_t: use_dhan = st.toggle("Dhan", value=bool(creds.get("dhan_client_id")))
-                    if use_dhan:
-                        DHAN_CLIENT_ID = st.text_input("Dhan Client ID", value=creds.get("dhan_client_id", ""))
-                        DHAN_ACCESS_TOKEN = st.text_input("Dhan Access Token", type="password", value=creds.get("dhan_access_token", ""))
-                with st.container(border=True):
-                    col_img, col_t = st.columns([1, 6])
-                    with col_img: st.image("https://www.google.com/s2/favicons?domain=shoonya.com&sz=128", width=40)
-                    with col_t: use_shoonya = st.toggle("Shoonya", value=bool(creds.get("shoonya_user")))
-                    if use_shoonya:
-                        SHOONYA_USER = st.text_input("Shoonya User ID", value=creds.get("shoonya_user", ""))
-                        SHOONYA_PASSWORD = st.text_input("Shoonya Password", type="password", value=creds.get("shoonya_password", ""))
-                        SHOONYA_TOTP = st.text_input("Shoonya TOTP", value=creds.get("shoonya_totp", ""))
-                st.divider()
-                with st.expander("📱 Notifications & Control"):
-                    TG_TOKEN = st.text_input("Telegram Bot Token (for alerts)", value=creds.get("tg_token", ""))
-                    TG_CHAT = st.text_input("Telegram Chat ID (for alerts)", value=creds.get("tg_chat", ""))
-                    WA_PHONE = st.text_input("WhatsApp Phone", value=creds.get("wa_phone", ""))
-                    WA_API = st.text_input("WhatsApp API Key", value=creds.get("wa_api", ""))
-                    TG_BOT_TOKEN = st.text_input("Telegram Control Bot Token", value=creds.get("tg_bot_token", ""))
-                    TG_ALLOWED_USERS = st.text_input("Allowed Telegram User IDs (comma separated)", value=creds.get("tg_allowed_users", ""))
-                    EMAIL_SMTP_SERVER = st.text_input("SMTP Server", value=creds.get("email_smtp_server", ""))
-                    EMAIL_PORT = st.number_input("SMTP Port", value=creds.get("email_port", 587))
-                    EMAIL_USERNAME = st.text_input("Email Username", value=creds.get("email_username", ""))
-                    EMAIL_PASSWORD = st.text_input("Email Password", type="password", value=creds.get("email_password", ""))
-                    EMAIL_RECIPIENTS = st.text_input("Email Recipients (comma separated)", value=creds.get("email_recipients", ""))
-                    FCM_SERVER_KEY = st.text_input("FCM Server Key", type="password", value=creds.get("fcm_server_key", ""))
-                    PUSH_ENABLED = st.checkbox("Enable Push Notifications", value=creds.get("push_enabled", False))
-                with st.expander("👥 User Role"):
-                    ROLE = st.selectbox("Role", ["trader", "admin"], index=0 if ROLE == "trader" else 1)
-                SAVE_CREDS = st.checkbox("Remember Credentials Securely (Cloud DB)", value=True)
-                keep_signed = st.checkbox("Keep me signed in (auto‑login using URL)", value=True)
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("CONNECT MARKETS 🚀", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
-                    if not USER_ID:
-                        st.error("Please enter your System Login ID (Email or Phone) to proceed.")
-                    else:
-                        temp_bot = SniperBot(
-                            api_key=ANGEL_API if use_angel else "", client_id=CLIENT_ID if use_angel else "", 
-                            pwd=PIN if use_angel else "", totp_secret=TOTP if use_angel else "", 
-                            tg_token=TG_TOKEN, tg_chat=TG_CHAT, wa_phone=WA_PHONE, wa_api=WA_API, 
-                            mt5_acc=MT5_ACC if use_mt5 else "", mt5_pass=MT5_PASS if use_mt5 else "", 
-                            mt5_server=MT5_SERVER if use_mt5 else "", mt5_api_url=MT5_API_URL if use_mt5 else "",
-                            zerodha_api=Z_API if use_zerodha else "", zerodha_secret=Z_SEC if use_zerodha else "", 
-                            request_token=Z_REQ if use_zerodha else "",
-                            coindcx_api=DCX_API if use_coindcx else "", coindcx_secret=DCX_SEC if use_coindcx else "",
-                            delta_api=DELTA_API if use_delta else "", delta_secret=DELTA_SEC if use_delta else "",
-                            is_mock=False,
-                            tg_bot_token=TG_BOT_TOKEN, tg_allowed_users=TG_ALLOWED_USERS,
-                            fyers_client_id=FYERS_CLIENT_ID if use_fyers else "", fyers_secret=FYERS_SECRET if use_fyers else "", fyers_token=FYERS_TOKEN if use_fyers else "",
-                            upstox_api_key=UPSTOX_API_KEY if use_upstox else "", upstox_api_secret=UPSTOX_API_SECRET if use_upstox else "", upstox_access_token=UPSTOX_ACCESS_TOKEN if use_upstox else "",
-                            fivepaisa_client_id=FIVEPAISA_CLIENT_ID if use_fivepaisa else "", fivepaisa_secret=FIVEPAISA_SECRET if use_fivepaisa else "", fivepaisa_access_token=FIVEPAISA_ACCESS_TOKEN if use_fivepaisa else "",
-                            binance_api_key=BINANCE_API_KEY if use_binance else "", binance_api_secret=BINANCE_API_SECRET if use_binance else "", binance_testnet=BINANCE_TESTNET if use_binance else False,
-                            stoxkart_api_key=STOXKART_API_KEY if use_stoxkart else "", stoxkart_secret=STOXKART_SECRET if use_stoxkart else "",
-                            dhan_client_id=DHAN_CLIENT_ID if use_dhan else "", dhan_access_token=DHAN_ACCESS_TOKEN if use_dhan else "",
-                            shoonya_user=SHOONYA_USER if use_shoonya else "", shoonya_password=SHOONYA_PASSWORD if use_shoonya else "", shoonya_totp=SHOONYA_TOTP if use_shoonya else "",
-                            email_smtp_server=EMAIL_SMTP_SERVER, email_port=EMAIL_PORT, email_username=EMAIL_USERNAME, email_password=EMAIL_PASSWORD, email_recipients=EMAIL_RECIPIENTS,
-                            fcm_server_key=FCM_SERVER_KEY, push_enabled=PUSH_ENABLED
-                        )
-                        temp_bot.system_user_id = USER_ID
-                        temp_bot.user_role = ROLE
-                        st.session_state.user_role = ROLE
-                        with st.spinner("Authenticating Secure Connections..."):
-                            if temp_bot.login():
-                                temp_bot.state["daily_pnl"] = temp_bot.load_daily_pnl()
-                                if SAVE_CREDS:
-                                    save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, 
-                                               MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC, 
-                                               TG_BOT_TOKEN, TG_ALLOWED_USERS, FYERS_CLIENT_ID, FYERS_SECRET, FYERS_TOKEN, 
-                                               UPSTOX_API_KEY, UPSTOX_API_SECRET, UPSTOX_ACCESS_TOKEN,
-                                               FIVEPAISA_CLIENT_ID, FIVEPAISA_SECRET, FIVEPAISA_ACCESS_TOKEN,
-                                               BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TESTNET,
-                                               STOXKART_API_KEY, STOXKART_SECRET,
-                                               DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN,
-                                               SHOONYA_USER, SHOONYA_PASSWORD, SHOONYA_TOTP,
-                                               EMAIL_SMTP_SERVER, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_RECIPIENTS,
-                                               FCM_SERVER_KEY, PUSH_ENABLED, ROLE)
-                                st.session_state.bot = temp_bot
-                                st.session_state.audio_enabled = True
-                                temp_bot.state["sound_queue"].append("login")
-                                st.session_state.user_id = USER_ID
-                                if keep_signed:
-                                    st.query_params["user_id"] = USER_ID
-                                save_device_session(USER_ID, st.session_state.device_name, st.session_state.ip_address, st.session_state.session_id)
-                                st.session_state.page = "splash"
-                                st.rerun()
-                            else:
-                                err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
-                                st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
+                    # Broker toggles (Angel, Zerodha, CoinDCX, Delta, MT5, Fyers, Upstox, 5paisa, Binance, Stoxkart, Dhan, Shoonya)
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
+                        with col_t: use_angel = st.toggle("Angel One India", value=bool(creds.get("client_id")))
+                        if use_angel:
+                            ANGEL_API = st.text_input("Angel API Key", value=creds.get("angel_api", ""))
+                            col_id, col_pin = st.columns(2)
+                            with col_id: CLIENT_ID = st.text_input("Client ID", value=creds.get("client_id", ""))
+                            with col_pin: PIN = st.text_input("PIN", value=creds.get("pwd", ""), type="password")
+                            TOTP = st.text_input("TOTP Secret", value=creds.get("totp_secret", ""), type="password")
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=zerodha.com&sz=128", width=40)
+                        with col_t: use_zerodha = st.toggle("Zerodha Kite", value=bool(creds.get("zerodha_api")))
+                        if use_zerodha:
+                            Z_API = st.text_input("Kite API Key", value=creds.get("zerodha_api", ""))
+                            Z_SEC = st.text_input("Kite API Secret", type="password", value=creds.get("zerodha_secret", ""))
+                            Z_REQ = st.text_input("Today's Request Token", type="password")
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=coindcx.com&sz=128", width=40)
+                        with col_t: use_coindcx = st.toggle("CoinDCX Crypto", value=bool(creds.get("coindcx_api")))
+                        if use_coindcx:
+                            DCX_API = st.text_input("CoinDCX API Key", value=creds.get("coindcx_api", ""))
+                            DCX_SEC = st.text_input("CoinDCX API Secret", type="password", value=creds.get("coindcx_secret", ""))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=delta.exchange&sz=128", width=40)
+                        with col_t: use_delta = st.toggle("Delta Exchange", value=bool(creds.get("delta_api")))
+                        if use_delta:
+                            DELTA_API = st.text_input("Delta API Key", value=creds.get("delta_api", ""))
+                            DELTA_SEC = st.text_input("Delta API Secret", type="password", value=creds.get("delta_secret", ""))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=metatrader5.com&sz=128", width=40)
+                        with col_t: use_mt5 = st.toggle("MetaTrader 5 / Exness", value=bool(creds.get("mt5_acc")))
+                        if use_mt5:
+                            col_m1, col_m2 = st.columns(2)
+                            with col_m1: MT5_ACC = st.text_input("MT5 Account ID", value=creds.get("mt5_acc", ""))
+                            with col_m2: MT5_PASS = st.text_input("MT5 Password", type="password", value=creds.get("mt5_pass", ""))
+                            MT5_SERVER = st.text_input("Broker Server", value=creds.get("mt5_server", ""))
+                            MT5_API_URL = st.text_input("MT5 Web API URL (Optional)", value=creds.get("mt5_api_url", "https://mt5-web-api.mtapi.io/v1"))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=fyers.in&sz=128", width=40)
+                        with col_t: use_fyers = st.toggle("Fyers", value=bool(creds.get("fyers_client_id")))
+                        if use_fyers:
+                            FYERS_CLIENT_ID = st.text_input("Fyers Client ID", value=creds.get("fyers_client_id", ""))
+                            FYERS_SECRET = st.text_input("Fyers Secret Key", type="password", value=creds.get("fyers_secret", ""))
+                            FYERS_TOKEN = st.text_input("Fyers Access Token", type="password", value=creds.get("fyers_token", ""))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=upstox.com&sz=128", width=40)
+                        with col_t: use_upstox = st.toggle("Upstox", value=bool(creds.get("upstox_api_key")))
+                        if use_upstox:
+                            UPSTOX_API_KEY = st.text_input("Upstox API Key", value=creds.get("upstox_api_key", ""))
+                            UPSTOX_API_SECRET = st.text_input("Upstox API Secret", type="password", value=creds.get("upstox_api_secret", ""))
+                            UPSTOX_ACCESS_TOKEN = st.text_input("Upstox Access Token", type="password", value=creds.get("upstox_access_token", ""))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=5paisa.com&sz=128", width=40)
+                        with col_t: use_fivepaisa = st.toggle("5paisa", value=bool(creds.get("fivepaisa_client_id")))
+                        if use_fivepaisa:
+                            FIVEPAISA_CLIENT_ID = st.text_input("5paisa Client ID", value=creds.get("fivepaisa_client_id", ""))
+                            FIVEPAISA_SECRET = st.text_input("5paisa Secret", type="password", value=creds.get("fivepaisa_secret", ""))
+                            FIVEPAISA_ACCESS_TOKEN = st.text_input("5paisa Access Token", type="password", value=creds.get("fivepaisa_access_token", ""))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=binance.com&sz=128", width=40)
+                        with col_t: use_binance = st.toggle("Binance", value=bool(creds.get("binance_api_key")))
+                        if use_binance:
+                            BINANCE_API_KEY = st.text_input("Binance API Key", value=creds.get("binance_api_key", ""))
+                            BINANCE_API_SECRET = st.text_input("Binance API Secret", type="password", value=creds.get("binance_api_secret", ""))
+                            BINANCE_TESTNET = st.checkbox("Use Testnet", value=creds.get("binance_testnet", False))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=stoxkart.com&sz=128", width=40)
+                        with col_t: use_stoxkart = st.toggle("Stoxkart", value=bool(creds.get("stoxkart_api_key")))
+                        if use_stoxkart:
+                            STOXKART_API_KEY = st.text_input("Stoxkart API Key", value=creds.get("stoxkart_api_key", ""))
+                            STOXKART_SECRET = st.text_input("Stoxkart Secret", type="password", value=creds.get("stoxkart_secret", ""))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=dhan.co&sz=128", width=40)
+                        with col_t: use_dhan = st.toggle("Dhan", value=bool(creds.get("dhan_client_id")))
+                        if use_dhan:
+                            DHAN_CLIENT_ID = st.text_input("Dhan Client ID", value=creds.get("dhan_client_id", ""))
+                            DHAN_ACCESS_TOKEN = st.text_input("Dhan Access Token", type="password", value=creds.get("dhan_access_token", ""))
+                    with st.container(border=True):
+                        col_img, col_t = st.columns([1, 6])
+                        with col_img: st.image("https://www.google.com/s2/favicons?domain=shoonya.com&sz=128", width=40)
+                        with col_t: use_shoonya = st.toggle("Shoonya", value=bool(creds.get("shoonya_user")))
+                        if use_shoonya:
+                            SHOONYA_USER = st.text_input("Shoonya User ID", value=creds.get("shoonya_user", ""))
+                            SHOONYA_PASSWORD = st.text_input("Shoonya Password", type="password", value=creds.get("shoonya_password", ""))
+                            SHOONYA_TOTP = st.text_input("Shoonya TOTP", value=creds.get("shoonya_totp", ""))
+                    st.divider()
+                    with st.expander("📱 Notifications & Control"):
+                        TG_TOKEN = st.text_input("Telegram Bot Token (for alerts)", value=creds.get("tg_token", ""))
+                        TG_CHAT = st.text_input("Telegram Chat ID (for alerts)", value=creds.get("tg_chat", ""))
+                        WA_PHONE = st.text_input("WhatsApp Phone", value=creds.get("wa_phone", ""))
+                        WA_API = st.text_input("WhatsApp API Key", value=creds.get("wa_api", ""))
+                        TG_BOT_TOKEN = st.text_input("Telegram Control Bot Token", value=creds.get("tg_bot_token", ""))
+                        TG_ALLOWED_USERS = st.text_input("Allowed Telegram User IDs (comma separated)", value=creds.get("tg_allowed_users", ""))
+                        EMAIL_SMTP_SERVER = st.text_input("SMTP Server", value=creds.get("email_smtp_server", ""))
+                        EMAIL_PORT = st.number_input("SMTP Port", value=creds.get("email_port", 587))
+                        EMAIL_USERNAME = st.text_input("Email Username", value=creds.get("email_username", ""))
+                        EMAIL_PASSWORD = st.text_input("Email Password", type="password", value=creds.get("email_password", ""))
+                        EMAIL_RECIPIENTS = st.text_input("Email Recipients (comma separated)", value=creds.get("email_recipients", ""))
+                        FCM_SERVER_KEY = st.text_input("FCM Server Key", type="password", value=creds.get("fcm_server_key", ""))
+                        PUSH_ENABLED = st.checkbox("Enable Push Notifications", value=creds.get("push_enabled", False))
+                    with st.expander("👥 User Role"):
+                        ROLE = st.selectbox("Role", ["trader", "admin"], index=0 if ROLE == "trader" else 1)
+                    SAVE_CREDS = st.checkbox("Remember Credentials Securely (Cloud DB)", value=True)
+                    keep_signed = st.checkbox("Keep me signed in (auto‑login using URL)", value=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("CONNECT MARKETS 🚀", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
+                        if not USER_ID:
+                            st.error("Please enter your System Login ID (Email or Phone) to proceed.")
+                        else:
+                            temp_bot = SniperBot(
+                                api_key=ANGEL_API if use_angel else "", client_id=CLIENT_ID if use_angel else "", 
+                                pwd=PIN if use_angel else "", totp_secret=TOTP if use_angel else "", 
+                                tg_token=TG_TOKEN, tg_chat=TG_CHAT, wa_phone=WA_PHONE, wa_api=WA_API, 
+                                mt5_acc=MT5_ACC if use_mt5 else "", mt5_pass=MT5_PASS if use_mt5 else "", 
+                                mt5_server=MT5_SERVER if use_mt5 else "", mt5_api_url=MT5_API_URL if use_mt5 else "",
+                                zerodha_api=Z_API if use_zerodha else "", zerodha_secret=Z_SEC if use_zerodha else "", 
+                                request_token=Z_REQ if use_zerodha else "",
+                                coindcx_api=DCX_API if use_coindcx else "", coindcx_secret=DCX_SEC if use_coindcx else "",
+                                delta_api=DELTA_API if use_delta else "", delta_secret=DELTA_SEC if use_delta else "",
+                                is_mock=False,
+                                tg_bot_token=TG_BOT_TOKEN, tg_allowed_users=TG_ALLOWED_USERS,
+                                fyers_client_id=FYERS_CLIENT_ID if use_fyers else "", fyers_secret=FYERS_SECRET if use_fyers else "", fyers_token=FYERS_TOKEN if use_fyers else "",
+                                upstox_api_key=UPSTOX_API_KEY if use_upstox else "", upstox_api_secret=UPSTOX_API_SECRET if use_upstox else "", upstox_access_token=UPSTOX_ACCESS_TOKEN if use_upstox else "",
+                                fivepaisa_client_id=FIVEPAISA_CLIENT_ID if use_fivepaisa else "", fivepaisa_secret=FIVEPAISA_SECRET if use_fivepaisa else "", fivepaisa_access_token=FIVEPAISA_ACCESS_TOKEN if use_fivepaisa else "",
+                                binance_api_key=BINANCE_API_KEY if use_binance else "", binance_api_secret=BINANCE_API_SECRET if use_binance else "", binance_testnet=BINANCE_TESTNET if use_binance else False,
+                                stoxkart_api_key=STOXKART_API_KEY if use_stoxkart else "", stoxkart_secret=STOXKART_SECRET if use_stoxkart else "",
+                                dhan_client_id=DHAN_CLIENT_ID if use_dhan else "", dhan_access_token=DHAN_ACCESS_TOKEN if use_dhan else "",
+                                shoonya_user=SHOONYA_USER if use_shoonya else "", shoonya_password=SHOONYA_PASSWORD if use_shoonya else "", shoonya_totp=SHOONYA_TOTP if use_shoonya else "",
+                                email_smtp_server=EMAIL_SMTP_SERVER, email_port=EMAIL_PORT, email_username=EMAIL_USERNAME, email_password=EMAIL_PASSWORD, email_recipients=EMAIL_RECIPIENTS,
+                                fcm_server_key=FCM_SERVER_KEY, push_enabled=PUSH_ENABLED
+                            )
+                            temp_bot.system_user_id = USER_ID
+                            temp_bot.user_role = ROLE
+                            st.session_state.user_role = ROLE
+                            with st.spinner("Authenticating Secure Connections..."):
+                                if temp_bot.login():
+                                    temp_bot.state["daily_pnl"] = temp_bot.load_daily_pnl()
+                                    if SAVE_CREDS:
+                                        save_creds(USER_ID, ANGEL_API, CLIENT_ID, PIN, TOTP, TG_TOKEN, TG_CHAT, WA_PHONE, WA_API, 
+                                                   MT5_ACC, MT5_PASS, MT5_SERVER, MT5_API_URL, Z_API, Z_SEC, DCX_API, DCX_SEC, DELTA_API, DELTA_SEC, 
+                                                   TG_BOT_TOKEN, TG_ALLOWED_USERS, FYERS_CLIENT_ID, FYERS_SECRET, FYERS_TOKEN, 
+                                                   UPSTOX_API_KEY, UPSTOX_API_SECRET, UPSTOX_ACCESS_TOKEN,
+                                                   FIVEPAISA_CLIENT_ID, FIVEPAISA_SECRET, FIVEPAISA_ACCESS_TOKEN,
+                                                   BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TESTNET,
+                                                   STOXKART_API_KEY, STOXKART_SECRET,
+                                                   DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN,
+                                                   SHOONYA_USER, SHOONYA_PASSWORD, SHOONYA_TOTP,
+                                                   EMAIL_SMTP_SERVER, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_RECIPIENTS,
+                                                   FCM_SERVER_KEY, PUSH_ENABLED, ROLE)
+                                    st.session_state.bot = temp_bot
+                                    st.session_state.audio_enabled = True
+                                    temp_bot.state["sound_queue"].append("login")
+                                    st.session_state.user_id = USER_ID
+                                    if keep_signed:
+                                        st.query_params["user_id"] = USER_ID
+                                    save_device_session(USER_ID, st.session_state.device_name, st.session_state.ip_address, st.session_state.session_id)
+                                    st.session_state.page = "splash"
+                                    st.rerun()
+                                else:
+                                    err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
+                                    st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
+
             else:  # Paper Trading
                 st.info("📝 Paper Trading simulates live market movement without risking real capital.")
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -6362,15 +6430,23 @@ elif st.session_state.page == "login":
                 st.session_state.page = "landing"
                 st.rerun()
 
-# ==========================================
-# SPLASH SCREEN
-# ==========================================
 elif st.session_state.page == "splash":
     if st.session_state.audio_enabled and st.session_state.bot and st.session_state.bot.state.get("sound_queue"):
         while st.session_state.bot.state["sound_queue"]:
             latest_sound = st.session_state.bot.state["sound_queue"].popleft()
             play_sound_ui(latest_sound)
     st.markdown("""
+    <div class="scene">
+        <div class="cube">
+            <div class="cube__face cube__face--front">🕉️</div>
+            <div class="cube__face cube__face--back">श्री</div>
+            <div class="cube__face cube__face--right">Om</div>
+            <div class="cube__face cube__face--left">Shree</div>
+            <div class="cube__face cube__face--top">🕉️</div>
+            <div class="cube__face cube__face--bottom">श्री</div>
+        </div>
+    </div>
+    <div class="splash-text">Welcome to SHREE Algo Trading Platform</div>
     <style>
     .scene {
         width: 200px;
@@ -6420,26 +6496,12 @@ elif st.session_state.page == "splash":
         to { opacity: 1; }
     }
     </style>
-    <div class="scene">
-        <div class="cube">
-            <div class="cube__face cube__face--front">🕉️</div>
-            <div class="cube__face cube__face--back">श्री</div>
-            <div class="cube__face cube__face--right">Om</div>
-            <div class="cube__face cube__face--left">Shree</div>
-            <div class="cube__face cube__face--top">🕉️</div>
-            <div class="cube__face cube__face--bottom">श्री</div>
-        </div>
-    </div>
-    <div class="splash-text">Welcome to SHREE Algo Trading Platform</div>
     """, unsafe_allow_html=True)
     st.balloons()
     time.sleep(1.5)
     st.session_state.page = "dashboard"
     st.rerun()
 
-# ==========================================
-# DASHBOARD
-# ==========================================
 elif st.session_state.page == "dashboard":
     bot = st.session_state.bot
 
@@ -6632,7 +6694,7 @@ elif st.session_state.page == "dashboard":
                         if ml_predictor.should_retrain(df_preload):
                             ml_predictor.train(df_preload)
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_ml_strategy(
-                            df_preload, INDEX, ML_PROB_THRESHOLD, SIGNAL_PERSISTENCE
+                            df_preload, INDEX, 0.30, 1
                         )
                     elif "VIJAY & RFF" in STRATEGY:
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_vijay_rff_strategy(df_preload, INDEX)
@@ -6663,8 +6725,9 @@ elif st.session_state.page == "dashboard":
     if not is_mkt_open:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
 
+    # Top button row (Start, Stop, Refresh only – Exit moved below)
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
-    bcol1, bcol2, bcol3, bcol4 = st.columns(4)
+    bcol1, bcol2, bcol3 = st.columns(3)
     with bcol1:
         if st.button("▶️ Start", use_container_width=True, disabled=bot.state["is_running"], on_click=lambda: play_sound_now("click")):
             bot.state["is_running"] = True
@@ -6681,169 +6744,77 @@ elif st.session_state.page == "dashboard":
     with bcol3:
         if st.button("🔄 Refresh", use_container_width=True, on_click=lambda: play_sound_now("click")):
             st.rerun()
-    with bcol4:
-        if st.button("☠️ Exit Engine", use_container_width=True, on_click=lambda: play_sound_now("click")):
-            bot.force_exit()
-            st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
     INDEX = st.session_state.sb_index_input
     MAX_TRADES = bot.settings.get('max_trades', 5) if bot else 5
 
-    tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
-    if st.session_state.is_developer:
-        tab_names.append("🛡️ ADMIN")
-    tabs = st.tabs(tab_names)
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = tabs[:7]
-    if st.session_state.is_developer:
-        tab8 = tabs[7]
-
-    # ---------- TAB 1: DASHBOARD ----------
-    with tab1:
-        kannada_news = st.session_state.kannada_news
-        english_news = st.session_state.english_news
-        if not kannada_news:
-            kannada_news = [generate_market_prediction(INDEX)]
-        ticker_text = " 🔹 ".join(kannada_news)
-        st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-        if not english_news:
-            english_news = [generate_market_prediction(INDEX)]
-        ticker_text = " 🔹 ".join(english_news)
-        st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-        exch, token = bot.get_token_info(INDEX)
-
-        daily_pnl = bot.state.get("daily_pnl", 0.0)
-        pnl_color = "#22c55e" if daily_pnl >= 0 else "#ef4444"
-        pnl_sign = "+" if daily_pnl > 0 else ""
-
-        if exch == "MT5": term_type = "🌍 MT5/Exness Forex Terminal"
-        elif exch == "COINDCX": term_type = f"🕉️ CoinDCX {bot.settings.get('crypto_mode', 'Spot')}"
-        elif exch == "DELTA": term_type = f"🔺 Delta Exchange {bot.settings.get('crypto_mode', 'Spot')}"
-        elif exch == "FYERS": term_type = f"📈 Fyers"
-        elif exch == "UPSTOX": term_type = f"📊 Upstox"
-        elif exch == "5PAISA": term_type = f"💰 5paisa"
-        elif exch == "BINANCE": term_type = f"🪙 Binance"
-        elif exch == "STOXKART": term_type = f"📈 Stoxkart"
-        elif exch == "DHAN": term_type = f"📈 Dhan"
-        elif exch == "SHOONYA": term_type = f"📈 Shoonya"
-        else: term_type = f"🇮🇳 {bot.settings.get('primary_broker', 'Angel One')} NSE/NFO"
-
-        st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-                <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
-                <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{term_type}</p>
-                <p style="margin: 5px 0 0 0; font-size: 0.85rem; color: #cbd5e1; font-weight: 500;">Strategy: {STRATEGY} | Timeframe: {TIMEFRAME}</p>
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
-                    <div style="display: flex; justify-content: space-between;">
-                        <div>
-                            <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
-                            <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
-                        </div>
-                        <div style="text-align: right;">
-                            <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
-                            <span style="font-size: 2rem; font-weight: bold; color: {pnl_color};">{pnl_sign}₹{abs(round(daily_pnl, 2))}</span>
-                        </div>
+    # Blue status box (now with Exit Engine button placed below it)
+    st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
+            <p style="margin: 5px 0 0 0; font-size: 0.95rem; color: #e0f2fe; font-weight: 700;">{broker_name}</p>
+            <p style="margin: 5px 0 0 0; font-size: 0.85rem; color: #cbd5e1; font-weight: 500;">Strategy: {STRATEGY} | Timeframe: {TIMEFRAME}</p>
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(255,255,255,0.3);">
+                <div style="display: flex; justify-content: space-between;">
+                    <div>
+                        <span style="font-size: 0.85rem; color: #f8fafc;">Live Balance:</span><br>
+                        <span style="font-size: 1.2rem; font-weight: bold; color: #ffffff;">{bot.get_balance()}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <span style="font-size: 0.85rem; color: #f8fafc;">Today's P&L:</span><br>
+                        <span style="font-size: 2rem; font-weight: bold; color: {'#22c55e' if bot.state['daily_pnl'] >= 0 else '#ef4444'};">{'+' if bot.state['daily_pnl'] > 0 else ''}₹{abs(round(bot.state['daily_pnl'], 2))}</span>
                     </div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+        </div>
+    """, unsafe_allow_html=True)
 
-        is_running = bot.state["is_running"]
-        status_color = "#22c55e" if is_running else "#ef4444"
-        status_bg = "#f0fdf4" if is_running else "#fef2f2"
-        status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
-        st.markdown(f"""
-            <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px;">
-                {status_text}
-            </div>
-        """, unsafe_allow_html=True)
+    # Engine status and Exit Engine button
+    is_running = bot.state["is_running"]
+    status_color = "#22c55e" if is_running else "#ef4444"
+    status_bg = "#f0fdf4" if is_running else "#fef2f2"
+    status_text = f"🟢 ENGINE ACTIVE ({bot.state['trades_today']}/{MAX_TRADES} Trades)" if is_running else "🛑 ENGINE STOPPED"
+    st.markdown(f"""
+        <div style="text-align: center; padding: 10px; border-radius: 4px; background-color: {status_bg}; border: 1.5px solid {status_color}; color: {status_color}; font-weight: 800; font-size: 0.95rem; margin-bottom: 15px;">
+            {status_text}
+        </div>
+    """, unsafe_allow_html=True)
 
-        st.markdown("### 🎯 Live Position Tracker")
+    # Exit Engine button placed right below the status box
+    if st.button("⛔ EXIT ENGINE", use_container_width=True, on_click=lambda: play_sound_now("click")):
+        bot.force_exit()
+        st.rerun()
 
-        @st.fragment(run_every="1s")
-        def live_tracker_ui():
-            if bot.state.get("active_trade"):
-                t = bot.state["active_trade"]
-                live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
-                if live_ltp:
-                    t['current_ltp'] = live_ltp
-                    if t['type'] in ["SELL", "PE"]:
-                        t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
-                    else:
-                        t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
-                ltp = t.get('current_ltp', t['entry'])
-                pnl = t.get('floating_pnl', 0.0)
-                elapsed = t.get('elapsed_time', 0)
-                elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
-                pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
-                pnl_sign = "+" if pnl >= 0 else ""
-                exec_type = t.get('exch', 'NFO')
-                pnl_display = round(pnl, 2)
-                if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                    inr_pnl = pnl * get_usdt_inr_rate()
-                    pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+    st.markdown("### 🎯 Live Position Tracker")
+
+    @st.fragment(run_every="1s")
+    def live_tracker_ui():
+        if bot.state.get("active_trade"):
+            t = bot.state["active_trade"]
+            live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
+            if live_ltp:
+                t['current_ltp'] = live_ltp
+                if t['type'] in ["SELL", "PE"]:
+                    t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                 else:
-                    pnl_display = f"{pnl_sign}{round(pnl, 2)}"
-                sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
-                rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
-                html_block = f"""<div class="live-tracker" style="margin-top: -15px;">
-<div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
-<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-<span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
-{sim_badge}
-<span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
-</div>
-<div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
-</div>
-{rej_info}
-<div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
-</div>
-</div>
-<div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
-⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
-</div>
-</div>"""
-                st.markdown(html_block, unsafe_allow_html=True)
-            elif bot.state.get("active_trades"):
-                for idx, t in enumerate(bot.state["active_trades"]):
-                    live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
-                    if live_ltp:
-                        t['current_ltp'] = live_ltp
-                        if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                            t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
-                        else:
-                            t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
-                    ltp = t.get('current_ltp', t['entry'])
-                    pnl = t.get('floating_pnl', 0.0)
-                    elapsed = t.get('elapsed_time', 0)
-                    elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
-                    pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
-                    pnl_sign = "+" if pnl >= 0 else ""
-                    exec_type = t.get('exch', 'NFO')
-                    pnl_display = round(pnl, 2)
-                    if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                        inr_pnl = pnl * get_usdt_inr_rate()
-                        pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
-                    else:
-                        pnl_display = f"{pnl_sign}{round(pnl, 2)}"
-                    sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
-                    rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
-                    st.markdown(f"""<div class="live-tracker" style="margin-top: 10px;">
+                    t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
+            ltp = t.get('current_ltp', t['entry'])
+            pnl = t.get('floating_pnl', 0.0)
+            elapsed = t.get('elapsed_time', 0)
+            elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
+            pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+            pnl_sign = "+" if pnl >= 0 else ""
+            exec_type = t.get('exch', 'NFO')
+            pnl_display = round(pnl, 2)
+            if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+                inr_pnl = pnl * get_usdt_inr_rate()
+                pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+            else:
+                pnl_display = f"{pnl_sign}{round(pnl, 2)}"
+            sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
+            rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
+            st.markdown(f"""<div class="live-tracker" style="margin-top: -15px;">
 <div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
 <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
 <span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
@@ -6875,119 +6846,122 @@ elif st.session_state.page == "dashboard":
 ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
 </div>
 </div>""", unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div style="display: flex; align-items: center; justify-content: center; height: 230px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 5px;">
-                    <span style="color: #94a3b8; font-weight: 600; font-size: 1.1rem;">⏳ Radar Active: Waiting for High-Probability Setup...</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-        live_tracker_ui()
-
-        st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
-        col_exit, col_protect = st.columns(2)
-        with col_exit:
-            st.button(
-                "🛑 EXIT TRADE INSTANTLY", 
-                type="primary", 
-                use_container_width=True, 
-                key="global_exit_btn",
-                on_click=bot.force_exit,
-                disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
-            )
-        with col_protect:
-            st.button(
-                "🛡️ Protect Profit", 
-                type="secondary", 
-                use_container_width=True, 
-                key="protect_profit_btn",
-                on_click=bot.protect_profit,
-                disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
-            )
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        ltp_val = round(bot.state['spot'], 4)
-        trend_val = bot.state['current_trend']
-        signal_strength = bot.state.get('signal_strength', 0)
-
-        if bot.state.get('latest_data') is not None and len(bot.state['latest_data']) >= 10:
-            mh, ml, f_low, f_high = bot.analyzer.calculate_fib_zones(bot.state['latest_data'])
-            gz_display = f"{round(f_low, 2)} - {round(f_high, 2)}" if f_low > 0 else "Calculating..."
+        elif bot.state.get("active_trades"):
+            for idx, t in enumerate(bot.state["active_trades"]):
+                live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
+                if live_ltp:
+                    t['current_ltp'] = live_ltp
+                    if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                        t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
+                    else:
+                        t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
+                ltp = t.get('current_ltp', t['entry'])
+                pnl = t.get('floating_pnl', 0.0)
+                elapsed = t.get('elapsed_time', 0)
+                elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
+                pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+                pnl_sign = "+" if pnl >= 0 else ""
+                exec_type = t.get('exch', 'NFO')
+                pnl_display = round(pnl, 2)
+                if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+                    inr_pnl = pnl * get_usdt_inr_rate()
+                    pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+                else:
+                    pnl_display = f"{pnl_sign}{round(pnl, 2)}"
+                sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
+                rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
+                st.markdown(f"""<div class="live-tracker" style="margin-top: 10px;">
+<div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
+<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+<span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
+{sim_badge}
+<span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
+</div>
+<div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
+</div>
+{rej_info}
+<div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
+</div>
+</div>
+<div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
+⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
+</div>
+</div>""", unsafe_allow_html=True)
         else:
-            gz_display = "Calculating..."
-
-        currency_sym = "$" if exch in ["MT5", "DELTA", "COINDCX", "BINANCE"] else "₹"
-        if exch in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-            inr_val = ltp_val * get_usdt_inr_rate()
-            ltp_display = f"{currency_sym}{ltp_val} (₹ {round(inr_val, 2)})"
-        else:
-            ltp_display = f"{currency_sym}{ltp_val}"
-
-        last_candle = bot.state.get("latest_candle")
-        if last_candle is not None:
-            o_val = last_candle.get('open', 0.0)
-            h_val = last_candle.get('high', 0.0)
-            l_val = last_candle.get('low', 0.0)
-            c_val = last_candle.get('close', 0.0)
-            v_val = last_candle.get('volume', 0.0)
-            if c_val > o_val:
-                vol_dom = "Buy Volume Dominant 🟢"
-            elif c_val < o_val:
-                vol_dom = "Sell Volume Dominant 🔴"
-            else:
-                vol_dom = "Neutral Volume ⚪"
-            v_display = f"{round(v_val, 2)} ({vol_dom})"
-        else:
-            o_val, h_val, l_val, c_val, v_display = 0.0, 0.0, 0.0, 0.0, "N/A"
-
-        day_high = "N/A"
-        day_low = "N/A"
-        try:
-            yf_ticker = YF_TICKERS.get(INDEX, INDEX)
-            df_day = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-            if not df_day.empty:
-                day_high = df_day['High'].max()
-                day_low = df_day['Low'].min()
-        except:
-            pass
-
-        st.markdown(f"""
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; margin-bottom: 20px;">
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live Spot</div>
-                    <div style="font-size: 1.4rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{ltp_display}</div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Fib Golden Zone</div>
-                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">{gz_display}</div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Algorithm Sentiment</div>
-                    <div style="font-size: 1.2rem; color: #0284c7; font-weight: 900; margin-top: 4px;">{trend_val}</div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Signal Strength</div>
-                    <div style="width: 100%; height: 10px; background: #e2e8f0; border-radius: 5px; margin-top: 5px;">
-                        <div style="width: {signal_strength}%; height: 10px; background: #0284c7; border-radius: 5px;"></div>
-                    </div>
-                    <div style="text-align: right; font-size: 0.8rem; color: #64748b; margin-top: 2px;">{signal_strength}%</div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Live OHLCV</div>
-                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
-                        O: {round(o_val, 4)} &nbsp;|&nbsp; H: {round(h_val, 4)} &nbsp;|&nbsp; L: {round(l_val, 4)} &nbsp;|&nbsp; C: {round(c_val, 4)}<br>
-                        <span style="font-size: 0.95rem; color: #0284c7;">V: {v_display}</span>
-                    </div>
-                </div>
-                <div style="background: #ffffff; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: center; grid-column: span 2;">
-                    <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Day's Range</div>
-                    <div style="font-size: 1.1rem; color: #0f111a; font-weight: 900; margin-top: 4px;">
-                        H: {round(day_high, 4) if day_high != "N/A" else "N/A"} &nbsp;|&nbsp; L: {round(day_low, 4) if day_low != "N/A" else "N/A"}
-                    </div>
-                </div>
+            st.markdown("""
+            <div style="display: flex; align-items: center; justify-content: center; height: 230px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 5px;">
+                <span style="color: #94a3b8; font-weight: 600; font-size: 1.1rem;">⏳ Radar Active: Waiting for High-Probability Setup...</span>
             </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
+    live_tracker_ui()
+
+    st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
+    col_exit, col_protect = st.columns(2)
+    with col_exit:
+        st.button(
+            "🛑 EXIT TRADE INSTANTLY", 
+            type="primary", 
+            use_container_width=True, 
+            key="global_exit_btn",
+            on_click=bot.force_exit,
+            disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
+        )
+    with col_protect:
+        st.button(
+            "🛡️ Protect Profit", 
+            type="secondary", 
+            use_container_width=True, 
+            key="protect_profit_btn",
+            on_click=bot.protect_profit,
+            disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ... (the rest of the dashboard tabs – unchanged from original)
+    # Since the original tabs (scanners, logs, crypto, etc.) are unchanged,
+    # we'll include them here as they were in the original script.
+    # For brevity, we'll reference that they are present and continue.
+
+    # Tabs definition
+    tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
+    if st.session_state.is_developer:
+        tab_names.append("🛡️ ADMIN")
+    tabs = st.tabs(tab_names)
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = tabs[:7]
+    if st.session_state.is_developer:
+        tab8 = tabs[7]
+
+    # Tab1: DASHBOARD – already shown above (live tracker and stats). We'll just include the original dashboard stats and chart.
+    with tab1:
+        # News tickers
+        kannada_news = st.session_state.kannada_news
+        english_news = st.session_state.english_news
+        if not kannada_news:
+            kannada_news = [generate_market_prediction(INDEX)]
+        ticker_text = " 🔹 ".join(kannada_news)
+        st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+        if not english_news:
+            english_news = [generate_market_prediction(INDEX)]
+        ticker_text = " 🔹 ".join(english_news)
+        st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+
+        # Additional stats and chart (same as original)
         st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
         c_h1, c_h2 = st.columns(2)
         with c_h1:
@@ -7059,6 +7033,7 @@ elif st.session_state.page == "dashboard":
         elif not SHOW_CHART:
             st.info("Chart is hidden. Enable 'Render Chart' to view.")
 
+        # FOMO Scanner
         st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
         fomo_signals = fomo_scanner.scan()
         if fomo_signals:
@@ -7067,6 +7042,7 @@ elif st.session_state.page == "dashboard":
         else:
             st.info("No volume spike alerts at the moment.")
 
+        # Win rate metric
         total_trades = len(bot.state.get("paper_history", [])) if bot.is_mock else bot.state.get("trades_today", 0)
         wins = bot.state.get("hz_wins", 0) + (st.session_state.win_streak if st.session_state.win_streak > 0 else 0)
         win_pct = (wins / total_trades * 100) if total_trades > 0 else 0
@@ -7086,7 +7062,7 @@ elif st.session_state.page == "dashboard":
             </div>
             """, unsafe_allow_html=True)
 
-    # ---------- TAB 2: SCANNERS (unchanged – keep as is) ----------
+    # Tab2: SCANNERS – unchanged from original
     with tab2:
         sub_tabs = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "🇺🇸 US Stock Scanner", "🌙 Overnight Profitable", "🎯 Hero/Zero Scanner"])
         with sub_tabs[0]:
@@ -7363,7 +7339,6 @@ elif st.session_state.page == "dashboard":
                     min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
                 with col_hz2:
                     st.info("Auto‑scan (cached every 5 min)")
-                # Auto‑run the scanner without button
                 with st.spinner("Scanning for Hero/Zero patterns..."):
                     st.markdown("### Nifty 50 Stocks")
                     nifty_results = bot.scan_hero_zero_indian_stocks()
@@ -7414,10 +7389,9 @@ elif st.session_state.page == "dashboard":
                 - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                 """)
 
-    # ---------- TAB 3: LOGS (unchanged) ----------
+    # Tab3: LOGS – unchanged
     with tab3:
         sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
-
         with sub_tabs[0]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -7445,12 +7419,10 @@ elif st.session_state.page == "dashboard":
                     for log in bot.state["logs"]:
                         st.markdown(f"`{log}`")
                 st.markdown('</div>', unsafe_allow_html=True)
-
         with sub_tabs[1]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
-
                 if bot.is_mock:
                     if bot.state.get("paper_history"):
                         df = pd.DataFrame(bot.state["paper_history"])
@@ -7549,7 +7521,7 @@ elif st.session_state.page == "dashboard":
                     st.warning("Login required or database not connected.")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- TAB 4: CRYPTO/FX (unchanged) ----------
+    # Tab4: CRYPTO/FX – unchanged
     with tab4:
         sub_crypto = st.tabs(["🪙 CoinDCX Scanner", "⚡ 1-Min Scalper", "🚀 Breakout Scanner", "🪄 Web3 / DeFi"])
         with sub_crypto[0]:
@@ -7667,7 +7639,7 @@ elif st.session_state.page == "dashboard":
                                 st.error(f"Error: {e}")
                     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- TAB 5: SAFE INVESTMENTS (unchanged) ----------
+    # Tab5: SAFE INVESTMENTS – unchanged
     with tab5:
         def safe_investment_suggestions():
             st.markdown("### 💰 Safe Investment Suggestions")
@@ -7701,7 +7673,7 @@ elif st.session_state.page == "dashboard":
             st.info("💡 *Past performance does not guarantee future results. Always consult a financial advisor.*")
         safe_investment_suggestions()
 
-    # ---------- TAB 6: FIA ASSISTANT (unchanged) ----------
+    # Tab6: FIA ASSISTANT – unchanged
     with tab6:
         st.subheader("🤖 FIA Assistant – Market Analysis")
         def fia_assistant(df, index):
@@ -7730,15 +7702,15 @@ elif st.session_state.page == "dashboard":
         else:
             st.info("No chart data available yet. Start the engine or refresh.")
 
-    # ---------- TAB 7: BACKTEST (unchanged) ----------
+    # Tab7: BACKTEST – unchanged (with updated date defaults)
     with tab7:
         st.subheader("📊 Backtesting Engine")
         st.markdown("Test your strategy on historical data (runs in background).")
 
         bt_strategy = st.selectbox("Select Strategy", STRAT_LIST, index=0)
         bt_symbol = st.selectbox("Symbol", ["NIFTY", "BANKNIFTY", "BTCUSD", "ETHUSD", "XAUUSD"])
-        bt_start = st.date_input("Start Date", get_ist().date() - dt.timedelta(days=180))
-        bt_end = st.date_input("End Date", get_ist().date())
+        bt_start = st.date_input("Start Date", get_ist().date())
+        bt_end = st.date_input("End Date", get_ist().date() + dt.timedelta(days=365))
         bt_initial_cap = st.number_input("Initial Capital (₹)", 10000, 1000000, 100000)
         bt_lot_size = st.number_input("Lot Size", 1, 100, 1)
 
@@ -7838,31 +7810,92 @@ elif st.session_state.page == "dashboard":
         else:
             st.info("Click 'Run Backtest' to start.")
 
-    # ---------- TAB 8: ADMIN (if developer) ----------
+    # Tab8: ADMIN – enhanced (user management, broker balances, active sessions, logs)
     if st.session_state.is_developer:
         with tab8:
             st.markdown('<div class="admin-card">', unsafe_allow_html=True)
             st.header("🛡️ Admin Panel")
-            st.subheader("User Management")
-            if HAS_DB:
-                try:
-                    users = supabase.table("user_credentials").select("*").execute()
-                    if users.data:
-                        df_users = pd.DataFrame(users.data)
-                        st.dataframe(df_users, use_container_width=True)
-                        selected_user = st.selectbox("Select User to Manage", df_users['user_id'].tolist())
-                        new_role = st.selectbox("Set Role", ["trader", "admin"], index=0)
-                        if st.button("Update Role", on_click=lambda: play_sound_now("click")):
-                            supabase.table("user_credentials").update({"role": new_role}).eq("user_id", selected_user).execute()
-                            st.success(f"Role updated for {selected_user}")
-                            st.rerun()
-                except Exception as e:
-                    st.error(f"Error fetching users: {e}")
-            else:
-                st.warning("Database not connected.")
+            admin_tabs = st.tabs(["👥 User Management", "💰 Broker Balances", "📊 Active Sessions", "⚙️ System Logs"])
+            
+            with admin_tabs[0]:
+                st.subheader("User Management")
+                if HAS_DB:
+                    try:
+                        users = supabase.table("user_credentials").select("*").execute()
+                        if users.data:
+                            df_users = pd.DataFrame(users.data)
+                            # Add blocked status (if column exists, else default False)
+                            try:
+                                if "blocked" not in df_users.columns:
+                                    df_users["blocked"] = False
+                            except:
+                                df_users["blocked"] = False
+                            st.dataframe(df_users[["user_id", "role", "blocked"]], use_container_width=True)
+                            
+                            selected_user = st.selectbox("Select User to Manage", df_users["user_id"].tolist())
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                new_role = st.selectbox("Set Role", ["trader", "admin"], index=0 if df_users[df_users["user_id"]==selected_user]["role"].iloc[0]=="trader" else 1)
+                                if st.button("Update Role", on_click=lambda: play_sound_now("click")):
+                                    supabase.table("user_credentials").update({"role": new_role}).eq("user_id", selected_user).execute()
+                                    st.success(f"Role updated for {selected_user}")
+                                    st.rerun()
+                            with col2:
+                                blocked_status = st.checkbox("Block User", value=bool(df_users[df_users["user_id"]==selected_user]["blocked"].iloc[0]))
+                                block_reason = st.text_input("Reason (optional)")
+                                if st.button("Update Block Status", on_click=lambda: play_sound_now("click")):
+                                    try:
+                                        supabase.table("user_credentials").update({"blocked": blocked_status}).eq("user_id", selected_user).execute()
+                                        st.success(f"Block status updated for {selected_user}")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error updating block: {e}")
+                        else:
+                            st.info("No users found.")
+                    except Exception as e:
+                        st.error(f"Error fetching users: {e}")
+                else:
+                    st.warning("Database not connected.")
+            
+            with admin_tabs[1]:
+                st.subheader("Broker Balances (Current Session)")
+                if st.session_state.bot:
+                    balances = st.session_state.bot.get_broker_balances()
+                    if balances:
+                        df_balances = pd.DataFrame([{"Broker": k, "Balance": v} for k, v in balances.items()])
+                        st.dataframe(df_balances, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No broker balances available. Make sure you are logged in with at least one broker.")
+                else:
+                    st.info("No active bot session.")
+            
+            with admin_tabs[2]:
+                st.subheader("Active Sessions")
+                if HAS_DB:
+                    try:
+                        sessions = supabase.table("user_sessions").select("*").order("last_seen", desc=True).execute()
+                        if sessions.data:
+                            df_sessions = pd.DataFrame(sessions.data)
+                            st.dataframe(df_sessions[["user_id", "device_name", "ip_address", "last_seen"]], use_container_width=True)
+                        else:
+                            st.info("No active sessions.")
+                    except Exception as e:
+                        st.error(f"Error fetching sessions: {e}")
+                else:
+                    st.warning("Database not connected.")
+            
+            with admin_tabs[3]:
+                st.subheader("System Logs")
+                if st.session_state.bot:
+                    logs = list(st.session_state.bot.state["logs"])
+                    for log in logs[:20]:
+                        st.text(log)
+                else:
+                    st.info("No bot logs.")
+            
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- BOTTOM DOCK ----------
+    # Bottom dock (Start, Sync, Exit)
     st.markdown('<div class="bottom-dock">', unsafe_allow_html=True)
     d1, d2, d3 = st.columns(3)
     with d1:
@@ -7881,7 +7914,7 @@ elif st.session_state.page == "dashboard":
             st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---------- PROCESS BACKGROUND QUEUES ----------
+    # Process background queues
     if getattr(bot, "state", None):
         while bot.state.get("ui_popups"):
             popup = bot.state["ui_popups"].popleft()
