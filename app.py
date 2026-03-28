@@ -4022,78 +4022,95 @@ class SniperBot:
         balances = {}
         if self.api:
             try:
-                rms = self.api.rmslimit()
-                if rms and rms.get('status') and rms.get('data'):
-                    bal = rms['data'].get('availablecash', 0)
+                # FIX: Capital 'L' in rmsLimit() is strictly required by Angel API
+                rms = self.api.rmsLimit() 
+                if rms and isinstance(rms, dict) and rms.get('status') and rms.get('data'):
+                    bal = rms['data'].get('availablecash', rms['data'].get('net', 0))
                     balances["Angel One"] = f"₹{float(bal):,.2f}"
-            except: pass
+            except Exception as e: 
+                self.log(f"Angel Balance Error: {e}")
+                
         if self.kite:
             try:
                 margins = self.kite.margins()
                 eq = margins.get('equity', {})
-                bal = eq.get('available', {}).get('live_balance', eq.get('net', 0))
+                # FIX: Safer fallback to 'net' balance
+                bal = eq.get('net', eq.get('available', {}).get('live_balance', 0))
                 balances["Zerodha"] = f"₹{float(bal):,.2f}"
-            except: pass
+            except Exception as e: 
+                self.log(f"Zerodha Balance Error: {e}")
+                
         if self.coindcx_bridge and self.is_coindcx_connected:
             try:
-                bal = self.coindcx_bridge.get_balance()
-                balances["CoinDCX"] = f"${bal:.2f}"
+                bals = self.coindcx_bridge.get_balance()
+                if bals is not None:
+                    balances["CoinDCX"] = f"${bals.get('USDT', 0.0):,.2f} | ₹{bals.get('INR', 0.0):,.2f}"
             except: pass
+            
         if self.delta_bridge and self.is_delta_connected:
             try:
                 info = self.delta_bridge.get_account_info()
                 if info:
                     balances["Delta Exchange"] = f"${info.get('balance', 0):,.2f}"
             except: pass
+            
         if self.mt5_bridge and self.is_mt5_connected:
             try:
                 acc = self.mt5_bridge.get_account_info()
                 if acc:
                     balances["MT5"] = f"${acc.get('balance', 0):,.2f}"
             except: pass
+            
         if self.fyers_bridge and self.is_fyers_connected:
             try:
                 info = self.fyers_bridge.get_account_info()
                 if info:
                     balances["Fyers"] = f"₹{info.get('balance', 0):,.2f}"
             except: pass
+            
         if self.upstox_bridge and self.is_upstox_connected:
             try:
                 info = self.upstox_bridge.get_account_info()
                 if info:
                     balances["Upstox"] = f"₹{info.get('balance', 0):,.2f}"
             except: pass
+            
         if self.fivepaisa_bridge and self.is_fivepaisa_connected:
             try:
                 info = self.fivepaisa_bridge.get_account_info()
                 if info:
                     balances["5paisa"] = f"₹{info.get('balance', 0):,.2f}"
             except: pass
+            
         if self.binance_bridge and self.is_binance_connected:
             try:
                 bal = self.binance_bridge.get_asset_balance("USDT")
-                balances["Binance"] = f"${bal:,.2f}" if bal else "0.00"
+                if bal is not None:
+                    balances["Binance"] = f"${bal:,.2f}"
             except: pass
+            
         if self.stoxkart_bridge and self.is_stoxkart_connected:
             try:
                 info = self.stoxkart_bridge.get_account_info()
                 if info:
                     balances["Stoxkart"] = f"₹{info.get('balance', 0):,.2f}"
             except: pass
+            
         if self.dhan_bridge and self.is_dhan_connected:
             try:
                 info = self.dhan_bridge.get_account_info()
                 if info:
                     balances["Dhan"] = f"₹{info.get('balance', 0):,.2f}"
             except: pass
+            
         if self.shoonya_bridge and self.is_shoonya_connected:
             try:
                 info = self.shoonya_bridge.get_account_info()
                 if info:
                     balances["Shoonya"] = f"₹{info.get('balance', 0):,.2f}"
             except: pass
+            
         return balances
-
     def connect_mt5(self):
         if self.mt5_acc and self.mt5_server:
             self.mt5_bridge = MT5WebBridge(account=self.mt5_acc, password=self.mt5_pass, server=self.mt5_server, api_url=self.mt5_api_url)
@@ -5304,11 +5321,18 @@ class SniperBot:
             return self._balance_cache
         
         balance_strs = []
+        
         if self.api:
             for attempt in range(2):
                 try:
-                    rms = self.api.rmslimit() if hasattr(self.api, 'rmslimit') else None
-                    if rms and rms.get('status') and rms.get('data'):
+                    # FIX: Correctly call rmsLimit()
+                    rms = self.api.rmsLimit() if hasattr(self.api, 'rmsLimit') else None
+                    
+                    # Safety fallback just in case the sdk version differs
+                    if not rms and hasattr(self.api, 'rmslimit'):
+                        rms = self.api.rmslimit()
+                        
+                    if rms and isinstance(rms, dict) and rms.get('status') and rms.get('data'):
                         data = rms['data']
                         bal = data.get('availablecash', data.get('net', 0))
                         try:
@@ -5317,25 +5341,31 @@ class SniperBot:
                             break
                         except:
                             pass
-                except:
+                except Exception as e:
+                    self.log(f"Angel get_balance error: {e}")
                     time.sleep(0.5)
+        
         if self.kite:
             for attempt in range(2):
                 try:
                     margins = self.kite.margins()
                     eq = margins.get('equity', {})
-                    bal = eq.get('available', {}).get('live_balance', eq.get('net', 0))
+                    bal = eq.get('net', eq.get('available', {}).get('live_balance', 0))
                     balance_strs.append(f"Zerodha: ₹ {float(bal):,.2f}")
                     break
                 except:
                     time.sleep(0.5)
+                    
         if self.coindcx_bridge and self.is_coindcx_connected:
             try:
-                bal = self.coindcx_bridge.get_balance()
-                if bal:
-                    balance_strs.append(f"CoinDCX: $ {bal:.2f}")
+                bals = self.coindcx_bridge.get_balance()
+                if bals is not None:
+                    usdt = bals.get("USDT", 0.0)
+                    inr = bals.get("INR", 0.0)
+                    balance_strs.append(f"CoinDCX: $ {usdt:,.2f} | ₹ {inr:,.2f}")
             except:
                 pass
+                
         if self.delta_bridge and self.is_delta_connected:
             try:
                 info = self.delta_bridge.get_account_info()
@@ -5343,6 +5373,7 @@ class SniperBot:
                     balance_strs.append(f"Delta: $ {info.get('balance', 0):,.2f}")
             except:
                 pass
+                
         if self.is_mt5_connected and self.mt5_bridge:
             try:
                 acc_info = self.mt5_bridge.get_account_info()
@@ -5350,6 +5381,7 @@ class SniperBot:
                     balance_strs.append(f"MT5: $ {acc_info.get('balance', 0):,.2f}")
             except:
                 pass
+                
         if self.is_fyers_connected and self.fyers_bridge:
             try:
                 info = self.fyers_bridge.get_account_info()
@@ -5357,6 +5389,7 @@ class SniperBot:
                     balance_strs.append(f"Fyers: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
+                
         if self.is_upstox_connected and self.upstox_bridge:
             try:
                 info = self.upstox_bridge.get_account_info()
@@ -5364,6 +5397,7 @@ class SniperBot:
                     balance_strs.append(f"Upstox: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
+                
         if self.is_fivepaisa_connected and self.fivepaisa_bridge:
             try:
                 info = self.fivepaisa_bridge.get_account_info()
@@ -5371,13 +5405,15 @@ class SniperBot:
                     balance_strs.append(f"5paisa: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
+                
         if self.is_binance_connected and self.binance_bridge:
             try:
                 bal = self.binance_bridge.get_asset_balance("USDT")
                 if bal is not None:
-                    balance_strs.append(f"Binance: $ {bal:,.2f}")
+                    balance_strs.append(f"Binance: $ {float(bal):,.2f}")
             except:
                 pass
+                
         if self.is_stoxkart_connected and self.stoxkart_bridge:
             try:
                 info = self.stoxkart_bridge.get_account_info()
@@ -5385,6 +5421,7 @@ class SniperBot:
                     balance_strs.append(f"Stoxkart: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
+                
         if self.is_dhan_connected and self.dhan_bridge:
             try:
                 info = self.dhan_bridge.get_account_info()
@@ -5392,6 +5429,7 @@ class SniperBot:
                     balance_strs.append(f"Dhan: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
+                
         if self.is_shoonya_connected and self.shoonya_bridge:
             try:
                 info = self.shoonya_bridge.get_account_info()
@@ -5399,16 +5437,17 @@ class SniperBot:
                     balance_strs.append(f"Shoonya: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
+                
         if not balance_strs:
             base_cap = self.settings.get('max_capital', 15000.0) if self.settings else 15000.0
             current_cap = base_cap + self.state.get('daily_pnl', 0.0)
             result = f"₹ {current_cap:,.2f} (Manual Cap)"
         else:
             result = " | ".join(balance_strs)
+            
         self._balance_cache = result
         self._balance_cache_time = now
         return result
-
     def trading_loop(self):
         self.log("▶️ Engine thread started.")
         while self.state["is_running"]:
