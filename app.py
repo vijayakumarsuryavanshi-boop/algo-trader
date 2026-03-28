@@ -6841,6 +6841,19 @@ elif st.session_state.page == "dashboard":
 
     if not is_mkt_open:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
+        
+     # News tickers
+        kannada_news = st.session_state.kannada_news
+        english_news = st.session_state.english_news
+        if not kannada_news:
+            kannada_news = [generate_market_prediction(INDEX)]
+        ticker_text = " 🔹 ".join(kannada_news)
+        st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+        if not english_news:
+            english_news = [generate_market_prediction(INDEX)]
+        ticker_text = " 🔹 ".join(english_news)
+        st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
+
 
     # Top button row (Start, Stop, Refresh only – Exit moved below)
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
@@ -7050,10 +7063,7 @@ elif st.session_state.page == "dashboard":
         )
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ... (the rest of the dashboard tabs – unchanged from original)
-    # Since the original tabs (scanners, logs, crypto, etc.) are unchanged,
-    # we'll include them here as they were in the original script.
-    # For brevity, we'll reference that they are present and continue.
+   
 
     # Tabs definition
     tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
@@ -7066,18 +7076,7 @@ elif st.session_state.page == "dashboard":
 
     # Tab1: DASHBOARD – already shown above (live tracker and stats). We'll just include the original dashboard stats and chart.
     with tab1:
-        # News tickers
-        kannada_news = st.session_state.kannada_news
-        english_news = st.session_state.english_news
-        if not kannada_news:
-            kannada_news = [generate_market_prediction(INDEX)]
-        ticker_text = " 🔹 ".join(kannada_news)
-        st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-        if not english_news:
-            english_news = [generate_market_prediction(INDEX)]
-        ticker_text = " 🔹 ".join(english_news)
-        st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-
+       
         # Additional stats and chart (same as original)
         st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
         c_h1, c_h2 = st.columns(2)
