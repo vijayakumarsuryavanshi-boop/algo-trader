@@ -2205,28 +2205,39 @@ class CoinDCXBridge:
             max_cap = 15000
             position_value = max_cap * leverage
             raw_qty = position_value / price
+            
             if "BTC" in symbol or "ETH" in symbol:
                 clean_qty = round(raw_qty, 4)
             elif "XRP" in symbol or "ADA" in symbol or "SOL" in symbol:
                 clean_qty = round(raw_qty, 1)
             else:
                 clean_qty = round(raw_qty, 0)
+                
             if clean_qty < 0.0001:
                 clean_qty = 0.0001
 
+            # FIX: Fetch from markets_details which returns dictionaries instead of strings
             try:
-                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets", timeout=5).json()
+                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets_details", timeout=5).json()
             except:
                 exchange_info = []
+                
             market_symbol = None
             for mkt in exchange_info:
-                if mkt.get('cointype', '').upper() == base_coin.upper() and mkt.get('currency', '').upper() in ['USDT', 'INR']:
-                    if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
-                        market_symbol = mkt['symbol']
-                        break
-                    elif market_type == "Spot" and not mkt.get('is_future', False):
-                        market_symbol = mkt['symbol']
-                        break
+                # FIX: Ensure it's a dictionary to prevent 'str object has no attribute get'
+                if isinstance(mkt, dict):
+                    # FIX: Map the correct dictionary keys from CoinDCX API
+                    cointype = mkt.get('target_currency_short_name', mkt.get('cointype', ''))
+                    currency = mkt.get('base_currency_short_name', mkt.get('currency', ''))
+                    
+                    if cointype.upper() == base_coin.upper() and currency.upper() in ['USDT', 'INR']:
+                        if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
+                            market_symbol = mkt.get('coindcx_name', mkt.get('symbol'))
+                            break
+                        elif market_type == "Spot" and not mkt.get('is_future', False):
+                            market_symbol = mkt.get('coindcx_name', mkt.get('symbol'))
+                            break
+                            
             if not market_symbol:
                 if market_type in ["Futures", "Options"]:
                     market_symbol = f"B-{base_coin}_USDT"
@@ -2266,10 +2277,11 @@ class CoinDCXBridge:
                 'Content-Type': 'application/json'
             }
             res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
+            
             if res.status_code == 200:
                 response_data = res.json()
                 if isinstance(response_data, list) and len(response_data) > 0:
-                    order_id = response_data[0].get('id', 'DCX_ORDER_OK')
+                    order_id = response_data.get('id', 'DCX_ORDER_OK')
                 elif isinstance(response_data, dict):
                     order_id = response_data.get('id', response_data.get('order_id', 'DCX_ORDER_OK'))
                 else:
@@ -2278,9 +2290,9 @@ class CoinDCXBridge:
             else:
                 error_msg = res.text if res.text else "Unknown error"
                 return None, f"CoinDCX rejected: {error_msg}"
+                
         except Exception as e:
             return None, str(e)
-
     def get_balance(self):
         try:
             ts = int(round(time.time() * 1000))
