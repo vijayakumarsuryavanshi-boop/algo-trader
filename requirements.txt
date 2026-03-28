@@ -25,7 +25,7 @@ streamlit-autorefresh
 aiohttp
 firebase-admin
 python-telegram-bot
-socketio
+python-socketio
 
 
 
