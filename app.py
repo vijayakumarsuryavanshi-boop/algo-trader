@@ -2197,23 +2197,41 @@ class CoinDCXBridge:
         try:
             ts = int(round(time.time() * 1000))
             
-            # Clean base and quote currencies
+            # Determine Base and Quote coins dynamically
             base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-            quote_coin = "INR" if "INR" in symbol else "USDT" 
+            quote_coin = "INR" if "INR" in symbol else "USDT"
             
             # 1. Price Resolution
             price_live = self.get_live_price(symbol)
             actual_price = price if price else price_live
             if not actual_price and order_type.upper() == "LIMIT":
                 return None, "Price not available for LIMIT order"
-
-            # 2. Determine Exact Market/Pair Symbol format
-            if market_type in ["Futures", "Options"]:
-                # Futures/Derivatives format: B-BTC_USDT
-                market_symbol = f"B-{base_coin}_{quote_coin}"
-            else:
-                # Spot format: BTCUSDT
-                market_symbol = f"{base_coin}{quote_coin}"
+                
+            # 2. Determine Exact Market Symbol via Market Details API
+            try:
+                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets_details", timeout=5).json()
+            except:
+                exchange_info = []
+                
+            market_symbol = None
+            for mkt in exchange_info:
+                if isinstance(mkt, dict):
+                    cointype = mkt.get('target_currency_short_name', mkt.get('cointype', ''))
+                    currency = mkt.get('base_currency_short_name', mkt.get('currency', ''))
+                    
+                    if cointype.upper() == base_coin.upper() and currency.upper() == quote_coin:
+                        if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
+                            market_symbol = mkt.get('coindcx_name', mkt.get('pair', mkt.get('symbol')))
+                            break
+                        elif market_type == "Spot" and not mkt.get('is_future', False):
+                            market_symbol = mkt.get('coindcx_name', mkt.get('symbol'))
+                            break
+                            
+            if not market_symbol:
+                if market_type in ["Futures", "Options"]:
+                    market_symbol = f"B-{base_coin}_{quote_coin}"
+                else:
+                    market_symbol = f"{base_coin}{quote_coin}"
 
             # 3. Clean Quantity depending on Coin
             raw_qty = float(qty)
@@ -2227,7 +2245,15 @@ class CoinDCXBridge:
             if clean_qty <= 0:
                 clean_qty = 0.0001 if ("BTC" in base_coin or "ETH" in base_coin) else 1
 
-            # 4. Clean Price to avoid Decimal Overflow Rejections
+            # 4. Spot Market Order Simulation (CoinDCX Spot rejects "market_order")
+            if market_type == "Spot" and order_type.upper() == "MARKET":
+                order_type = "LIMIT"
+                if side.lower() == "buy":
+                    actual_price = actual_price * 1.01  # 1% higher to execute instantly against asks
+                else:
+                    actual_price = actual_price * 0.99  # 1% lower to execute instantly against bids
+                    
+            # 5. Clean Price precision to avoid API formatting rejections
             exec_price = None
             if actual_price:
                 if actual_price > 1000:
@@ -2237,19 +2263,20 @@ class CoinDCXBridge:
                 else:
                     exec_price = round(actual_price, 6)
 
-            # 5. Construct Payload per API Guidelines
+            # 6. Construct Payload per strict API Guidelines
             ord_type_str = "limit_order" if order_type.upper() == "LIMIT" else "market_order"
             
             if market_type in ["Futures", "Options"]:
                 endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
                 
-                # Futures requires trade parameters nested in an 'order' dictionary
+                # Futures requires trade parameters strictly nested in an 'order' dictionary
                 order_payload = {
                     "side": side.lower(),
                     "pair": market_symbol,
                     "order_type": ord_type_str,
                     "total_quantity": clean_qty,
-                    "leverage": int(leverage)
+                    "leverage": int(leverage),
+                    "margin_currency_short_name": quote_coin # Dynamically targets INR or USDT Futures Wallet
                 }
                 
                 if order_type.upper() == "LIMIT" and exec_price:
@@ -2272,9 +2299,9 @@ class CoinDCXBridge:
                 }
                 
                 if order_type.upper() == "LIMIT" and exec_price:
-                    payload["price_per_unit"] = exec_price
+                    payload["price_per_unit"] = exec_price # Spot STRICTLY requires price_per_unit
 
-            # 6. Signature and Headers
+            # 7. Signature and Headers
             payload_str = json.dumps(payload, separators=(',', ':'))
             secret_bytes = bytes(self.secret, 'utf-8')
             signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
@@ -2285,7 +2312,6 @@ class CoinDCXBridge:
                 'Content-Type': 'application/json'
             }
             
-            # 7. Execute Request
             res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
             
             # 8. Unified Response Parsing
@@ -2293,7 +2319,6 @@ class CoinDCXBridge:
                 response_data = res.json()
                 order_id = "DCX_ORDER_OK"
                 
-                # Handle varying response structures (Spot returns dict with 'orders', Futures returns list)
                 if isinstance(response_data, dict) and "orders" in response_data:
                     order_list = response_data["orders"]
                     if len(order_list) > 0:
@@ -2305,7 +2330,6 @@ class CoinDCXBridge:
                     
                 return order_id, None
             else:
-                # Detailed Error Extraction for Dashboard Logs
                 try:
                     err_data = res.json()
                     if isinstance(err_data, dict):
@@ -2321,6 +2345,7 @@ class CoinDCXBridge:
                 
         except Exception as e:
             return None, f"Bridge Exception: {str(e)}"
+
     def get_balance(self):
         try:
             ts = int(round(time.time() * 1000))
@@ -2334,14 +2359,22 @@ class CoinDCXBridge:
                 'Content-Type': 'application/json'
             }
             res = requests.post("https://api.coindcx.com/exchange/v1/users/balances", headers=headers, data=payload_str, timeout=5)
+            
             if res.status_code == 200:
                 data = res.json()
+                usdt_bal = 0.0
+                inr_bal = 0.0
                 for item in data:
                     if item['currency'] == 'USDT':
-                        return float(item['balance'])
-            return 0.0
-        except:
-            return 0.0
+                        usdt_bal = float(item['balance'])
+                    elif item['currency'] == 'INR':
+                        inr_bal = float(item['balance'])
+                # Returns dict to seamlessly integrate with your SniperBot balance UI
+                return {"USDT": usdt_bal, "INR": inr_bal}
+            return None
+        except Exception as e:
+            print(f"CoinDCX Balance Error: {e}")
+            return None
 
     def get_historical_data(self, symbol, interval="5m", days=10):
         try:
