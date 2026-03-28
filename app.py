@@ -2198,10 +2198,12 @@ class CoinDCXBridge:
             ts = int(round(time.time() * 1000))
             base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
             price_live = self.get_live_price(symbol)
+            
             if not price_live and not price:
                 return None, "Price not available"
             if not price:
                 price = price_live
+                
             max_cap = 15000
             position_value = max_cap * leverage
             raw_qty = position_value / price
@@ -2216,7 +2218,6 @@ class CoinDCXBridge:
             if clean_qty < 0.0001:
                 clean_qty = 0.0001
 
-            # FIX: Fetch from markets_details which returns dictionaries instead of strings
             try:
                 exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets_details", timeout=5).json()
             except:
@@ -2224,9 +2225,7 @@ class CoinDCXBridge:
                 
             market_symbol = None
             for mkt in exchange_info:
-                # FIX: Ensure it's a dictionary to prevent 'str object has no attribute get'
                 if isinstance(mkt, dict):
-                    # FIX: Map the correct dictionary keys from CoinDCX API
                     cointype = mkt.get('target_currency_short_name', mkt.get('cointype', ''))
                     currency = mkt.get('base_currency_short_name', mkt.get('currency', ''))
                     
@@ -2244,17 +2243,20 @@ class CoinDCXBridge:
                 else:
                     market_symbol = f"{base_coin}USDT"
 
+            # Create specific payload formats for Futures vs. Spot
             if market_type in ["Futures", "Options"]:
-                coin_side = "long" if side.lower() == "buy" else "short"
                 payload = {
-                    "side": coin_side,
+                    "side": side.lower(), # FIX: Must be "buy" or "sell", not "long" or "short"
                     "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order",
                     "pair": market_symbol,
                     "total_quantity": clean_qty,
+                    "leverage": leverage, # FIX: Required for Futures
+                    "margin_currency_short_name": "USDT", # FIX: Required for Futures
                     "timestamp": ts
                 }
                 if order_type.upper() == "LIMIT" and price:
-                    payload["price"] = price
+                    payload["price"] = price # Futures uses "price"
+                    
                 endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
             else:
                 payload = {
@@ -2265,7 +2267,8 @@ class CoinDCXBridge:
                     "timestamp": ts
                 }
                 if order_type.upper() == "LIMIT" and price:
-                    payload["price"] = price
+                    payload["price_per_unit"] = price # FIX: Spot strictly requires "price_per_unit"
+                    
                 endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
 
             payload_str = json.dumps(payload, separators=(',', ':'))
@@ -2276,6 +2279,7 @@ class CoinDCXBridge:
                 'X-AUTH-SIGNATURE': signature,
                 'Content-Type': 'application/json'
             }
+            
             res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
             
             if res.status_code == 200:
@@ -2288,8 +2292,13 @@ class CoinDCXBridge:
                     order_id = 'DCX_ORDER_OK'
                 return order_id, None
             else:
-                error_msg = res.text if res.text else "Unknown error"
-                return None, f"CoinDCX rejected: {error_msg}"
+                # FIX: Improved Error Parser to grab the exact API message if it fails again
+                try:
+                    err_data = res.json()
+                    error_msg = err_data.get('message', err_data.get('error', res.text))
+                except:
+                    error_msg = res.text if res.text else f"Empty response (Status Code: {res.status_code})"
+                return None, f"API Rejected ({res.status_code}): {error_msg}"
                 
         except Exception as e:
             return None, str(e)
