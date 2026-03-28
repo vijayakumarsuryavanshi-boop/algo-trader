@@ -2326,14 +2326,22 @@ class CoinDCXBridge:
                 response_data = res.json()
                 order_id = "DCX_ORDER_OK"
                 
-                if isinstance(response_data, dict) and "orders" in response_data:
-                    order_list = response_data["orders"]
-                    if len(order_list) > 0:
-                        order_id = order_list.get("id", "DCX_ORDER_OK")
-                elif isinstance(response_data, list) and len(response_data) > 0:
-                    order_id = response_data.get("id", "DCX_ORDER_OK")
-                elif isinstance(response_data, dict):
-                    order_id = response_data.get("id", response_data.get("order_id", "DCX_ORDER_OK"))
+                try:
+                    if isinstance(response_data, dict):
+                        if "orders" in response_data and isinstance(response_data["orders"], list) and len(response_data["orders"]) > 0:
+                            first_order = response_data["orders"]
+                            if isinstance(first_order, dict):
+                                order_id = first_order.get("id", "DCX_ORDER_OK")
+                        else:
+                            order_id = response_data.get("id", response_data.get("order_id", "DCX_ORDER_OK"))
+                    elif isinstance(response_data, list) and len(response_data) > 0:
+                        first_item = response_data
+                        # FIX: Checks if it's actually a dictionary before calling .get()
+                        if isinstance(first_item, dict):
+                            order_id = first_item.get("id", "DCX_ORDER_OK")
+                except Exception as parse_e:
+                    # If parsing the ID fails, do NOT crash! The order executed successfully.
+                    pass 
                     
                 return order_id, None
             else:
@@ -2342,7 +2350,12 @@ class CoinDCXBridge:
                     if isinstance(err_data, dict):
                         error_msg = err_data.get("message", err_data.get("error", res.text))
                     elif isinstance(err_data, list) and len(err_data) > 0:
-                        error_msg = err_data.get("message", res.text)
+                        first_err = err_data
+                        # FIX: Protects against the exact same 'list object has no attribute get' error here
+                        if isinstance(first_err, dict):
+                            error_msg = first_err.get("message", res.text)
+                        else:
+                            error_msg = str(err_data)
                     else:
                         error_msg = str(err_data)
                 except:
@@ -3865,35 +3878,43 @@ class SniperBot:
         with self.state["trade_lock"]:
             if self.state["active_trade"]:
                 t = self.state["active_trade"]
+                order_success = True
+                
                 if not self.is_mock and not t.get("simulated"):
                     exec_side = "BUY" if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"] else "SELL"
                     order_id, err = self.place_real_order(t['symbol'], t['token'], t['qty'], exec_side, t['exch'], "MARKET")
-                    if order_id:
-                        ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
-                    else:
-                        ltp = t['entry']
-                        self.log(f"Exit order failed: {err}")
-                else:
+                    
+                    if not order_id:
+                        self.log(f"❌ Force Exit Failed: {err}. Trade remains open!")
+                        self.push_notify("Exit Failed", f"Could not close {t['symbol']}")
+                        order_success = False
+                        
+                if order_success:
                     ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
-                if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                    pnl = (t['entry'] - ltp) * t['qty']
-                else: 
-                    pnl = (ltp - t['entry']) * t['qty']
-                
-                if not self.is_mock and hasattr(self, "system_user_id"):
-                    today = get_ist().strftime('%Y-%m-%d')
-                    now = get_ist().strftime('%H:%M:%S')
-                    slippage = abs(t.get('fill_price', ltp) - t.get('signal_price', t['entry']))
-                    self.db_queue.put({
-                        "user_id": self.system_user_id, "trade_date": today, "trade_time": now,
-                        "symbol": t['symbol'], "trade_type": t['type'], "qty": t['qty'],
-                        "entry_price": t['entry'], "exit_price": ltp,
-                        "pnl": pnl, "result": "Manual Exit", "slippage": slippage
-                    })
-                self.state["daily_pnl"] += pnl
-                self.state["active_trade"] = None
-                self.state["sound_queue"].append("exit")
-                st.toast(f"Trade closed at {ltp:.2f} | PnL: ₹{pnl:.2f}", icon="✅")
+                    if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                        pnl = (t['entry'] - ltp) * t['qty']
+                    else: 
+                        pnl = (ltp - t['entry']) * t['qty']
+                    
+                    if not self.is_mock and hasattr(self, "system_user_id"):
+                        today = get_ist().strftime('%Y-%m-%d')
+                        now = get_ist().strftime('%H:%M:%S')
+                        slippage = abs(t.get('fill_price', ltp) - t.get('signal_price', t['entry']))
+                        self.db_queue.put({
+                            "user_id": self.system_user_id, "trade_date": today, "trade_time": now,
+                            "symbol": t['symbol'], "trade_type": t['type'], "qty": t['qty'],
+                            "entry_price": t['entry'], "exit_price": ltp,
+                            "pnl": pnl, "result": "Manual Exit", "slippage": slippage
+                        })
+                        
+                    self.state["daily_pnl"] += pnl
+                    self.state["active_trade"] = None
+                    self.state["sound_queue"].append("exit")
+                    st.toast(f"Trade closed at {ltp:.2f} | PnL: ₹{pnl:.2f}", icon="✅")
+                    
+                    # Stop engine if forced
+                    self.state["is_running"] = False
+                    self.state["engine_active"] = False
             if self.state["active_trades"]:
                 for trade in self.state["active_trades"]:
                     if not self.is_mock and not trade.get("simulated"):
@@ -5931,78 +5952,95 @@ class SniperBot:
                         market_close = current_time >= cutoff_time
 
                         if hit_tp or hit_sl or market_close:
+                            order_success = True
                             if not is_mock_mode and not trade.get("simulated"):
                                 exec_side = "BUY" if not is_long else "SELL"
-                                self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'], "MARKET")
-                            if hit_tp:
-                                self.state["sound_queue"].append("tp")
-                                st.session_state.win_streak += 1
-                                st.session_state.loss_streak = 0
-                            elif hit_sl:
-                                self.state["sound_queue"].append("sl")
-                                st.session_state.loss_streak += 1
-                                st.session_state.win_streak = 0
-                            win_text = "profit👍" if pnl > 0 else "sl hit 🛑"
-                            if market_close:
-                                win_text += " (Force Exit)"
-                            self.log(f"🛑 EXIT {trade['symbol']} | PnL: {round(pnl, 2)} [{win_text}]")
-                            self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: {round(pnl, 2)}")
-                            if not self.is_mock:
-                                user_id = getattr(self, "system_user_id", self.api_key)
-                                slippage = trade.get('slippage', 0)
-                                self.db_queue.put({
-                                    "user_id": user_id, "trade_date": today_date, "trade_time": time_str,
-                                    "symbol": trade['symbol'], "trade_type": trade['type'], "qty": trade['qty'],
-                                    "entry_price": trade['entry'], "exit_price": ltp,
-                                    "pnl": round(pnl, 2), "result": win_text, "slippage": slippage
-                                })
-                                journal_entry = {
-                                    "user_id": user_id,
-                                    "trade_date": today_date,
-                                    "trade_time": time_str,
-                                    "symbol": trade['symbol'],
-                                    "type": trade['type'],
-                                    "qty": trade['qty'],
-                                    "entry": trade['entry'],
-                                    "exit": ltp,
-                                    "pnl": round(pnl, 2),
-                                    "result": win_text,
-                                    "strategy": self.settings.get('strategy', 'Unknown'),
-                                    "slippage": slippage
-                                }
-                                save_trade_journal(user_id, journal_entry)
-                            else:
-                                if "paper_history" not in self.state:
-                                    self.state["paper_history"] = []
-                                self.state["paper_history"].append({
-                                    "Date": today_date,
-                                    "Time": time_str,
-                                    "Symbol": trade['symbol'],
-                                    "Type": trade['type'],
-                                    "Qty": trade['qty'],
-                                    "Entry Price": trade['entry'],
-                                    "Exit Price": ltp,
-                                    "PnL": round(pnl, 2),
-                                    "Result": win_text,
-                                    "Slippage": trade.get('slippage', 0)
-                                })
-                            if trade.get('is_hz'):
-                                self.state["hz_pnl"] += pnl
-                                if pnl > 0:
-                                    self.state["hz_wins"] += 1
+                                # Attempt the real exit
+                                order_id, err = self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'], "MARKET")
+                                
+                                if not order_id:
+                                    self.log(f"❌ Auto-Exit Rejected: {err} | Retrying next tick...")
+                                    order_success = False # Blocks the bot from deleting the trade
+                            
+                            # ONLY clear the dashboard trade if the real order actually succeeded
+                            if order_success:
+                                if hit_tp:
+                                    self.state["sound_queue"].append("tp")
+                                    st.session_state.win_streak += 1
+                                    st.session_state.loss_streak = 0
+                                elif hit_sl:
+                                    self.state["sound_queue"].append("sl")
+                                    st.session_state.loss_streak += 1
+                                    st.session_state.win_streak = 0
+                                    
+                                win_text = "profit👍" if pnl > 0 else "sl hit 🛑"
+                                if market_close:
+                                    win_text += " (Force Exit)"
+                                    
+                                self.log(f"🛑 EXIT {trade['symbol']} | PnL: {round(pnl, 2)} [{win_text}]")
+                                self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: {round(pnl, 2)}")
+                                
+                                if not self.is_mock:
+                                    user_id = getattr(self, "system_user_id", self.api_key)
+                                    slippage = trade.get('slippage', 0)
+                                    self.db_queue.put({
+                                        "user_id": user_id, "trade_date": today_date, "trade_time": time_str,
+                                        "symbol": trade['symbol'], "trade_type": trade['type'], "qty": trade['qty'],
+                                        "entry_price": trade['entry'], "exit_price": ltp,
+                                        "pnl": round(pnl, 2), "result": win_text, "slippage": slippage
+                                    })
+                                    journal_entry = {
+                                        "user_id": user_id,
+                                        "trade_date": today_date,
+                                        "trade_time": time_str,
+                                        "symbol": trade['symbol'],
+                                        "type": trade['type'],
+                                        "qty": trade['qty'],
+                                        "entry": trade['entry'],
+                                        "exit": ltp,
+                                        "pnl": round(pnl, 2),
+                                        "result": win_text,
+                                        "strategy": self.settings.get('strategy', 'Unknown'),
+                                        "slippage": slippage
+                                    }
+                                    save_trade_journal(user_id, journal_entry)
                                 else:
-                                    self.state["hz_losses"] += 1
-                            self.state["last_trade"] = trade.copy()
-                            self.state["last_trade"].update({"exit_price": ltp, "final_pnl": pnl, "win_text": win_text})
-                            self.state["daily_pnl"] += pnl
-                            self.state["active_trade"] = None
-                            if self.state.get("stop_after_manual_exit"):
-                                self.state["is_running"] = False
-                                self.state["engine_active"] = False
-                                self.state["stop_after_manual_exit"] = False
-                                self.log("Engine stopped after manual exit.")
-                                break
-                            continue
+                                    if "paper_history" not in self.state:
+                                        self.state["paper_history"] = []
+                                    self.state["paper_history"].append({
+                                        "Date": today_date,
+                                        "Time": time_str,
+                                        "Symbol": trade['symbol'],
+                                        "Type": trade['type'],
+                                        "Qty": trade['qty'],
+                                        "Entry Price": trade['entry'],
+                                        "Exit Price": ltp,
+                                        "PnL": round(pnl, 2),
+                                        "Result": win_text,
+                                        "Slippage": trade.get('slippage', 0)
+                                    })
+                                    
+                                if trade.get('is_hz'):
+                                    self.state["hz_pnl"] += pnl
+                                    if pnl > 0:
+                                        self.state["hz_wins"] += 1
+                                    else:
+                                        self.state["hz_losses"] += 1
+                                        
+                                self.state["last_trade"] = trade.copy()
+                                self.state["last_trade"].update({"exit_price": ltp, "final_pnl": pnl, "win_text": win_text})
+                                self.state["daily_pnl"] += pnl
+                                
+                                # SAFELY remove the active trade
+                                self.state["active_trade"] = None
+                                
+                                if self.state.get("stop_after_manual_exit"):
+                                    self.state["is_running"] = False
+                                    self.state["engine_active"] = False
+                                    self.state["stop_after_manual_exit"] = False
+                                    self.log("Engine stopped after manual exit.")
+                                    break
+                                continue
 
                     elif self.state["active_trades"]:
                         all_closed = True
