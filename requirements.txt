@@ -26,6 +26,7 @@ aiohttp
 firebase-admin
 python-telegram-bot
 python-socketio
+Stoxkart
 
 
 
