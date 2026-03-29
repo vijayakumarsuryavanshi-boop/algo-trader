@@ -1507,11 +1507,11 @@ LOT_SIZES = {
     "NATURALGAS": 1250,
     "GOLD": 100,
     "SILVER": 30,
-    "XAUUSD": 1,
+    "XAUUSD": 0.01,
     "EURUSD": 1,
-    "BTCUSD": 1,
-    "ETHUSD": 1,
-    "SOLUSD": 1,
+    "BTCUSD": 0.002,
+    "ETHUSD": 0.02,
+    "SOLUSD": 0.10,
     "XRPUSD": 1,
     "ADAUSD": 1,
     "DOGEUSD": 1,
@@ -5213,7 +5213,7 @@ class SniperBot:
                 return None, f"5paisa error: {msg}"
 
         if exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge:
-            order_id, msg = self.stoxkart_bridge.place_order(symbol, qty, side, order_type, price)
+            order_id, msg = self.stoxkart_bridge.place_order(symbol, token, exchange, qty, side, order_type, price)
             if order_id:
                 self.log(f"✅ Stoxkart Order Success! ID: {order_id}")
                 return order_id, None
@@ -6825,8 +6825,8 @@ elif st.session_state.page == "dashboard":
         st.markdown("**2. Risk Management**")
         lot_size = LOT_SIZES.get(INDEX, 1)
         st.caption(f"1 lot = {lot_size} units for {INDEX}")
-        min_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
-        step_val = 1.0 if INDEX in LOT_SIZES and lot_size > 1 else 0.01
+        min_val = 0.001 if lot_size < 1 else (1.0 if lot_size >= 1 else 0.01)
+        step_val = 0.001 if lot_size < 1 else (1.0 if lot_size >= 1 else 0.01)
         LOTS = st.number_input("Base Lots", min_value=min_val, max_value=10000.0, value=1.0, step=step_val, key=f"lots_input_{INDEX}", on_change=lambda: play_sound_now("click"))
         actual_qty = LOTS * lot_size
         st.caption(f"Base quantity: {actual_qty:.2f} units")
