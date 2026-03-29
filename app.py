@@ -1,3 +1,4 @@
+
 # ==========================================
 # SHREE ALGO TRADING PLATFORM – FINAL (FULL VERSION)
 # ==========================================
@@ -4610,31 +4611,16 @@ class SniperBot:
         return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
-        now = time.time()
-        
-        # 1. Initialize and Check Cache
-        if not hasattr(self, "_ltp_cache"):
-            self._ltp_cache = {}
-            
-        cache_key = f"{exchange}_{symbol}_{token}"
-        if cache_key in self._ltp_cache:
-            ts, cached_price = self._ltp_cache[cache_key]
-            if now - ts < 1.5:  # 1.5s micro-cache limit prevents UI freezing
-                return cached_price
-
         if exchange in ["NSE", "NFO", "BSE", "BFO", "MCX"] and self.ws_angel_connected and token in self.live_prices_angel:
-            price = self.live_prices_angel[token]
-            self._ltp_cache[cache_key] = (now, price)
-            return price
+            return self.live_prices_angel[token]
 
         if self.is_mock and token == "12345":
             if "CE" in symbol or "PE" in symbol:
                 if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
                     base_price = self.state["active_trade"]["entry"]
                     change = np.random.normal(0, base_price * 0.005)
-                    price = base_price + change
-                else:
-                    price = np.random.uniform(150, 300)
+                    return base_price + change
+                return np.random.uniform(150, 300)
             else:
                 if self.state.get('mock_price') is None:
                     base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
@@ -4642,10 +4628,7 @@ class SniperBot:
                     self.state['mock_price'] = float(base)
                 change = np.random.normal(0, self.state['mock_price'] * 0.0005)
                 self.state['mock_price'] += change
-                price = float(self.state['mock_price'])
-                
-            self._ltp_cache[cache_key] = (now, price)
-            return price
+                return float(self.state['mock_price'])
 
         price = None
         try:
@@ -4697,11 +4680,6 @@ class SniperBot:
                     self.log(f"⚠️ Using yfinance fallback for {symbol}: {price}")
             except:
                 pass
-                
-        # Save to cache before returning
-        if price is not None:
-            self._ltp_cache[cache_key] = (now, price)
-            
         return price
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
@@ -7179,32 +7157,15 @@ elif st.session_state.page == "dashboard":
 
     @st.fragment(run_every="1s")
     def live_tracker_ui():
-        _active = None
-        _active_trades = []
-        
-        # 1. Thread-safe snapshot — acquire lock non-blocking
-        if bot.state["trade_lock"].acquire(blocking=False):
-            try:
-                _active = bot.state.get("active_trade")
-                _active_trades = list(bot.state.get("active_trades", []))
-            finally:
-                bot.state["trade_lock"].release()
-        else:
-            # If the engine is holding the lock, skip this UI tick to prevent freezing
-            pass 
-
-        # 2. Fetch live prices outside lock
-        if _active:
-            t = _active
-            live_ltp = bot.get_live_price(t["exch"], t["symbol"], t["token"])
+        if bot.state.get("active_trade"):
+            t = bot.state["active_trade"]
+            live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
             if live_ltp:
-                t["current_ltp"] = live_ltp
-                if t["type"] in ["SELL", "PE", "SHORT", "SELL_CALL", "SELL_PUT"]:
-                    t["floating_pnl"] = (t["entry"] - live_ltp) * t["qty"]
+                t['current_ltp'] = live_ltp
+                if t['type'] in ["SELL", "PE"]:
+                    t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                 else:
-                    t["floating_pnl"] = (live_ltp - t["entry"]) * t["qty"]
-            
-            # --- RENDER SINGLE TRADE UI ---
+                    t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
             ltp = t.get('current_ltp', t['entry'])
             pnl = t.get('floating_pnl', 0.0)
             elapsed = t.get('elapsed_time', 0)
@@ -7212,52 +7173,48 @@ elif st.session_state.page == "dashboard":
             pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
             pnl_sign = "+" if pnl >= 0 else ""
             exec_type = t.get('exch', 'NFO')
-            
+            pnl_display = round(pnl, 2)
             if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
                 inr_pnl = pnl * get_usdt_inr_rate()
                 pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
             else:
                 pnl_display = f"{pnl_sign}{round(pnl, 2)}"
-                
             sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
             rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
-            
             st.markdown(f"""<div class="live-tracker" style="margin-top: -15px;">
-            <div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
-            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-            <span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
-            {sim_badge}
-            <span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
-            </div>
-            <div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
-            </div>
-            {rej_info}
-            <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-            <div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
-            </div>
-            <div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
-            </div>
-            <div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
-            </div>
-            <div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
-            </div>
-            </div>
-            <div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
-            ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
-            </div>
-            </div>""", unsafe_allow_html=True)
-
-        # 3. Handle Arbitrage/Multi-leg trades
-        elif _active_trades:
-            for idx, t in enumerate(_active_trades):
+<div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
+<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+<span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
+{sim_badge}
+<span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
+</div>
+<div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
+</div>
+{rej_info}
+<div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
+</div>
+</div>
+<div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
+⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
+</div>
+</div>""", unsafe_allow_html=True)
+        elif bot.state.get("active_trades"):
+            for idx, t in enumerate(bot.state["active_trades"]):
                 live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
                 if live_ltp:
                     t['current_ltp'] = live_ltp
@@ -7265,8 +7222,6 @@ elif st.session_state.page == "dashboard":
                         t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                     else:
                         t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
-                
-                # --- RENDER MULTI TRADE UI ---
                 ltp = t.get('current_ltp', t['entry'])
                 pnl = t.get('floating_pnl', 0.0)
                 elapsed = t.get('elapsed_time', 0)
@@ -7275,48 +7230,45 @@ elif st.session_state.page == "dashboard":
                 pnl_sign = "+" if pnl >= 0 else ""
                 exec_type = t.get('exch', 'NFO')
                 pnl_display = round(pnl, 2)
-                
                 if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
                     inr_pnl = pnl * get_usdt_inr_rate()
                     pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
                 else:
                     pnl_display = f"{pnl_sign}{round(pnl, 2)}"
-                    
                 sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
                 rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
-                
                 st.markdown(f"""<div class="live-tracker" style="margin-top: 10px;">
-            <div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
-            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-            <span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
-            {sim_badge}
-            <span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
-            </div>
-            <div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
-            </div>
-            {rej_info}
-            <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-            <div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
-            </div>
-            <div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
-            </div>
-            <div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
-            </div>
-            <div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
-            </div>
-            </div>
-            <div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
-            ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
-            </div>
-            </div>""", unsafe_allow_html=True)
+<div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
+<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+<span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
+{sim_badge}
+<span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
+</div>
+<div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
+</div>
+{rej_info}
+<div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
+</div>
+<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
+<div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
+</div>
+</div>
+<div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
+⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
+</div>
+</div>""", unsafe_allow_html=True)
         else:
             st.markdown("""
             <div style="display: flex; align-items: center; justify-content: center; height: 230px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 5px;">
