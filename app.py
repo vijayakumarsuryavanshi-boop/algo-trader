@@ -7185,12 +7185,12 @@ elif st.session_state.page == "dashboard":
 
     st.markdown("### 🎯 Live Position Tracker")
 
-  
     @st.fragment(run_every="1s")
     def live_tracker_ui():
         _active = None
         _active_trades = []
         
+        # 1. Thread-safe snapshot — acquire lock non-blocking
         if bot.state["trade_lock"].acquire(blocking=False):
             try:
                 _active = bot.state.get("active_trade")
@@ -7198,7 +7198,7 @@ elif st.session_state.page == "dashboard":
             finally:
                 bot.state["trade_lock"].release()
         
-        # --- 1. SINGLE TRADE UI ---
+        # --- 2. SINGLE TRADE UI ---
         if _active:
             t = _active
             live_ltp = bot.get_live_price(t.get("exch", "NFO"), t.get("symbol", ""), t.get("token", ""))
@@ -7226,7 +7226,6 @@ elif st.session_state.page == "dashboard":
             sim_badge = '<span class="simulated-badge" style="background:#f59e0b;color:white;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:bold;margin-left:8px;">SIMULATED</span>' if t.get("simulated") else ''
             rej_info = f"<div style='font-size:0.8rem;color:#ef4444;margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
             
-            # Note: HTML is flush left to prevent Markdown Code Block errors!
             st.markdown(f"""
 <div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 2px solid #3b82f6; border-radius: 20px; padding: 20px; margin-bottom: 20px; color: #ffffff; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
     <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
@@ -7262,7 +7261,7 @@ elif st.session_state.page == "dashboard":
 </div>
 """, unsafe_allow_html=True)
 
-        # --- 2. MULTI TRADE UI ---
+        # --- 3. MULTI TRADE UI ---
         elif _active_trades:
             for idx, t in enumerate(_active_trades):
                 live_ltp = bot.get_live_price(t.get('exch', 'NFO'), t.get('symbol', ''), t.get('token', ''))
@@ -7315,50 +7314,50 @@ elif st.session_state.page == "dashboard":
 </div>
 """, unsafe_allow_html=True)
         
-        # --- 3. WAITING FOR SETUP UI ---
+        # --- 4. WAITING FOR SETUP UI ---
         else:
             st.markdown("""
-<div style="display: flex; align-items: center; justify-content: center; height: 180px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 15px;">
+<div style="display: flex; align-items: center; justify-content: center; height: 120px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 15px;">
     <span style="color: #94a3b8; font-weight: 600; font-size: 1.1rem;">⏳ Radar Active: Waiting for High-Probability Setup...</span>
 </div>
 """, unsafe_allow_html=True)
 
-        # ==========================================
-        # 🚀 NEW: OHLCV SESSION DATA BOX
-        # ==========================================
+        # --- 5. DAILY HIGH/LOW & GOLDEN ZONES BOX ---
         df_latest = bot.state.get("latest_data")
+        fib = bot.state.get("fib_data", {})
+        if not isinstance(fib, dict):
+            fib = {}
+            
         if df_latest is not None and not df_latest.empty:
-            day_open = df_latest['open'].iloc
             day_high = df_latest['high'].max()
             day_low = df_latest['low'].min()
-            day_close = bot.state.get('spot', df_latest['close'].iloc[-1])
-            day_vol = df_latest['volume'].sum() if 'volume' in df_latest.columns else 0
             
             st.markdown(f"""
-<div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 1px solid #3b82f6; border-radius: 16px; padding: 15px; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
-    <div style="color: #38bdf8; font-weight: 800; font-size: 0.9rem; margin-bottom: 12px; border-bottom: 1px solid #334155; padding-bottom: 8px; text-transform: uppercase;">
-        📊 Session OHLCV (Current Chart Data)
+<div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 1px solid #3b82f6; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.4);">
+    <div style="color: #38bdf8; font-weight: 800; font-size: 1rem; margin-bottom: 15px; border-bottom: 1px solid #334155; padding-bottom: 10px; text-transform: uppercase; display: flex; justify-content: space-between;">
+        <span>📊 Daily Range & Key Levels</span>
+        <span style="color: #94a3b8; font-size: 0.8rem;">ATR: ₹ {bot.state.get('atr', 0):.2f}</span>
     </div>
-    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
-            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Open</div>
-            <div style="color: white; font-weight: bold; font-size: 1.1rem;">{day_open:.2f}</div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+        <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #22c55e;">
+            <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Daily High</div>
+            <div style="color: #22c55e; font-weight: 800; font-size: 1.2rem;">{day_high:,.2f}</div>
         </div>
-        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
-            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">High</div>
-            <div style="color: #22c55e; font-weight: bold; font-size: 1.1rem;">{day_high:.2f}</div>
+        <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #ef4444;">
+            <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Daily Low</div>
+            <div style="color: #ef4444; font-weight: 800; font-size: 1.2rem;">{day_low:,.2f}</div>
         </div>
-        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
-            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Low</div>
-            <div style="color: #ef4444; font-weight: bold; font-size: 1.1rem;">{day_low:.2f}</div>
+        <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #f87171;">
+            <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Major Res</div>
+            <div style="color: #f87171; font-weight: 800; font-size: 1.2rem;">{fib.get('major_high', 0):,.2f}</div>
         </div>
-        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
-            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Close (LTP)</div>
-            <div style="color: #facc15; font-weight: bold; font-size: 1.1rem;">{day_close:.2f}</div>
+        <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #fbbf24; box-shadow: 0 0 10px rgba(251, 191, 36, 0.1);">
+            <div style="color: #fbbf24; font-size: 0.75rem; font-weight: 800; text-transform: uppercase;">✨ Golden Zone</div>
+            <div style="color: #fbbf24; font-weight: 900; font-size: 1.1rem;">{fib.get('fib_high', 0):.0f} - {fib.get('fib_low', 0):.0f}</div>
         </div>
-        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
-            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Volume</div>
-            <div style="color: white; font-weight: bold; font-size: 1.1rem;">{day_vol:,.0f}</div>
+        <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #4ade80;">
+            <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Major Sup</div>
+            <div style="color: #4ade80; font-weight: 800; font-size: 1.2rem;">{fib.get('major_low', 0):,.2f}</div>
         </div>
     </div>
 </div>
