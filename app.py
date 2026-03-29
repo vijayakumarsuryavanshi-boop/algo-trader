@@ -7186,7 +7186,7 @@ elif st.session_state.page == "dashboard":
     st.markdown("### 🎯 Live Position Tracker")
 
   
-   @st.fragment(run_every="1s")
+    @st.fragment(run_every="1s")
     def live_tracker_ui():
         _active = None
         _active_trades = []
