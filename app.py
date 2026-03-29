@@ -38,6 +38,7 @@ import functools
 import random
 import socketio
 import asyncio
+import Stoxkart
 
 # ---------- Optional imports with fallbacks ----------
 try:
