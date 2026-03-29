@@ -4610,7 +4610,7 @@ class SniperBot:
             pass
         return 0, 0
 
-   def get_live_price(self, exchange, symbol, token):
+    def get_live_price(self, exchange, symbol, token):
         now = time.time()
         
         # 1. Initialize and Check Cache
