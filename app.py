@@ -1943,48 +1943,73 @@ class StoxkartBridge:
         self.connected = False
         self.token = None
         self.user_id = None
-        self.base_url = "https://superrapi.stoxkart.com" # Stoxkart's XTS Live API URL
+        self.base_url = "https://superrapi.stoxkart.com"
 
     def connect(self):
-        # Try standard port first, then fallback to port 3000
         urls_to_try = [
             f"{self.base_url}/interactive/user/session",
-            f"{self.base_url}:3000/interactive/user/session"
+            f"{self.base_url}:3000/interactive/user/session",
         ]
-        
         last_error = ""
         for url in urls_to_try:
             try:
-                payload = {
-                    "secretKey": self.secret,
-                    "appKey": self.api_key,
-                    "source": "WebAPI"
-                }
-                # FIX: Increased timeout to 15 seconds to prevent premature drops
-                res = requests.post(url, json=payload, timeout=15) 
-                
+                payload = {"secretKey": self.secret, "appKey": self.api_key, "source": "WebAPI"}
+                headers = {"Content-Type": "application/json"}
+                res = requests.post(url, json=payload, headers=headers, timeout=20)
                 if res.status_code == 200:
                     data = res.json()
                     if data.get("type") == "success":
                         self.token = data["result"]["token"]
                         self.user_id = data["result"]["userID"]
                         self.connected = True
-                        return True, "Connected to Stoxkart"
-                
-                last_error = res.text
+                        return True, "Connected to Stoxkart XTS"
+                    else:
+                        last_error = data.get("description", str(data))
+                else:
+                    last_error = f"HTTP {res.status_code}: {res.text[:200]}"
             except requests.exceptions.ConnectTimeout:
-                # FIX: Catches the timeout cleanly so it doesn't crash your script
-                last_error = "Connection Timed Out (Server is offline for weekend maintenance or blocking your IP)"
+                last_error = "Connection Timed Out (Server offline or IP blocked)"
             except Exception as e:
                 last_error = str(e)
-                
         return False, f"Stoxkart login failed: {last_error}"
 
     def get_live_price(self, symbol):
-        return None
+        return None  # Uses yfinance fallback in SniperBot
 
-    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
-        return "STX_ORDER_OK", "Order placed (fallback)"
+    def place_order(self, symbol, token, exchange, qty, side,
+                    order_type="MARKET", price=None):
+        if not self.connected or not self.token:
+            return None, "Stoxkart not connected"
+        try:
+            headers = {"Content-Type": "application/json", "authorization": self.token}
+            exch_map = {"NSE": "NSECM", "BSE": "BSECM", "NFO": "NSEFO",
+                        "MCX": "MCXFO", "BFO": "BSEFO"}
+            xts_exch = exch_map.get(str(exchange).upper(), "NSEFO")
+            xts_type = "Limit" if str(order_type).upper() == "LIMIT" else "Market"
+            xts_side = "Buy" if str(side).upper() == "BUY" else "Sell"
+            payload = {
+                "exchangeSegment": xts_exch,
+                "exchangeInstrumentID": int(token) if str(token).isdigit() else 0,
+                "productType": "MIS",
+                "orderType": xts_type,
+                "orderSide": xts_side,
+                "timeInForce": "DAY",
+                "disclosedQuantity": 0,
+                "orderQuantity": int(float(qty)),
+                "limitPrice": float(price) if price and xts_type == "Limit" else 0.0,
+                "stopPrice": 0.0,
+                "orderUniqueIdentifier": "SHREE_BOT"
+            }
+            res = requests.post(f"{self.base_url}/interactive/orders",
+                                json=payload, headers=headers, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("type") == "success":
+                    return str(data["result"].get("AppOrderID", "STX_OK")), None
+                return None, data.get("description", "Order Rejected")
+            return None, f"HTTP {res.status_code}: {res.text[:200]}"
+        except Exception as e:
+            return None, f"Stoxkart Exception: {e}"
 
     def get_historical_data(self, symbol, interval="5m", days=10):
         return None
@@ -1995,23 +2020,21 @@ class StoxkartBridge:
         try:
             headers = {"authorization": self.token}
             params = {"clientID": self.user_id} if self.user_id else {}
-            
-            res = requests.get(f"{self.base_url}/interactive/user/balance", headers=headers, params=params, timeout=5)
-            
+            res = requests.get(f"{self.base_url}/interactive/user/balance",
+                               headers=headers, params=params, timeout=8)
             if res.status_code == 200:
                 data = res.json()
                 if data.get("type") == "success":
                     try:
-                        # Navigate the XTS JSON structure safely
-                        bal = data["result"]["BalanceList"]["limitObject"]["RMSSubLimits"]["cashMarginAvailable"]
-                        return {'balance': float(bal)}
-                    except:
+                        bal = (data["result"]["BalanceList"]["limitObject"]
+                               ["RMSSubLimits"]["cashMarginAvailable"])
+                        return {"balance": float(bal)}
+                    except Exception:
                         pass
-            return {'balance': 0.0}
+            return {"balance": 0.0}
         except Exception as e:
             print(f"Stoxkart Balance Error: {e}")
             return None
-
 class DeltaExchangeBridge:
     def __init__(self, api_key, secret):
         self.api_key = api_key
