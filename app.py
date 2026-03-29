@@ -7184,32 +7184,24 @@ elif st.session_state.page == "dashboard":
         st.rerun()
 
    
-    import streamlit as st
+    st.markdown("### 🎯 Live Position Tracker")
 
-st.markdown("### 🎯 Live Position Tracker")
-
-@st.fragment(run_every="1s")
-def live_tracker_ui():
-    _active = None
-    _active_trades = []
-    
-    # 1. FIX: Read state without a hard non-blocking lock to prevent "Ghost Trades"
-    # Dictionaries in Python are thread-safe enough for a pure UI read
-    try:
-        _active = bot.state.get("active_trade")
-        _active_trades = list(bot.state.get("active_trades", []))
-    except Exception as e:
-        bot.log(f"State read warning: {e}")
-
-    # --- 2. SINGLE / MULTI TRADE UI LOGIC ---
-    trades_to_display = []
-    if _active:
-        trades_to_display = [_active]
-    elif _active_trades:
-        trades_to_display = _active_trades
-
-    if trades_to_display:
-        for t in trades_to_display:
+    @st.fragment(run_every="1s")
+    def live_tracker_ui():
+        _active = None
+        _active_trades = []
+        
+        # 1. Thread-safe snapshot — acquire lock non-blocking
+        if bot.state["trade_lock"].acquire(blocking=False):
+            try:
+                _active = bot.state.get("active_trade")
+                _active_trades = list(bot.state.get("active_trades", []))
+            finally:
+                bot.state["trade_lock"].release()
+        
+        # --- 2. SINGLE TRADE UI ---
+        if _active:
+            t = _active
             live_ltp = bot.get_live_price(t.get("exch", "NFO"), t.get("symbol", ""), t.get("token", ""))
             if live_ltp:
                 t["current_ltp"] = live_ltp
@@ -7222,163 +7214,202 @@ def live_tracker_ui():
             pnl = float(t.get('floating_pnl', 0.0))
             elapsed = float(t.get('elapsed_time', 0))
             elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
-            
-            pnl_color = "#4ade80" if pnl >= 0 else "#f87171"
-            pnl_bg = "rgba(74, 222, 128, 0.1)" if pnl >= 0 else "rgba(248, 113, 113, 0.1)"
+            pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
             pnl_sign = "+" if pnl >= 0 else ""
             exec_type = t.get('exch', 'NFO')
             
             if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                # Assuming get_usdt_inr_rate() is available in your scope
-                try:
-                    inr_pnl = pnl * float(get_usdt_inr_rate())
-                    pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
-                except:
-                    pnl_display = f"{pnl_sign}{round(pnl, 2)}"
+                inr_pnl = pnl * float(get_usdt_inr_rate())
+                pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
             else:
                 pnl_display = f"{pnl_sign}{round(pnl, 2)}"
                 
-            sim_badge = '<span style="background:#f59e0b;color:#000;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:800;margin-left:10px;box-shadow: 0 0 10px rgba(245,158,11,0.4);">SIMULATED</span>' if t.get("simulated") else ''
-            rej_info = f"<div style='background:rgba(239,68,68,0.1); border-left: 4px solid #ef4444; padding: 8px; font-size:0.85rem; color:#ef4444; margin-top:10px; border-radius:4px;'><strong>Rejected:</strong> {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
+            sim_badge = '<span class="simulated-badge" style="background:#f59e0b;color:white;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:bold;margin-left:8px;">SIMULATED</span>' if t.get("simulated") else ''
+            rej_info = f"<div style='font-size:0.8rem;color:#ef4444;margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
             
             st.markdown(f"""
-            <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 20px; color: #f8fafc; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
-                <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 15px; margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="background: #2563eb; color: white; padding: 6px 14px; border-radius: 8px; font-weight: 800; font-size: 0.9rem; letter-spacing: 0.5px;">{t.get("type", "TRADE")}</span>
-                        <span style="font-size: 1.4rem; font-weight: 800; margin: 0; color: #e2e8f0;">{t.get("symbol", "UNKNOWN")}</span>
-                        {sim_badge}
-                    </div>
-                    <div style="color: {pnl_color}; border: 1px solid {pnl_color}; padding: 10px 24px; border-radius: 12px; font-weight: 900; font-size: 1.6rem; background: {pnl_bg}; box-shadow: 0 0 15px {pnl_bg};">
-                        {pnl_display}
-                    </div>
-                </div>
-                {rej_info}
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;">
-                    <div style="background: #1e293b; padding: 15px; border-radius: 12px; border-left: 3px solid #64748b;">
-                        <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Avg Entry</div>
-                        <div style="font-size: 1.3rem; font-weight: 800; color: #f8fafc;">{float(t.get("entry", 0)):.4f}</div>
-                    </div>
-                    <div style="background: #1e293b; padding: 15px; border-radius: 12px; border-left: 3px solid {'#4ade80' if pnl >= 0 else '#f87171'};">
-                        <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Live Mark</div>
-                        <div style="font-size: 1.3rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
-                    </div>
-                    <div style="background: #1e293b; padding: 15px; border-radius: 12px; border-left: 3px solid #eab308;">
-                        <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Qty / Exch</div>
-                        <div style="font-size: 1.3rem; font-weight: 800; color: #eab308;">{t.get("qty", 0)} <span style="font-size: 0.9rem; color: #94a3b8;">({exec_type})</span></div>
-                    </div>
-                    <div style="background: #1e293b; padding: 15px; border-radius: 12px; border-left: 3px solid #ef4444;">
-                        <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Risk Stop</div>
-                        <div style="font-size: 1.3rem; font-weight: 800; color: #ef4444;">{float(t.get("sl", 0)):.4f}</div>
-                    </div>
-                </div>
-                <div style="background: #1e293b; padding: 12px; border-radius: 12px; text-align: center; color: #94a3b8; font-weight: 600; font-size: 0.9rem; display: flex; justify-content: center; gap: 20px;">
-                    <span>⏱️ <span style="color:#e2e8f0;">{elapsed_str}</span></span>
-                    <span>🎯 TP1: <span style="color: #38bdf8;">{float(t.get("tp1",0)):.2f}</span></span>
-                    <span>TP2: <span style="color: #38bdf8;">{float(t.get("tp2",0)):.2f}</span></span>
-                    <span>TP3: <span style="color: #38bdf8;">{float(t.get("tp3",0)):.2f}</span></span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # --- 3. WAITING FOR SETUP UI ---
-    else:
-        st.markdown("""
-        <div style="display: flex; align-items: center; justify-content: center; height: 100px; background: #0f172a; border: 1px dashed #334155; border-radius: 16px; margin-bottom: 20px;">
-            <div style="text-align: center;">
-                <div style="color: #38bdf8; font-weight: 800; font-size: 1.2rem; margin-bottom: 4px;">🟢 Radar Active</div>
-                <div style="color: #64748b; font-size: 0.9rem; font-weight: 600;">Waiting for High-Probability Setup...</div>
-            </div>
+<div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 2px solid #3b82f6; border-radius: 20px; padding: 20px; margin-bottom: 20px; color: #ffffff; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t.get("type", "TRADE")}</span>
+            {sim_badge}
+            <span style="font-size: 1.3rem; font-weight: bold; margin: 0;">{t.get("symbol", "UNKNOWN")}</span>
         </div>
-        """, unsafe_allow_html=True)
+        <div style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem; background: rgba(255,255,255,0.1);">{pnl_display}</div>
+    </div>
+    {rej_info}
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{float(t.get("entry", 0)):.4f}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t.get("qty", 0)} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{float(t.get("sl", 0)):.4f}</div>
+        </div>
+    </div>
+    <div style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
+        ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp1",0)):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp2",0)):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp3",0)):.2f}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-    # --- 4. DAILY HIGH/LOW & GOLDEN ZONES BOX ---
-    df_latest = bot.state.get("latest_data")
-    fib = bot.state.get("fib_data", {})
-    if not isinstance(fib, dict):
-        fib = {}
+        # --- 3. MULTI TRADE UI ---
+        elif _active_trades:
+            for idx, t in enumerate(_active_trades):
+                live_ltp = bot.get_live_price(t.get('exch', 'NFO'), t.get('symbol', ''), t.get('token', ''))
+                if live_ltp:
+                    t['current_ltp'] = live_ltp
+                    if t.get('type') in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                        t['floating_pnl'] = (float(t.get('entry', 0)) - float(live_ltp)) * float(t.get('qty', 1))
+                    else:
+                        t['floating_pnl'] = (float(live_ltp) - float(t.get('entry', 0))) * float(t.get('qty', 1))
+                
+                ltp = float(t.get('current_ltp', t.get('entry', 0)))
+                pnl = float(t.get('floating_pnl', 0.0))
+                elapsed = float(t.get('elapsed_time', 0))
+                elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
+                pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+                pnl_sign = "+" if pnl >= 0 else ""
+                exec_type = t.get('exch', 'NFO')
+                pnl_display = round(pnl, 2)
+                
+                if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+                    inr_pnl = pnl * float(get_usdt_inr_rate())
+                    pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+                else:
+                    pnl_display = f"{pnl_sign}{round(pnl, 2)}"
+                    
+                sim_badge = '<span class="simulated-badge" style="background:#f59e0b;color:white;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:bold;margin-left:8px;">SIMULATED</span>' if t.get("simulated") else ''
+                rej_info = f"<div style='font-size:0.8rem;color:#ef4444;margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
+                
+                st.markdown(f"""
+<div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 2px solid #3b82f6; border-radius: 20px; padding: 20px; margin-bottom: 20px; color: #ffffff; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t.get("type", "TRADE")}</span>
+            {sim_badge}
+            <span style="font-size: 1.3rem; font-weight: bold; margin: 0;">{t.get("symbol", "UNKNOWN")}</span>
+        </div>
+        <div style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem; background: rgba(255,255,255,0.1);">{pnl_display}</div>
+    </div>
+    {rej_info}
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{float(t.get("entry", 0)):.4f}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t.get("qty", 0)} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{float(t.get("sl", 0)):.4f}</div>
+        </div>
+    </div>
+    <div style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
+        ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp1",0)):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp2",0)):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp3",0)):.2f}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
         
-    if df_latest is not None and not df_latest.empty:
-        try:
-            # FIX: Properly indexing Pandas iloc to avoid the crash
-            day_open = float(df_latest['open'].iloc[-1])
-            day_high = float(df_latest['high'].max())
-            day_low = float(df_latest['low'].min())
-            day_close = float(bot.state.get('spot', df_latest['close'].iloc[-1]))
-            day_vol = float(df_latest['volume'].sum()) if 'volume' in df_latest.columns else 0.0
+        # --- 4. WAITING FOR SETUP UI ---
+        else:
+            st.markdown("""
+<div style="display: flex; align-items: center; justify-content: center; height: 120px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 15px;">
+    <span style="color: #94a3b8; font-weight: 600; font-size: 1.1rem;">⏳ Radar Active: Waiting for High-Probability Setup...</span>
+</div>
+""", unsafe_allow_html=True)
+
+        # --- 5. DAILY HIGH/LOW & GOLDEN ZONES BOX ---
+        df_latest = bot.state.get("latest_data")
+        fib = bot.state.get("fib_data", {})
+        if not isinstance(fib, dict):
+            fib = {}
             
-            atr_val = float(bot.state.get('atr', 0))
-            maj_high = float(fib.get('major_high', day_high))
-            fib_h = float(fib.get('fib_high', maj_high - ((maj_high - day_low) * 0.618))) # Fallback math if missing
-            fib_l = float(fib.get('fib_low', maj_high - ((maj_high - day_low) * 0.650)))
-            maj_low = float(fib.get('major_low', day_low))
-            rev_point = fib.get('reversal_point', 'None Detected')
-            
-            st.markdown(f"""
-            <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+        if df_latest is not None and not df_latest.empty:
+            try:
+                day_open = float(df_latest['open'].iloc)
+                day_high = float(df_latest['high'].max())
+                day_low = float(df_latest['low'].min())
+                day_close = float(bot.state.get('spot', df_latest['close'].iloc[-1]))
+                day_vol = float(df_latest['volume'].sum()) if 'volume' in df_latest.columns else 0.0
                 
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 15px;">
-                    <div style="color: #e2e8f0; font-weight: 800; font-size: 1.1rem; text-transform: uppercase; letter-spacing: 1px;">
-                        🗺️ Market Structure & Key Levels
-                    </div>
-                    <div style="background: #1e293b; color: #94a3b8; padding: 4px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 700;">
-                        ATR: ₹ {atr_val:.2f}
-                    </div>
-                </div>
+                atr_val = float(bot.state.get('atr', 0))
+                maj_high = float(fib.get('major_high', 0))
+                fib_h = float(fib.get('fib_high', 0))
+                fib_l = float(fib.get('fib_low', 0))
+                maj_low = float(fib.get('major_low', 0))
                 
-                <div style="display: flex; justify-content: space-between; background: #1e293b; padding: 12px; border-radius: 10px; margin-bottom: 20px;">
-                    <div style="text-align: center; flex: 1;">
-                        <div style="color: #64748b; font-size: 0.7rem; font-weight: 800; text-transform: uppercase;">Daily Open</div>
-                        <div style="color: #f8fafc; font-weight: 700; font-size: 1rem;">{day_open:.2f}</div>
-                    </div>
-                    <div style="text-align: center; flex: 1; border-left: 1px solid #334155;">
-                        <div style="color: #64748b; font-size: 0.7rem; font-weight: 800; text-transform: uppercase;">Daily High</div>
-                        <div style="color: #4ade80; font-weight: 700; font-size: 1rem;">{day_high:.2f}</div>
-                    </div>
-                    <div style="text-align: center; flex: 1; border-left: 1px solid #334155;">
-                        <div style="color: #64748b; font-size: 0.7rem; font-weight: 800; text-transform: uppercase;">Daily Low</div>
-                        <div style="color: #f87171; font-weight: 700; font-size: 1rem;">{day_low:.2f}</div>
-                    </div>
-                    <div style="text-align: center; flex: 1; border-left: 1px solid #334155;">
-                        <div style="color: #64748b; font-size: 0.7rem; font-weight: 800; text-transform: uppercase;">Current (LTP)</div>
-                        <div style="color: #eab308; font-weight: 700; font-size: 1rem;">{day_close:.2f}</div>
-                    </div>
-                </div>
+                st.markdown(f"""
+<div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 1px solid #3b82f6; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.4);">
+    <div style="color: #38bdf8; font-weight: 800; font-size: 1rem; margin-bottom: 15px; border-bottom: 1px solid #334155; padding-bottom: 10px; text-transform: uppercase; display: flex; justify-content: space-between;">
+        <span>📊 Daily Range & Key Levels</span>
+        <span style="color: #94a3b8; font-size: 0.8rem;">ATR: ₹ {atr_val:.2f}</span>
+    </div>
+    
+    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Open</div>
+            <div style="color: white; font-weight: bold; font-size: 1.1rem;">{day_open:.2f}</div>
+        </div>
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">High</div>
+            <div style="color: #22c55e; font-weight: bold; font-size: 1.1rem;">{day_high:.2f}</div>
+        </div>
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Low</div>
+            <div style="color: #ef4444; font-weight: bold; font-size: 1.1rem;">{day_low:.2f}</div>
+        </div>
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Close (LTP)</div>
+            <div style="color: #facc15; font-weight: bold; font-size: 1.1rem;">{day_close:.2f}</div>
+        </div>
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Volume</div>
+            <div style="color: white; font-weight: bold; font-size: 1.1rem;">{day_vol:,.0f}</div>
+        </div>
+    </div>
 
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
-                    <div style="background: rgba(248, 113, 113, 0.05); padding: 15px; border-radius: 12px; text-align: center; border: 1px solid rgba(248, 113, 113, 0.2); border-top: 4px solid #f87171;">
-                        <div style="color: #f87171; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; margin-bottom: 5px;">Major Resistance</div>
-                        <div style="color: #f8fafc; font-weight: 800; font-size: 1.2rem;">{maj_high:,.2f}</div>
-                    </div>
-                    
-                    <div style="background: rgba(234, 179, 8, 0.08); padding: 15px; border-radius: 12px; text-align: center; border: 1px solid rgba(234, 179, 8, 0.3); border-top: 4px solid #eab308; box-shadow: 0 0 20px rgba(234, 179, 8, 0.15); grid-column: span 2;">
-                        <div style="color: #eab308; font-size: 0.8rem; font-weight: 900; text-transform: uppercase; margin-bottom: 5px; letter-spacing: 1px;">✨ Golden Zone (0.618 - 0.65)</div>
-                        <div style="color: #f8fafc; font-weight: 900; font-size: 1.3rem;">{fib_h:.2f} <span style="color:#64748b;">—</span> {fib_l:.2f}</div>
-                    </div>
-                    
-                    <div style="background: rgba(74, 222, 128, 0.05); padding: 15px; border-radius: 12px; text-align: center; border: 1px solid rgba(74, 222, 128, 0.2); border-top: 4px solid #4ade80;">
-                        <div style="color: #4ade80; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; margin-bottom: 5px;">Major Support</div>
-                        <div style="color: #f8fafc; font-weight: 800; font-size: 1.2rem;">{maj_low:,.2f}</div>
-                    </div>
-                </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
+        <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #f87171;">
+            <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Major Res</div>
+            <div style="color: #f87171; font-weight: 800; font-size: 1.2rem;">{maj_high:,.2f}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #fbbf24; box-shadow: 0 0 10px rgba(251, 191, 36, 0.1);">
+            <div style="color: #fbbf24; font-size: 0.75rem; font-weight: 800; text-transform: uppercase;">✨ Golden Zone</div>
+            <div style="color: #fbbf24; font-weight: 900; font-size: 1.1rem;">{fib_h:.0f} - {fib_l:.0f}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #4ade80;">
+            <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Major Sup</div>
+            <div style="color: #4ade80; font-weight: 800; font-size: 1.2rem;">{maj_low:,.2f}</div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+            except Exception as e:
+                bot.log(f"⚠️ UI formatting error skipped: {str(e)}")
 
-                <div style="margin-top: 15px; background: #1e293b; padding: 10px 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid #a855f7;">
-                    <span style="color: #94a3b8; font-size: 0.85rem; font-weight: 700; text-transform: uppercase;">🔄 Last Reversal Node:</span>
-                    <span style="color: #d8b4fe; font-weight: 800; font-size: 1rem;">{rev_point}</span>
-                </div>
-                
-            </div>
-            """, unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"UI Formatting Error: {str(e)}") # Actually show the error locally so you aren't guessing next time
-            bot.log(f"⚠️ UI formatting error skipped: {str(e)}")
+    live_tracker_ui()
 
-live_tracker_ui()
-st.markdown('<div class="sticky-buttons"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
     # ==========================================
     # ENGINE STATS & GOLDEN ZONE METRICS
     # ==========================================
-if bot.state.get("latest_data") is not None:
+        if bot.state.get("latest_data") is not None:
         # Safely extract fib data dictionary
         fib = bot.state.get("fib_data", {})
         if not isinstance(fib, dict):
