@@ -2830,9 +2830,17 @@ class TechnicalAnalyzer:
 
         vwap = last.get('vwap', 0)
         ema = last['ema9']
-        fib = {}
+        
+        # --- FIX: Calculate actual Fib Zones instead of fib = {} ---
+        mh, ml, f_low, f_high = TechnicalAnalyzer.calculate_fib_zones(df)
+        fib = {
+            'major_high': mh, 
+            'major_low': ml, 
+            'fib_high': f_high, 
+            'fib_low': f_low
+        }
+        
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
-
     # -----------------------------------------------------------------
     # KEYWORD RULE BUILDER
     # -----------------------------------------------------------------
@@ -7180,21 +7188,15 @@ elif st.session_state.page == "dashboard":
   
     @st.fragment(run_every="1s")
     def live_tracker_ui():
-        _active = None
-        _active_trades = []
-        
-        # 1. Thread-safe snapshot — acquire lock non-blocking
-        if bot.state["trade_lock"].acquire(blocking=False):
-            try:
-                _active = bot.state.get("active_trade")
-                _active_trades = list(bot.state.get("active_trades", []))
-            finally:
-                bot.state["trade_lock"].release()
-        
+        # 1. Grab a snapshot of trades directly (Python allows safe dict reads)
+        _active = bot.state.get("active_trade")
+        _active_trades = list(bot.state.get("active_trades", []))
+
         # 2. Handle Single Trade UI
         if _active:
             t = _active
             live_ltp = bot.get_live_price(t.get("exch", "NFO"), t.get("symbol", ""), t.get("token", ""))
+            
             if live_ltp:
                 t["current_ltp"] = live_ltp
                 if t.get("type") in ["SELL", "PE", "SHORT", "SELL_CALL", "SELL_PUT"]:
