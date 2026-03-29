@@ -7186,94 +7186,31 @@ elif st.session_state.page == "dashboard":
    
    
 
-   st.markdown("### 🎯 Live Position Tracker")
+    st.markdown("### 🎯 Live Position Tracker")
 
-@st.fragment(run_every="1s")
-def live_tracker_ui():
-    _active = None
-    _active_trades = []
-    
-    # 1. FIX: Removed trade_lock.acquire(blocking=False).
-    # Reading from a Python dictionary is safe enough for the UI and prevents the "skipped trade" issue.
-    try:
-        _active = bot.state.get("active_trade")
-        _active_trades = list(bot.state.get("active_trades", []))
-    except Exception as e:
-        bot.log(f"UI State read warning: {str(e)}")
-    
-    # --- 2. SINGLE TRADE UI ---
-    if _active:
-        t = _active
-        live_ltp = bot.get_live_price(t.get("exch", "NFO"), t.get("symbol", ""), t.get("token", ""))
-        if live_ltp:
-            t["current_ltp"] = live_ltp
-            if t.get("type") in ["SELL", "PE", "SHORT", "SELL_CALL", "SELL_PUT"]:
-                t["floating_pnl"] = (float(t.get("entry", 0)) - float(live_ltp)) * float(t.get("qty", 1))
-            else:
-                t["floating_pnl"] = (float(live_ltp) - float(t.get("entry", 0))) * float(t.get("qty", 1))
+    @st.fragment(run_every="1s")
+    def live_tracker_ui():
+        _active = None
+        _active_trades = []
         
-        ltp = float(t.get('current_ltp', t.get('entry', 0)))
-        pnl = float(t.get('floating_pnl', 0.0))
-        elapsed = float(t.get('elapsed_time', 0))
-        elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
-        pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
-        pnl_sign = "+" if pnl >= 0 else ""
-        exec_type = t.get('exch', 'NFO')
+        # 1. Thread-safe snapshot — acquire lock non-blocking
+        if bot.state["trade_lock"].acquire(blocking=False):
+            try:
+                _active = bot.state.get("active_trade")
+                _active_trades = list(bot.state.get("active_trades", []))
+            finally:
+                bot.state["trade_lock"].release()
         
-        if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-            inr_pnl = pnl * float(get_usdt_inr_rate())
-            pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
-        else:
-            pnl_display = f"{pnl_sign}{round(pnl, 2)}"
-            
-        sim_badge = '<span class="simulated-badge" style="background:#f59e0b;color:white;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:bold;margin-left:8px;">SIMULATED</span>' if t.get("simulated") else ''
-        rej_info = f"<div style='font-size:0.8rem;color:#ef4444;margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
-        
-        st.markdown(f"""
-<div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 2px solid #3b82f6; border-radius: 20px; padding: 20px; margin-bottom: 20px; color: #ffffff; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
-    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <span style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t.get("type", "TRADE")}</span>
-            {sim_badge}
-            <span style="font-size: 1.3rem; font-weight: bold; margin: 0;">{t.get("symbol", "UNKNOWN")}</span>
-        </div>
-        <div style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem; background: rgba(255,255,255,0.1);">{pnl_display}</div>
-    </div>
-    {rej_info}
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{float(t.get("entry", 0)):.4f}</div>
-        </div>
-        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
-        </div>
-        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t.get("qty", 0)} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
-        </div>
-        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{float(t.get("sl", 0)):.4f}</div>
-        </div>
-    </div>
-    <div style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
-        ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp1",0)):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp2",0)):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp3",0)):.2f}</span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-    # --- 3. MULTI TRADE UI ---
-    elif _active_trades:
-        for idx, t in enumerate(_active_trades):
-            live_ltp = bot.get_live_price(t.get('exch', 'NFO'), t.get('symbol', ''), t.get('token', ''))
+        # --- 2. SINGLE TRADE UI ---
+        if _active:
+            t = _active
+            live_ltp = bot.get_live_price(t.get("exch", "NFO"), t.get("symbol", ""), t.get("token", ""))
             if live_ltp:
-                t['current_ltp'] = live_ltp
-                if t.get('type') in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                    t['floating_pnl'] = (float(t.get('entry', 0)) - float(live_ltp)) * float(t.get('qty', 1))
+                t["current_ltp"] = live_ltp
+                if t.get("type") in ["SELL", "PE", "SHORT", "SELL_CALL", "SELL_PUT"]:
+                    t["floating_pnl"] = (float(t.get("entry", 0)) - float(live_ltp)) * float(t.get("qty", 1))
                 else:
-                    t['floating_pnl'] = (float(live_ltp) - float(t.get('entry', 0))) * float(t.get('qty', 1))
+                    t["floating_pnl"] = (float(live_ltp) - float(t.get("entry", 0))) * float(t.get("qty", 1))
             
             ltp = float(t.get('current_ltp', t.get('entry', 0)))
             pnl = float(t.get('floating_pnl', 0.0))
@@ -7282,7 +7219,6 @@ def live_tracker_ui():
             pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
             pnl_sign = "+" if pnl >= 0 else ""
             exec_type = t.get('exch', 'NFO')
-            pnl_display = round(pnl, 2)
             
             if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
                 inr_pnl = pnl * float(get_usdt_inr_rate())
@@ -7327,37 +7263,100 @@ def live_tracker_ui():
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+        # --- 3. MULTI TRADE UI ---
+        elif _active_trades:
+            for idx, t in enumerate(_active_trades):
+                live_ltp = bot.get_live_price(t.get('exch', 'NFO'), t.get('symbol', ''), t.get('token', ''))
+                if live_ltp:
+                    t['current_ltp'] = live_ltp
+                    if t.get('type') in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                        t['floating_pnl'] = (float(t.get('entry', 0)) - float(live_ltp)) * float(t.get('qty', 1))
+                    else:
+                        t['floating_pnl'] = (float(live_ltp) - float(t.get('entry', 0))) * float(t.get('qty', 1))
+                
+                ltp = float(t.get('current_ltp', t.get('entry', 0)))
+                pnl = float(t.get('floating_pnl', 0.0))
+                elapsed = float(t.get('elapsed_time', 0))
+                elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
+                pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+                pnl_sign = "+" if pnl >= 0 else ""
+                exec_type = t.get('exch', 'NFO')
+                pnl_display = round(pnl, 2)
+                
+                if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+                    inr_pnl = pnl * float(get_usdt_inr_rate())
+                    pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
+                else:
+                    pnl_display = f"{pnl_sign}{round(pnl, 2)}"
+                    
+                sim_badge = '<span class="simulated-badge" style="background:#f59e0b;color:white;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:bold;margin-left:8px;">SIMULATED</span>' if t.get("simulated") else ''
+                rej_info = f"<div style='font-size:0.8rem;color:#ef4444;margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
+                
+                st.markdown(f"""
+<div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 2px solid #3b82f6; border-radius: 20px; padding: 20px; margin-bottom: 20px; color: #ffffff; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t.get("type", "TRADE")}</span>
+            {sim_badge}
+            <span style="font-size: 1.3rem; font-weight: bold; margin: 0;">{t.get("symbol", "UNKNOWN")}</span>
+        </div>
+        <div style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem; background: rgba(255,255,255,0.1);">{pnl_display}</div>
+    </div>
+    {rej_info}
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{float(t.get("entry", 0)):.4f}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t.get("qty", 0)} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{float(t.get("sl", 0)):.4f}</div>
+        </div>
+    </div>
+    <div style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
+        ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp1",0)):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp2",0)):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp3",0)):.2f}</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
         
-    # --- 4. WAITING FOR SETUP UI ---
-    else:
-        st.markdown("""
+        # --- 4. WAITING FOR SETUP UI ---
+        else:
+            st.markdown("""
 <div style="display: flex; align-items: center; justify-content: center; height: 120px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 15px;">
     <span style="color: #94a3b8; font-weight: 600; font-size: 1.1rem;">⏳ Radar Active: Waiting for High-Probability Setup...</span>
 </div>
 """, unsafe_allow_html=True)
 
-    # --- 5. DAILY HIGH/LOW & GOLDEN ZONES BOX ---
-    df_latest = bot.state.get("latest_data")
-    fib = bot.state.get("fib_data", {})
-    if not isinstance(fib, dict):
-        fib = {}
-        
-    if df_latest is not None and not df_latest.empty:
-        try:
-            # FIX 2: Added [-1] to iloc to fix the syntax error causing the box to crash
-            day_open = float(df_latest['open'].iloc[-1])
-            day_high = float(df_latest['high'].max())
-            day_low = float(df_latest['low'].min())
-            day_close = float(bot.state.get('spot', df_latest['close'].iloc[-1]))
-            day_vol = float(df_latest['volume'].sum()) if 'volume' in df_latest.columns else 0.0
+        # --- 5. DAILY HIGH/LOW & GOLDEN ZONES BOX ---
+        df_latest = bot.state.get("latest_data")
+        fib = bot.state.get("fib_data", {})
+        if not isinstance(fib, dict):
+            fib = {}
             
-            atr_val = float(bot.state.get('atr', 0))
-            maj_high = float(fib.get('major_high', 0))
-            fib_h = float(fib.get('fib_high', 0))
-            fib_l = float(fib.get('fib_low', 0))
-            maj_low = float(fib.get('major_low', 0))
-            
-            st.markdown(f"""
+        if df_latest is not None and not df_latest.empty:
+            try:
+                day_open = float(df_latest['open'].iloc)
+                day_high = float(df_latest['high'].max())
+                day_low = float(df_latest['low'].min())
+                day_close = float(bot.state.get('spot', df_latest['close'].iloc[-1]))
+                day_vol = float(df_latest['volume'].sum()) if 'volume' in df_latest.columns else 0.0
+                
+                atr_val = float(bot.state.get('atr', 0))
+                maj_high = float(fib.get('major_high', 0))
+                fib_h = float(fib.get('fib_high', 0))
+                fib_l = float(fib.get('fib_low', 0))
+                maj_low = float(fib.get('major_low', 0))
+                
+                st.markdown(f"""
 <div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 1px solid #3b82f6; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.4);">
     <div style="color: #38bdf8; font-weight: 800; font-size: 1rem; margin-bottom: 15px; border-bottom: 1px solid #334155; padding-bottom: 10px; text-transform: uppercase; display: flex; justify-content: space-between;">
         <span>📊 Daily Range & Key Levels</span>
@@ -7403,59 +7402,12 @@ def live_tracker_ui():
     </div>
 </div>
 """, unsafe_allow_html=True)
-        except Exception as e:
-            bot.log(f"⚠️ UI formatting error skipped: {str(e)}")
+            except Exception as e:
+                bot.log(f"⚠️ UI formatting error skipped: {str(e)}")
 
-live_tracker_ui()
-
-st.markdown('<div class="sticky-buttons"></div>', unsafe_allow_html=True)
-    # ==========================================
-    # ENGINE STATS & GOLDEN ZONE METRICS
-    # ==========================================
-    if bot.state.get("latest_data") is not None:
-        # Safely extract fib data dictionary
-        fib = bot.state.get("fib_data", {})
-        if not isinstance(fib, dict):
-            fib = {}
-            
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Current Price", f"₹ {bot.state.get('spot', 0):.2f}")
-        c2.metric("Signal Strength", f"{bot.state.get('signal_strength', 0)}%")
-        c3.metric("VWAP", f"₹ {bot.state.get('vwap', 0):.2f}")
-        c4.metric("EMA (9)", f"₹ {bot.state.get('ema', 0):.2f}")
-
-        st.markdown(f"""
-        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border: 1px solid #334155; margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                <div><span style="color: #94a3b8;">ATR (Vol):</span> <span style="color: white; font-weight: bold;">₹ {bot.state.get('atr', 0):.2f}</span></div>
-                <div><span style="color: #94a3b8;">Major Res:</span> <span style="color: #ef4444; font-weight: bold;">₹ {fib.get('major_high', 0):.2f}</span></div>
-                <div><span style="color: #94a3b8;">Golden Zone:</span> <span style="color: #fbbf24; font-weight: bold;">₹ {fib.get('fib_high', 0):.2f} - ₹ {fib.get('fib_low', 0):.2f}</span></div>
-                <div><span style="color: #94a3b8;">Major Sup:</span> <span style="color: #22c55e; font-weight: bold;">₹ {fib.get('major_low', 0):.2f}</span></div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    live_tracker_ui()
 
     st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
-    col_exit, col_protect = st.columns(2)
-    with col_exit:
-        st.button(
-            "🛑 EXIT TRADE INSTANTLY", 
-            type="primary", 
-            use_container_width=True, 
-            key="global_exit_btn",
-            on_click=bot.force_exit,
-            disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
-        )
-    with col_protect:
-        st.button(
-            "🛡️ Protect Profit", 
-            type="secondary", 
-            use_container_width=True, 
-            key="protect_profit_btn",
-            on_click=bot.protect_profit,
-            disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
-        )
-    st.markdown('</div>', unsafe_allow_html=True)
 
    
 
