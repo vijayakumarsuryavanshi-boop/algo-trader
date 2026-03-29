@@ -6228,6 +6228,95 @@ if st.session_state.page == "landing":
         st.info(info_line)
 
     st.markdown("""
+    <style>
+        /* Default text color: deep blue */
+        .landing-hero, .landing-hero *,
+        .terms-card, .terms-card *,
+        .broker-grid, .broker-grid *,
+        .footer, .footer *,
+        h1, h2, h3, h4, h5, h6, p, div, span, label, .stCheckbox label {
+            color: #0a4b8c !important;
+        }
+        /* Bento cards: light background, dark red text */
+        .bento-card {
+            background: #fff5f5 !important;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+            margin: 10px 0;
+        }
+        .bento-card * {
+            color: #8B0000 !important;
+        }
+        /* Keep buttons and checkboxes default */
+        .stButton button, .stCheckbox {
+            color: inherit !important;
+        }
+        /* Small blue box for SHREE with animation and no border */
+        .shree-box {
+            background-color: #1e3a8a;
+            padding: 8px 20px;
+            border-radius: 40px;
+            display: inline-block;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            margin-bottom: 10px;
+            border: none;
+            animation: moveBox 4s infinite alternate ease-in-out;
+        }
+        @keyframes moveBox {
+            0% { transform: translate(0, 0); }
+            25% { transform: translate(20px, -20px); }
+            50% { transform: translate(40px, 0); }
+            75% { transform: translate(20px, 20px); }
+            100% { transform: translate(0, 0); }
+        }
+        .kinetic-title {
+            color: white !important;
+            font-size: 2.2rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+        }
+        .kinetic-sub {
+            color: #e0f2fe !important;
+            font-size: 1.2rem;
+            margin-top: 0;
+        }
+        .bento-icon {
+            font-size: 2.5rem;
+        }
+
+        /* Mobile-friendly adjustments */
+        @media (max-width: 768px) {
+            .shree-box {
+                padding: 5px 12px;
+                animation: moveBoxMobile 4s infinite alternate ease-in-out;
+            }
+            @keyframes moveBoxMobile {
+                0% { transform: translate(0, 0); }
+                25% { transform: translate(10px, -10px); }
+                50% { transform: translate(20px, 0); }
+                75% { transform: translate(10px, 10px); }
+                100% { transform: translate(0, 0); }
+            }
+            .kinetic-title {
+                font-size: 1.8rem;
+            }
+            .kinetic-sub {
+                font-size: 1rem;
+            }
+            .bento-card {
+                padding: 15px;
+            }
+            .bento-icon {
+                font-size: 2rem;
+            }
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Hero section with animated blue SHREE box
+    st.markdown("""
     <div class="landing-hero">
         <div class="shree-box">
             <div class="kinetic-title">🕉️ SHREE</div>
@@ -6240,9 +6329,11 @@ if st.session_state.page == "landing":
     with col2:
         st.markdown('<div class="terms-card">', unsafe_allow_html=True)
         st.markdown("### 📜 Terms and Conditions")
-        st.markdown('<div class="typewriter">By accessing and using this platform, you agree to the following:</div>', unsafe_allow_html=True)
         st.markdown("""
+        By accessing and using this platform, you agree to the following:
+
         - You are solely responsible for all trading decisions and outcomes.
+        - This software is provided "as is" without any warranties.
         - Past performance does not guarantee future results.
         - You acknowledge the high risk of financial loss in trading.
         - You will not hold the developers liable for any losses.
@@ -6264,8 +6355,8 @@ if st.session_state.page == "landing":
         </div>
         <div class="bento-card">
             <div class="bento-icon">🔌</div>
-            <h3>12+ Brokers</h3>
-            <p>Angel, Zerodha, CoinDCX, Delta, MT5, Fyers, Upstox, 5paisa, Binance, Stoxkart, Dhan, Shoonya.</p>
+            <h3>9+ Brokers</h3>
+            <p>Angel, Zerodha, CoinDCX, Delta, MT5, Fyers, Upstox, 5paisa, Binance.</p>
         </div>
         <div class="bento-card">
             <div class="bento-icon">⚡</div>
@@ -6286,14 +6377,11 @@ if st.session_state.page == "landing":
         ("Zerodha", "https://www.google.com/s2/favicons?domain=zerodha.com&sz=64"),
         ("CoinDCX", "https://www.google.com/s2/favicons?domain=coindcx.com&sz=64"),
         ("Delta Exchange", "https://www.google.com/s2/favicons?domain=delta.exchange&sz=64"),
-        ("MT5/Exness", "https://www.google.com/s2/favicons?domain=metatrader5.com&sz=64"),
+        ("MT5", "https://www.google.com/s2/favicons?domain=metatrader5.com&sz=64"),
         ("Fyers", "https://www.google.com/s2/favicons?domain=fyers.in&sz=64"),
         ("Upstox", "https://www.google.com/s2/favicons?domain=upstox.com&sz=64"),
         ("5paisa", "https://www.google.com/s2/favicons?domain=5paisa.com&sz=64"),
-        ("Binance", "https://www.google.com/s2/favicons?domain=binance.com&sz=64"),
-        ("Stoxkart", "https://www.google.com/s2/favicons?domain=stoxkart.com&sz=64"),
-        ("Dhan", "https://www.google.com/s2/favicons?domain=dhan.co&sz=64"),
-        ("Shoonya", "https://www.google.com/s2/favicons?domain=shoonya.com&sz=64")
+        ("Binance", "https://www.google.com/s2/favicons?domain=binance.com&sz=64")
     ]
     html = '<div class="broker-grid">'
     for name, icon in broker_list:
@@ -6337,6 +6425,7 @@ if st.session_state.page == "landing":
         <p style="font-size: 0.9rem;">Developed by Vijayakumar Suryavanshi</p>
     </div>
     """, unsafe_allow_html=True)
+
 
 elif st.session_state.page == "login":
     if not HAS_DB:
