@@ -7072,17 +7072,19 @@ elif st.session_state.page == "dashboard":
                         "fib_data": fib, "latest_data": df_work.copy()
                     })
     # News tickers
-        kannada_news = st.session_state.kannada_news
-        english_news = st.session_state.english_news
-        if not kannada_news:
-            kannada_news = [generate_market_prediction(INDEX)]
-        ticker_text = " 🔹 ".join(kannada_news)
-        st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-        if not english_news:
-            english_news = [generate_market_prediction(INDEX)]
-        ticker_text = " 🔹 ".join(english_news)
-        st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
-
+    kannada_news = st.session_state.kannada_news
+    english_news = st.session_state.english_news
+    
+    if not kannada_news:
+        kannada_news = [generate_market_prediction(INDEX)]
+    ticker_text_kan = " 🔹 ".join(kannada_news)
+    st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text_kan}</span></div>', unsafe_allow_html=True)
+    
+    if not english_news:
+        english_news = [generate_market_prediction(INDEX)]
+    ticker_text_eng = " 🔹 ".join(english_news)
+    st.markdown(f'<div class="news-ticker-english"><span>{ticker_text_eng}</span></div>', unsafe_allow_html=True)
+    # -------------------------------------------------------------------------
 
     if not is_mkt_open:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
