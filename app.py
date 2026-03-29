@@ -7187,38 +7187,31 @@ elif st.session_state.page == "dashboard":
 
     @st.fragment(run_every="1s")
     def live_tracker_ui():
-        _active = None
-        _active_trades = []
-        
-        # 1. Thread-safe snapshot — acquire lock non-blocking
-        if bot.state["trade_lock"].acquire(blocking=False):
-            try:
-                _active = bot.state.get("active_trade")
-                _active_trades = list(bot.state.get("active_trades", []))
-            finally:
-                bot.state["trade_lock"].release()
+        # 1. BYPASS THE LOCK: Read directly from state so the engine doesn't starve the UI
+        _active = bot.state.get("active_trade")
+        _active_trades = bot.state.get("active_trades", [])
         
         # --- 2. SINGLE TRADE UI ---
         if _active:
-            t = _active
+            t = dict(_active) # Safe copy for UI rendering
             live_ltp = bot.get_live_price(t.get("exch", "NFO"), t.get("symbol", ""), t.get("token", ""))
             if live_ltp:
                 t["current_ltp"] = live_ltp
                 if t.get("type") in ["SELL", "PE", "SHORT", "SELL_CALL", "SELL_PUT"]:
-                    t["floating_pnl"] = (t.get("entry", 0) - live_ltp) * t.get("qty", 1)
+                    t["floating_pnl"] = (float(t.get("entry", 0)) - float(live_ltp)) * float(t.get("qty", 1))
                 else:
-                    t["floating_pnl"] = (live_ltp - t.get("entry", 0)) * t.get("qty", 1)
+                    t["floating_pnl"] = (float(live_ltp) - float(t.get("entry", 0))) * float(t.get("qty", 1))
             
-            ltp = t.get('current_ltp', t.get('entry', 0))
-            pnl = t.get('floating_pnl', 0.0)
-            elapsed = t.get('elapsed_time', 0)
+            ltp = float(t.get('current_ltp', t.get('entry', 0)))
+            pnl = float(t.get('floating_pnl', 0.0))
+            elapsed = float(t.get('elapsed_time', 0))
             elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
             pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
             pnl_sign = "+" if pnl >= 0 else ""
             exec_type = t.get('exch', 'NFO')
             
             if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                inr_pnl = pnl * get_usdt_inr_rate()
+                inr_pnl = pnl * float(get_usdt_inr_rate())
                 pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
             else:
                 pnl_display = f"{pnl_sign}{round(pnl, 2)}"
@@ -7240,7 +7233,7 @@ elif st.session_state.page == "dashboard":
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
         <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
             <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t.get("entry", 0):.4f}</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{float(t.get("entry", 0)):.4f}</div>
         </div>
         <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
             <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
@@ -7252,29 +7245,30 @@ elif st.session_state.page == "dashboard":
         </div>
         <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
             <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t.get("sl", 0):.4f}</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{float(t.get("sl", 0)):.4f}</div>
         </div>
     </div>
     <div style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
-        ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
+        ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp1",0)):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp2",0)):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp3",0)):.2f}</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
         # --- 3. MULTI TRADE UI ---
         elif _active_trades:
-            for idx, t in enumerate(_active_trades):
+            for idx, raw_t in enumerate(_active_trades):
+                t = dict(raw_t) # Safe copy
                 live_ltp = bot.get_live_price(t.get('exch', 'NFO'), t.get('symbol', ''), t.get('token', ''))
                 if live_ltp:
                     t['current_ltp'] = live_ltp
                     if t.get('type') in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                        t['floating_pnl'] = (t.get('entry', 0) - live_ltp) * t.get('qty', 1)
+                        t['floating_pnl'] = (float(t.get('entry', 0)) - float(live_ltp)) * float(t.get('qty', 1))
                     else:
-                        t['floating_pnl'] = (live_ltp - t.get('entry', 0)) * t.get('qty', 1)
+                        t['floating_pnl'] = (float(live_ltp) - float(t.get('entry', 0))) * float(t.get('qty', 1))
                 
-                ltp = t.get('current_ltp', t.get('entry', 0))
-                pnl = t.get('floating_pnl', 0.0)
-                elapsed = t.get('elapsed_time', 0)
+                ltp = float(t.get('current_ltp', t.get('entry', 0)))
+                pnl = float(t.get('floating_pnl', 0.0))
+                elapsed = float(t.get('elapsed_time', 0))
                 elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
                 pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
                 pnl_sign = "+" if pnl >= 0 else ""
@@ -7282,7 +7276,7 @@ elif st.session_state.page == "dashboard":
                 pnl_display = round(pnl, 2)
                 
                 if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                    inr_pnl = pnl * get_usdt_inr_rate()
+                    inr_pnl = pnl * float(get_usdt_inr_rate())
                     pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
                 else:
                     pnl_display = f"{pnl_sign}{round(pnl, 2)}"
@@ -7304,7 +7298,7 @@ elif st.session_state.page == "dashboard":
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
         <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
             <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t.get("entry", 0):.4f}</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{float(t.get("entry", 0)):.4f}</div>
         </div>
         <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
             <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
@@ -7329,41 +7323,71 @@ elif st.session_state.page == "dashboard":
             fib = {}
             
         if df_latest is not None and not df_latest.empty:
-            day_high = df_latest['high'].max()
-            day_low = df_latest['low'].min()
-            
-            st.markdown(f"""
+            try:
+                day_open = float(df_latest['open'].iloc)
+                day_high = float(df_latest['high'].max())
+                day_low = float(df_latest['low'].min())
+                day_close = float(bot.state.get('spot', df_latest['close'].iloc[-1]))
+                day_vol = float(df_latest['volume'].sum()) if 'volume' in df_latest.columns else 0.0
+                
+                atr_val = float(bot.state.get('atr', 0))
+                maj_high = float(fib.get('major_high', 0))
+                fib_h = float(fib.get('fib_high', 0))
+                fib_l = float(fib.get('fib_low', 0))
+                maj_low = float(fib.get('major_low', 0))
+                
+                st.markdown(f"""
 <div style="background: linear-gradient(145deg, #1e293b, #0f172a); border: 1px solid #3b82f6; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.4);">
     <div style="color: #38bdf8; font-weight: 800; font-size: 1rem; margin-bottom: 15px; border-bottom: 1px solid #334155; padding-bottom: 10px; text-transform: uppercase; display: flex; justify-content: space-between;">
         <span>📊 Daily Range & Key Levels</span>
-        <span style="color: #94a3b8; font-size: 0.8rem;">ATR: ₹ {bot.state.get('atr', 0):.2f}</span>
+        <span style="color: #94a3b8; font-size: 0.8rem;">ATR: ₹ {atr_val:.2f}</span>
     </div>
+    
+    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Open</div>
+            <div style="color: white; font-weight: bold; font-size: 1.1rem;">{day_open:.2f}</div>
+        </div>
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">High</div>
+            <div style="color: #22c55e; font-weight: bold; font-size: 1.1rem;">{day_high:.2f}</div>
+        </div>
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Low</div>
+            <div style="color: #ef4444; font-weight: bold; font-size: 1.1rem;">{day_low:.2f}</div>
+        </div>
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Close (LTP)</div>
+            <div style="color: #facc15; font-weight: bold; font-size: 1.1rem;">{day_close:.2f}</div>
+        </div>
+        <div style="flex: 1; text-align: center; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+            <div style="color: #94a3b8; font-size: 0.7rem; font-weight: bold; text-transform: uppercase;">Volume</div>
+            <div style="color: white; font-weight: bold; font-size: 1.1rem;">{day_vol:,.0f}</div>
+        </div>
+    </div>
+
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px;">
-        <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #22c55e;">
-            <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Daily High</div>
-            <div style="color: #22c55e; font-weight: 800; font-size: 1.2rem;">{day_high:,.2f}</div>
-        </div>
-        <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #ef4444;">
-            <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Daily Low</div>
-            <div style="color: #ef4444; font-weight: 800; font-size: 1.2rem;">{day_low:,.2f}</div>
-        </div>
         <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #f87171;">
             <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Major Res</div>
-            <div style="color: #f87171; font-weight: 800; font-size: 1.2rem;">{fib.get('major_high', 0):,.2f}</div>
+            <div style="color: #f87171; font-weight: 800; font-size: 1.2rem;">{maj_high:,.2f}</div>
         </div>
         <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #fbbf24; box-shadow: 0 0 10px rgba(251, 191, 36, 0.1);">
             <div style="color: #fbbf24; font-size: 0.75rem; font-weight: 800; text-transform: uppercase;">✨ Golden Zone</div>
-            <div style="color: #fbbf24; font-weight: 900; font-size: 1.1rem;">{fib.get('fib_high', 0):.0f} - {fib.get('fib_low', 0):.0f}</div>
+            <div style="color: #fbbf24; font-weight: 900; font-size: 1.1rem;">{fib_h:.0f} - {fib_l:.0f}</div>
         </div>
         <div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 10px; text-align: center; border-top: 3px solid #4ade80;">
             <div style="color: #94a3b8; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">Major Sup</div>
-            <div style="color: #4ade80; font-weight: 800; font-size: 1.2rem;">{fib.get('major_low', 0):,.2f}</div>
+            <div style="color: #4ade80; font-weight: 800; font-size: 1.2rem;">{maj_low:,.2f}</div>
         </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
+            except Exception as e:
+                bot.log(f"⚠️ UI formatting error skipped: {str(e)}")
 
     live_tracker_ui()
+
+    st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
     # ==========================================
     # ENGINE STATS & GOLDEN ZONE METRICS
     # ==========================================
