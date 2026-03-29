@@ -1946,25 +1946,39 @@ class StoxkartBridge:
         self.base_url = "https://superrapi.stoxkart.com" # Stoxkart's XTS Live API URL
 
     def connect(self):
-        try:
-            # FIX: Bypasses the missing library by using pure Python requests
-            payload = {
-                "secretKey": self.secret,
-                "appKey": self.api_key,
-                "source": "WebAPI"
-            }
-            res = requests.post(f"{self.base_url}/interactive/user/session", json=payload, timeout=10)
-            
-            if res.status_code == 200:
-                data = res.json()
-                if data.get("type") == "success":
-                    self.token = data["result"]["token"]
-                    self.user_id = data["result"]["userID"]
-                    self.connected = True
-                    return True, "Connected to Stoxkart"
-            return False, f"Stoxkart login failed: {res.text}"
-        except Exception as e:
-            return False, f"Stoxkart connection error: {e}"
+        # Try standard port first, then fallback to port 3000
+        urls_to_try = [
+            f"{self.base_url}/interactive/user/session",
+            f"{self.base_url}:3000/interactive/user/session"
+        ]
+        
+        last_error = ""
+        for url in urls_to_try:
+            try:
+                payload = {
+                    "secretKey": self.secret,
+                    "appKey": self.api_key,
+                    "source": "WebAPI"
+                }
+                # FIX: Increased timeout to 15 seconds to prevent premature drops
+                res = requests.post(url, json=payload, timeout=15) 
+                
+                if res.status_code == 200:
+                    data = res.json()
+                    if data.get("type") == "success":
+                        self.token = data["result"]["token"]
+                        self.user_id = data["result"]["userID"]
+                        self.connected = True
+                        return True, "Connected to Stoxkart"
+                
+                last_error = res.text
+            except requests.exceptions.ConnectTimeout:
+                # FIX: Catches the timeout cleanly so it doesn't crash your script
+                last_error = "Connection Timed Out (Server is offline for weekend maintenance or blocking your IP)"
+            except Exception as e:
+                last_error = str(e)
+                
+        return False, f"Stoxkart login failed: {last_error}"
 
     def get_live_price(self, symbol):
         return None
@@ -1982,14 +1996,13 @@ class StoxkartBridge:
             headers = {"authorization": self.token}
             params = {"clientID": self.user_id} if self.user_id else {}
             
-            # Fetch balance directly from the Stoxkart XTS ledger
             res = requests.get(f"{self.base_url}/interactive/user/balance", headers=headers, params=params, timeout=5)
             
             if res.status_code == 200:
                 data = res.json()
                 if data.get("type") == "success":
                     try:
-                        # Navigate the XTS JSON structure to find available margin
+                        # Navigate the XTS JSON structure safely
                         bal = data["result"]["BalanceList"]["limitObject"]["RMSSubLimits"]["cashMarginAvailable"]
                         return {'balance': float(bal)}
                     except:
