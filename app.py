@@ -38,7 +38,7 @@ import functools
 import random
 import socketio
 import asyncio
-import Stoxkart
+import superrapi-python
 
 # ---------- Optional imports with fallbacks ----------
 try:
