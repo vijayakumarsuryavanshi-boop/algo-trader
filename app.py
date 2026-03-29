@@ -4610,16 +4610,31 @@ class SniperBot:
         return 0, 0
 
     def get_live_price(self, exchange, symbol, token):
+        now = time.time()
+        
+        # 1. Initialize and Check Cache
+        if not hasattr(self, "_ltp_cache"):
+            self._ltp_cache = {}
+            
+        cache_key = f"{exchange}_{symbol}_{token}"
+        if cache_key in self._ltp_cache:
+            ts, cached_price = self._ltp_cache[cache_key]
+            if now - ts < 1.5:  # 1.5s micro-cache limit prevents UI freezing
+                return cached_price
+
         if exchange in ["NSE", "NFO", "BSE", "BFO", "MCX"] and self.ws_angel_connected and token in self.live_prices_angel:
-            return self.live_prices_angel[token]
+            price = self.live_prices_angel[token]
+            self._ltp_cache[cache_key] = (now, price)
+            return price
 
         if self.is_mock and token == "12345":
             if "CE" in symbol or "PE" in symbol:
                 if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
                     base_price = self.state["active_trade"]["entry"]
                     change = np.random.normal(0, base_price * 0.005)
-                    return base_price + change
-                return np.random.uniform(150, 300)
+                    price = base_price + change
+                else:
+                    price = np.random.uniform(150, 300)
             else:
                 if self.state.get('mock_price') is None:
                     base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
@@ -4627,7 +4642,10 @@ class SniperBot:
                     self.state['mock_price'] = float(base)
                 change = np.random.normal(0, self.state['mock_price'] * 0.0005)
                 self.state['mock_price'] += change
-                return float(self.state['mock_price'])
+                price = float(self.state['mock_price'])
+                
+            self._ltp_cache[cache_key] = (now, price)
+            return price
 
         price = None
         try:
@@ -4679,6 +4697,11 @@ class SniperBot:
                     self.log(f"⚠️ Using yfinance fallback for {symbol}: {price}")
             except:
                 pass
+                
+        # Save to cache before returning
+        if price is not None:
+            self._ltp_cache[cache_key] = (now, price)
+            
         return price
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
