@@ -7183,17 +7183,25 @@ elif st.session_state.page == "dashboard":
         bot.force_exit()
         st.rerun()
 
+   
     st.markdown("### 🎯 Live Position Tracker")
 
     @st.fragment(run_every="1s")
     def live_tracker_ui():
-        # 1. BYPASS THE LOCK: Read directly from state so the engine doesn't starve the UI
-        _active = bot.state.get("active_trade")
-        _active_trades = bot.state.get("active_trades", [])
+        _active = None
+        _active_trades = []
+        
+        # 1. Thread-safe snapshot — acquire lock non-blocking
+        if bot.state["trade_lock"].acquire(blocking=False):
+            try:
+                _active = bot.state.get("active_trade")
+                _active_trades = list(bot.state.get("active_trades", []))
+            finally:
+                bot.state["trade_lock"].release()
         
         # --- 2. SINGLE TRADE UI ---
         if _active:
-            t = dict(_active) # Safe copy for UI rendering
+            t = _active
             live_ltp = bot.get_live_price(t.get("exch", "NFO"), t.get("symbol", ""), t.get("token", ""))
             if live_ltp:
                 t["current_ltp"] = live_ltp
@@ -7256,8 +7264,7 @@ elif st.session_state.page == "dashboard":
 
         # --- 3. MULTI TRADE UI ---
         elif _active_trades:
-            for idx, raw_t in enumerate(_active_trades):
-                t = dict(raw_t) # Safe copy
+            for idx, t in enumerate(_active_trades):
                 live_ltp = bot.get_live_price(t.get('exch', 'NFO'), t.get('symbol', ''), t.get('token', ''))
                 if live_ltp:
                     t['current_ltp'] = live_ltp
@@ -7304,6 +7311,17 @@ elif st.session_state.page == "dashboard":
             <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
             <div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
         </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t.get("qty", 0)} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
+            <div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
+            <div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{float(t.get("sl", 0)):.4f}</div>
+        </div>
+    </div>
+    <div style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
+        ⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp1",0)):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp2",0)):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{float(t.get("tp3",0)):.2f}</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
