@@ -1889,53 +1889,93 @@ class FyersBridge:
             return None
 
 class MT5WebBridge:
-    def __init__(self, account, password, server, api_url="https://mt5-web-api.mtapi.io/v1"):
+    def __init__(self, account, password, server, api_url=""):
         self.account = account
         self.password = password
         self.server = server
-        self.api_url = api_url
-        self.token = None
+        self.api_url = api_url or "https://mt5-web-api.mtapi.io/v1"
         self.connected = False
+        self._use_local = False
 
     def connect(self):
-        try:
-            self.connected = True
-            return True, "Connected to MT5/Exness (simulated)"
-        except Exception as e:
-            return False, f"MT5 connection error: {e}"
+        if HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                if mt5.initialize(login=int(self.account),
+                                  password=self.password,
+                                  server=self.server):
+                    self.connected = True
+                    self._use_local = True
+                    return True, f"MT5 local connected ({self.server})"
+            except Exception as e:
+                pass
+        self.connected = True
+        self._use_local = False
+        return True, f"MT5 bridge simulated ({self.server})"
 
     def get_live_price(self, symbol):
-        if not self.connected:
-            return None
+        if not self.connected: return None
+        if self._use_local and HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                tick = mt5.symbol_info_tick(symbol)
+                if tick: return float((tick.bid + tick.ask) / 2)
+            except Exception: pass
+        yf_map = {"XAUUSD":"GC=F","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD",
+                  "ETHUSD":"ETH-USD","SOLUSD":"SOL-USD","GBPUSD":"GBPUSD=X","USDJPY":"JPY=X"}
         try:
-            return None
-        except:
-            return None
+            df = yf.Ticker(yf_map.get(symbol, symbol)).history(period="1d", interval="1m")
+            if not df.empty: return float(df["Close"].iloc[-1])
+        except Exception: pass
+        return None
 
     def place_order(self, symbol, qty, side):
-        if not self.connected:
-            return None, "Not connected"
-        try:
-            return "MT5_ORDER", None
-        except Exception as e:
-            return None, str(e)
+        if not self.connected: return None, "Not connected"
+        if self._use_local and HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
+                tick = mt5.symbol_info_tick(symbol)
+                price = tick.ask if str(side).upper()=="BUY" else tick.bid
+                req = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": symbol, "volume": float(qty), "type": action,
+                    "price": price, "deviation": 20, "magic": 20250101,
+                    "comment": "SHREE_BOT", "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_IOC,
+                }
+                result = mt5.order_send(req)
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    return str(result.order), None
+                return None, f"MT5 retcode: {result.retcode if result else 'unknown'}"
+            except Exception as e:
+                return None, str(e)
+        return f"MT5_SIM_{int(time.time())}", None
 
     def get_historical_data(self, symbol, interval):
-        if not self.connected:
-            return None
-        try:
-            return None
-        except:
-            return None
+        if self._use_local and HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                tf_map = {"1m":mt5.TIMEFRAME_M1,"5m":mt5.TIMEFRAME_M5,"15m":mt5.TIMEFRAME_M15}
+                rates = mt5.copy_rates_from_pos(symbol, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
+                if rates is not None:
+                    df = pd.DataFrame(rates)
+                    df["time"] = pd.to_datetime(df["time"], unit="s")
+                    df.set_index("time", inplace=True)
+                    df.rename(columns={"tick_volume":"volume"}, inplace=True)
+                    return df
+            except Exception: pass
+        return None
 
     def get_account_info(self):
-        if not self.connected:
-            return None
-        try:
-            return {'balance': 0, 'login': self.account}
-        except:
-            return None
-
+        if not self.connected: return None
+        if self._use_local and HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                info = mt5.account_info()
+                if info: return {"balance": float(info.balance), "login": self.account}
+            except Exception: pass
+        return {"balance": 0, "login": self.account}
 class StoxkartBridge:
     def __init__(self, api_key, secret):
         self.api_key = api_key
@@ -7031,11 +7071,7 @@ elif st.session_state.page == "dashboard":
                         "vwap": v, "ema": e, "atr": atr,
                         "fib_data": fib, "latest_data": df_work.copy()
                     })
-
-    if not is_mkt_open:
-        st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
-        
-     # News tickers
+    # News tickers
         kannada_news = st.session_state.kannada_news
         english_news = st.session_state.english_news
         if not kannada_news:
@@ -7047,6 +7083,11 @@ elif st.session_state.page == "dashboard":
         ticker_text = " 🔹 ".join(english_news)
         st.markdown(f'<div class="news-ticker-english"><span>{ticker_text}</span></div>', unsafe_allow_html=True)
 
+
+    if not is_mkt_open:
+        st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
+        
+     
 
     # Top button row (Start, Stop, Refresh only – Exit moved below)
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
