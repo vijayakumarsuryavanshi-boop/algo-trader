@@ -2182,10 +2182,23 @@ class CoinDCXBridge:
         self.ws_thread.start()
 
     def get_live_price(self, symbol):
+        now = time.time()
+        # Initialize cache variables if they don't exist
+        if not hasattr(self, '_ticker_cache_time'):
+            self._ticker_cache_time = 0
+            self._ticker_cache_data = []
+
         try:
             market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-            res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
-            for coin in res:
+            
+            # MICRO-CACHE: Only hit the API once every 2 seconds to avoid bans
+            if now - self._ticker_cache_time > 2.0:
+                res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=3)
+                if res.status_code == 200:
+                    self._ticker_cache_data = res.json()
+                    self._ticker_cache_time = now
+
+            for coin in self._ticker_cache_data:
                 mkt = coin.get('market', '')
                 if mkt == market_symbol or mkt.upper() == market_symbol.upper():
                     return float(coin['last_price'])
