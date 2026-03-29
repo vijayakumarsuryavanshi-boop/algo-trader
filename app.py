@@ -7184,7 +7184,7 @@ elif st.session_state.page == "dashboard":
         st.rerun()
 
    
-    st.markdown("### 🎯 Live Position Tracker")
+   
 
    st.markdown("### 🎯 Live Position Tracker")
 
