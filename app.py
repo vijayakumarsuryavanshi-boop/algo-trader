@@ -7378,7 +7378,7 @@ st.markdown('<div class="sticky-buttons"></div>', unsafe_allow_html=True)
     # ==========================================
     # ENGINE STATS & GOLDEN ZONE METRICS
     # ==========================================
-    if bot.state.get("latest_data") is not None:
+if bot.state.get("latest_data") is not None:
         # Safely extract fib data dictionary
         fib = bot.state.get("fib_data", {})
         if not isinstance(fib, dict):
