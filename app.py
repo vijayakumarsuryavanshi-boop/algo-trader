@@ -7309,6 +7309,121 @@ elif st.session_state.page == "dashboard":
 
     live_tracker_ui()
 
+    # ==========================================
+# DAILY HIGH / LOW + MAJOR S&R + GOLDEN ZONE (Fixed & Animated)
+# ==========================================
+
+st.markdown("### 📊 Today's Key Levels")
+
+latest_df = bot.state.get("latest_data")
+
+if isinstance(latest_df, pd.DataFrame) and not latest_df.empty:
+    df_today = latest_df.copy()
+    
+    # Daily High & Low
+    daily_high = float(df_today['high'].max())
+    daily_low  = float(df_today['low'].min())
+    
+    # Major Support & Resistance
+    major_res, major_sup = TechnicalAnalyzer.get_support_resistance(df_today, lookback=20)
+    
+    # Golden Zone (Fib 61.8% - 65%)
+    if len(df_today) >= 30:
+        swing_high = df_today['high'].rolling(50).max().iloc[-1]
+        swing_low  = df_today['low'].rolling(50).min().iloc[-1]
+        diff = swing_high - swing_low
+        golden_high = swing_high - (diff * 0.618)
+        golden_low  = swing_high - (diff * 0.650)
+    else:
+        golden_high = golden_low = daily_high  # fallback
+
+    # Beautiful Animated Cards
+    st.markdown("""
+    <style>
+    .key-levels-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin: 15px 0 30px 0;
+    }
+    .level-card {
+        background: linear-gradient(135deg, #1e293b, #334155);
+        color: white;
+        padding: 20px;
+        border-radius: 18px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        text-align: center;
+        transition: all 0.4s ease;
+        animation: floatLevel 3s ease-in-out infinite;
+    }
+    .level-card:hover {
+        transform: translateY(-8px) scale(1.05);
+        box-shadow: 0 20px 40px rgba(59,130,246,0.6);
+    }
+    @keyframes floatLevel {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-6px); }
+    }
+    .golden-card {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        animation: goldenPulse 2.2s ease-in-out infinite;
+    }
+    @keyframes goldenPulse {
+        0%, 100% { box-shadow: 0 0 15px #fbbf24; }
+        50% { box-shadow: 0 0 40px #f59e0b; }
+    }
+    .level-label { font-size: 0.9rem; font-weight: 700; opacity: 0.95; letter-spacing: 1px; }
+    .level-value { font-size: 1.9rem; font-weight: 800; margin: 8px 0; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="key-levels-grid">', unsafe_allow_html=True)
+
+    # Daily High
+    st.markdown(f"""
+        <div class="level-card">
+            <div class="level-label">📈 DAILY HIGH</div>
+            <div class="level-value">{daily_high:.2f}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Daily Low
+    st.markdown(f"""
+        <div class="level-card">
+            <div class="level-label">📉 DAILY LOW</div>
+            <div class="level-value">{daily_low:.2f}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Major Support
+    st.markdown(f"""
+        <div class="level-card">
+            <div class="level-label">🛡️ MAJOR SUPPORT</div>
+            <div class="level-value">{major_sup:.2f if major_sup else '—'}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Major Resistance
+    st.markdown(f"""
+        <div class="level-card">
+            <div class="level-label">🚧 MAJOR RESISTANCE</div>
+            <div class="level-value">{major_res:.2f if major_res else '—'}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Golden Zone (Special Animation)
+    st.markdown(f"""
+        <div class="level-card golden-card">
+            <div class="level-label">✨ GOLDEN ZONE</div>
+            <div class="level-value">{golden_low:.2f} — {golden_high:.2f}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+else:
+    st.info("⏳ Waiting for live market data to calculate key levels...")
+
     st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
     col_exit, col_protect = st.columns(2)
     with col_exit:
