@@ -7315,44 +7315,56 @@ elif st.session_state.page == "dashboard":
 
 st.markdown("### 📊 Today's Key Levels")
 
+# Assuming 'bot' is already initialized in your session state
 latest_df = bot.state.get("latest_data")
 
 if isinstance(latest_df, pd.DataFrame) and not latest_df.empty:
+    import pandas as pd
     df_today = latest_df.copy()
     
-    # Daily High & Low
+    # 1. Daily High & Low
     daily_high = float(df_today['high'].max())
     daily_low  = float(df_today['low'].min())
     
-    # Major Support & Resistance
+    # 2. Major Support & Resistance (Safe Fetch)
     major_res, major_sup = TechnicalAnalyzer.get_support_resistance(df_today, lookback=20)
     
-    # Golden Zone (Fib 61.8% - 65%)
-    if len(df_today) >= 30:
-        swing_high = df_today['high'].rolling(50).max().iloc[-1]
-        swing_low  = df_today['low'].rolling(50).min().iloc[-1]
+    # 3. Golden Zone (Safe Rolling Window Calculation to prevent NaN)
+    actual_lookback = min(50, len(df_today))
+    if actual_lookback >= 2:
+        swing_high = float(df_today['high'].rolling(actual_lookback).max().iloc[-1])
+        swing_low  = float(df_today['low'].rolling(actual_lookback).min().iloc[-1])
+        
+        # If rolling fails due to index limits, fallback to daily high/low
+        if pd.isna(swing_high): swing_high = daily_high
+        if pd.isna(swing_low): swing_low = daily_low
+        
         diff = swing_high - swing_low
         golden_high = swing_high - (diff * 0.618)
         golden_low  = swing_high - (diff * 0.650)
     else:
-        golden_high = golden_low = daily_high  # fallback
+        golden_high = daily_high
+        golden_low = daily_low
 
-    # Safe string conversion for None values
-    major_sup_str = f"{major_sup:.2f}" if major_sup is not None else "—"
-    major_res_str = f"{major_res:.2f}" if major_res is not None else "—"
-    golden_low_str = f"{golden_low:.2f}"
-    golden_high_str = f"{golden_high:.2f}"
+    # 4. Safe String Formatting (Fixes NoneType Errors)
+    major_sup_str = f"{major_sup:.2f}" if pd.notna(major_sup) and major_sup is not None else "—"
+    major_res_str = f"{major_res:.2f}" if pd.notna(major_res) and major_res is not None else "—"
+    
+    # Golden Zone format (always High - Low order)
+    gz_top = max(golden_high, golden_low)
+    gz_bot = min(golden_high, golden_low)
+    golden_zone_str = f"{gz_bot:.2f} — {gz_top:.2f}"
 
-    # Beautiful Animated Cards
-    st.markdown("""
+    # 5. SINGLE Markdown Block (Fixes the Streamlit Grid Crash)
+    st.markdown(f"""
     <style>
-    .key-levels-grid {
+    .key-levels-grid {{
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         gap: 16px;
         margin: 15px 0 30px 0;
-    }
-    .level-card {
+    }}
+    .level-card {{
         background: linear-gradient(135deg, #1e293b, #334155);
         color: white;
         padding: 20px;
@@ -7361,75 +7373,58 @@ if isinstance(latest_df, pd.DataFrame) and not latest_df.empty:
         text-align: center;
         transition: all 0.4s ease;
         animation: floatLevel 3s ease-in-out infinite;
-    }
-    .level-card:hover {
+    }}
+    .level-card:hover {{
         transform: translateY(-8px) scale(1.05);
         box-shadow: 0 20px 40px rgba(59,130,246,0.6);
-    }
-    @keyframes floatLevel {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-6px); }
-    }
-    .golden-card {
+    }}
+    @keyframes floatLevel {{
+        0%, 100% {{ transform: translateY(0); }}
+        50% {{ transform: translateY(-6px); }}
+    }}
+    .golden-card {{
         background: linear-gradient(135deg, #f59e0b, #d97706);
         animation: goldenPulse 2.2s ease-in-out infinite;
-    }
-    @keyframes goldenPulse {
-        0%, 100% { box-shadow: 0 0 15px #fbbf24; }
-        50% { box-shadow: 0 0 40px #f59e0b; }
-    }
-    .level-label { font-size: 0.9rem; font-weight: 700; opacity: 0.95; letter-spacing: 1px; }
-    .level-value { font-size: 1.9rem; font-weight: 800; margin: 8px 0; }
+    }}
+    @keyframes goldenPulse {{
+        0%, 100% {{ box-shadow: 0 0 15px rgba(251, 191, 36, 0.4); }}
+        50% {{ box-shadow: 0 0 30px rgba(245, 158, 11, 0.8); }}
+    }}
+    .level-label {{ font-size: 0.9rem; font-weight: 700; opacity: 0.95; letter-spacing: 1px; margin-bottom: 5px; }}
+    .level-value {{ font-size: 1.6rem; font-weight: 900; margin: 8px 0; }}
     </style>
-    """, unsafe_allow_html=True)
 
-    st.markdown('<div class="key-levels-grid">', unsafe_allow_html=True)
-
-    # Daily High
-    st.markdown(f"""
-        <div class="level-card">
+    <div class="key-levels-grid">
+        <div class="level-card" style="border-bottom: 4px solid #4ade80;">
             <div class="level-label">📈 DAILY HIGH</div>
             <div class="level-value">{daily_high:.2f}</div>
         </div>
-    """, unsafe_allow_html=True)
 
-    # Daily Low
-    st.markdown(f"""
-        <div class="level-card">
+        <div class="level-card" style="border-bottom: 4px solid #f87171;">
             <div class="level-label">📉 DAILY LOW</div>
             <div class="level-value">{daily_low:.2f}</div>
         </div>
-    """, unsafe_allow_html=True)
 
-    # Major Support
-    st.markdown(f"""
         <div class="level-card">
             <div class="level-label">🛡️ MAJOR SUPPORT</div>
-            <div class="level-value">{major_sup_str}</div>
+            <div class="level-value" style="color: #4ade80;">{major_sup_str}</div>
         </div>
-    """, unsafe_allow_html=True)
 
-    # Major Resistance
-    st.markdown(f"""
         <div class="level-card">
             <div class="level-label">🚧 MAJOR RESISTANCE</div>
-            <div class="level-value">{major_res_str}</div>
+            <div class="level-value" style="color: #f87171;">{major_res_str}</div>
         </div>
-    """, unsafe_allow_html=True)
 
-    # Golden Zone
-    st.markdown(f"""
-        <div class="level-card golden-card">
-            <div class="level-label">✨ GOLDEN ZONE</div>
-            <div class="level-value">{golden_low_str} — {golden_high_str}</div>
+        <div class="level-card golden-card" style="grid-column: span 2;">
+            <div class="level-label">✨ GOLDEN ZONE (0.618 - 0.65)</div>
+            <div class="level-value">{golden_zone_str}</div>
         </div>
+    </div>
     """, unsafe_allow_html=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 else:
     st.info("⏳ Waiting for live market data to calculate key levels...")
-
+    
     st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
     col_exit, col_protect = st.columns(2)
     with col_exit:
