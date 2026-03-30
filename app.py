@@ -7329,60 +7329,7 @@ elif st.session_state.page == "dashboard":
             disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
         )
     st.markdown('</div>', unsafe_allow_html=True)
-    # --- MARKET STRUCTURE BOX ---
-df_latest = bot.state.get("latest_data")
-fib = bot.state.get("fib_data", {})
-
-if df_latest is not None and not df_latest.empty:
-    # 1. Gather the data from your state
-    curr_spot = bot.state.get('spot', 0.0)
-    d_high = df_latest['high'].max()
-    d_low = df_latest['low'].min()
-    m_res = fib.get('major_high', 0.0)
-    gz_h = fib.get('fib_high', 0.0)
-    gz_l = fib.get('fib_low', 0.0)
-    m_sup = fib.get('major_low', 0.0)
-
-    # 2. Render using unsafe_allow_html=True
-    st.markdown(f"""
-    <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); font-family: sans-serif;">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 15px; margin-bottom: 20px;">
-            <div style="color: #e2e8f0; font-weight: 800; font-size: 1.1rem; letter-spacing: 1px;">🗺️ MARKET STRUCTURE</div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <span style="color: #94a3b8; font-size: 0.8rem; font-weight: bold; text-transform: uppercase;">Current Price</span>
-                <div style="color: #000; background: #eab308; padding: 6px 16px; border-radius: 8px; font-weight: 900; font-size: 1.3rem; box-shadow: 0 0 15px rgba(234, 179, 8, 0.4);">
-                    ₹ {curr_spot:,.2f}
-                </div>
-            </div>
-        </div>
-        <div style="display: flex; justify-content: space-between; background: #1e293b; padding: 12px; border-radius: 10px; margin-bottom: 20px;">
-            <div style="text-align: center; flex: 1;">
-                <div style="color: #64748b; font-size: 0.75rem; font-weight: 800; text-transform: uppercase;">Daily High</div>
-                <div style="color: #4ade80; font-weight: 700; font-size: 1.1rem;">{d_high:,.2f}</div>
-            </div>
-            <div style="text-align: center; flex: 1; border-left: 1px solid #334155;">
-                <div style="color: #64748b; font-size: 0.75rem; font-weight: 800; text-transform: uppercase;">Daily Low</div>
-                <div style="color: #f87171; font-weight: 700; font-size: 1.1rem;">{d_low:,.2f}</div>
-            </div>
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 15px;">
-            <div style="background: rgba(248, 113, 113, 0.05); padding: 15px; border-radius: 12px; text-align: center; border-top: 3px solid #f87171;">
-                <div style="color: #f87171; font-size: 0.75rem; font-weight: 800; margin-bottom: 5px;">MAJOR RES</div>
-                <div style="color: #f8fafc; font-weight: bold; font-size: 1.2rem;">{m_res:,.2f}</div>
-            </div>
-            <div style="background: rgba(234, 179, 8, 0.1); padding: 15px; border-radius: 12px; text-align: center; border: 1px solid rgba(234, 179, 8, 0.3); box-shadow: 0 0 15px rgba(234, 179, 8, 0.1);">
-                <div style="color: #eab308; font-size: 0.8rem; font-weight: bold; margin-bottom: 5px;">✨ GOLDEN ZONE</div>
-                <div style="color: #f8fafc; font-weight: bold; font-size: 1.3rem;">{gz_h:,.2f} <span style="color:#64748b;">—</span> {gz_l:,.2f}</div>
-            </div>
-            <div style="background: rgba(74, 222, 128, 0.05); padding: 15px; border-radius: 12px; text-align: center; border-top: 3px solid #4ade80;">
-                <div style="color: #4ade80; font-size: 0.75rem; font-weight: 800; margin-bottom: 5px;">MAJOR SUP</div>
-                <div style="color: #f8fafc; font-weight: bold; font-size: 1.2rem;">{m_sup:,.2f}</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-        except Exception as e:
-            bot.log(f"⚠️ Market Box rendering error: {str(e)}")
+    
    
 
     
