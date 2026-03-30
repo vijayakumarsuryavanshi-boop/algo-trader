@@ -7309,7 +7309,7 @@ elif st.session_state.page == "dashboard":
 
     live_tracker_ui()
 
-    # ==========================================
+   # ==========================================
 # DAILY HIGH / LOW + MAJOR S&R + GOLDEN ZONE (Fixed & Animated)
 # ==========================================
 
@@ -7336,6 +7336,12 @@ if isinstance(latest_df, pd.DataFrame) and not latest_df.empty:
         golden_low  = swing_high - (diff * 0.650)
     else:
         golden_high = golden_low = daily_high  # fallback
+
+    # Safe string conversion for None values
+    major_sup_str = f"{major_sup:.2f}" if major_sup is not None else "—"
+    major_res_str = f"{major_res:.2f}" if major_res is not None else "—"
+    golden_low_str = f"{golden_low:.2f}"
+    golden_high_str = f"{golden_high:.2f}"
 
     # Beautiful Animated Cards
     st.markdown("""
@@ -7399,7 +7405,7 @@ if isinstance(latest_df, pd.DataFrame) and not latest_df.empty:
     st.markdown(f"""
         <div class="level-card">
             <div class="level-label">🛡️ MAJOR SUPPORT</div>
-            <div class="level-value">{major_sup:.2f if major_sup else '—'}</div>
+            <div class="level-value">{major_sup_str}</div>
         </div>
     """, unsafe_allow_html=True)
 
@@ -7407,15 +7413,15 @@ if isinstance(latest_df, pd.DataFrame) and not latest_df.empty:
     st.markdown(f"""
         <div class="level-card">
             <div class="level-label">🚧 MAJOR RESISTANCE</div>
-            <div class="level-value">{major_res:.2f if major_res else '—'}</div>
+            <div class="level-value">{major_res_str}</div>
         </div>
     """, unsafe_allow_html=True)
 
-    # Golden Zone (Special Animation)
+    # Golden Zone
     st.markdown(f"""
         <div class="level-card golden-card">
             <div class="level-label">✨ GOLDEN ZONE</div>
-            <div class="level-value">{golden_low:.2f} — {golden_high:.2f}</div>
+            <div class="level-value">{golden_low_str} — {golden_high_str}</div>
         </div>
     """, unsafe_allow_html=True)
 
