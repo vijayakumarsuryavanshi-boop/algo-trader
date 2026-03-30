@@ -7193,7 +7193,9 @@ elif st.session_state.page == "dashboard":
             live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
             if live_ltp:
                 t['current_ltp'] = live_ltp
-                if t['type'] in ["SELL", "PE"]:
+                long_types = ["BUY", "CE", "PE", "LONG"]
+                short_types = ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]
+                if t['type'] in short_types:
                     t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
                 else:
                     t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
