@@ -606,6 +606,9 @@ def get_market_status(asset_name):
 # ==========================================
 # DATABASE FUNCTIONS
 # ==========================================
+# ==========================================
+# DATABASE FUNCTIONS
+# ==========================================
 def get_user_hash(user_id):
     if not user_id: return "guest"
     return hashlib.md5(user_id.encode()).hexdigest()[:8]
@@ -615,7 +618,7 @@ def load_creds(user_id):
     if HAS_DB:
         try:
             res = supabase.table("user_credentials").select("*").eq("user_id", user_id).execute()
-            if res.data: 
+            if res.data and len(res.data) > 0: 
                 return res.data
         except Exception as e:
             st.toast(f"DB Load Error: {e}")
@@ -623,7 +626,7 @@ def load_creds(user_id):
         "user_id": user_id, "angel_api": "", "client_id": "", "pwd": "", "totp_secret": "", 
         "tg_token": "", "tg_chat": "", "wa_phone": "", "wa_api": "", 
         "mt5_acc": "", "mt5_pass": "", "mt5_server": "", "mt5_api_url": "",
-        "zerodha_api": "", "zerodha_secret": "", "coindcx_api": "", "coindcx_secret": "",
+        "zerodha_api": "", "zerodha_secret": "", "request_token": "", "coindcx_api": "", "coindcx_secret": "",
         "delta_api": "", "delta_secret": "", "tg_bot_token": "", "tg_allowed_users": "",
         "fyers_client_id": "", "fyers_secret": "", "fyers_token": "",
         "upstox_api_key": "", "upstox_api_secret": "", "upstox_access_token": "",
@@ -660,63 +663,26 @@ def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_cha
                groww_api_key="", groww_secret=""):
     if HAS_DB:
         data = {
-            "user_id": user_id,
-            "angel_api": angel_api,
-            "client_id": client_id,
-            "pwd": pwd,
-            "totp_secret": totp_secret,
-            "tg_token": tg_token,
-            "tg_chat": tg_chat,
-            "wa_phone": wa_phone,
-            "wa_api": wa_api,
-            "mt5_acc": mt5_acc,
-            "mt5_pass": mt5_pass,
-            "mt5_server": mt5_server,
-            "mt5_api_url": mt5_api_url,
-            "zerodha_api": zerodha_api,
-            "zerodha_secret": zerodha_secret,
-            "coindcx_api": coindcx_api,
-            "coindcx_secret": coindcx_secret,
-            "delta_api": delta_api,
-            "delta_secret": delta_secret,
-            "tg_bot_token": tg_bot_token,
-            "tg_allowed_users": tg_allowed_users,
-            "fyers_client_id": fyers_client_id,
-            "fyers_secret": fyers_secret,
-            "fyers_token": fyers_token,
-            "upstox_api_key": upstox_api_key,
-            "upstox_api_secret": upstox_api_secret,
-            "upstox_access_token": upstox_access_token,
-            "fivepaisa_client_id": fivepaisa_client_id,
-            "fivepaisa_secret": fivepaisa_secret,
-            "fivepaisa_access_token": fivepaisa_access_token,
-            "binance_api_key": binance_api_key,
-            "binance_api_secret": binance_api_secret,
-            "binance_testnet": binance_testnet,
-            "stoxkart_api_key": stoxkart_api_key,
-            "stoxkart_secret": stoxkart_secret,
-            "dhan_client_id": dhan_client_id,
-            "dhan_access_token": dhan_access_token,
-            "shoonya_user": shoonya_user,
-            "shoonya_password": shoonya_password,
-            "shoonya_totp": shoonya_totp,
-            "icici_api_key": icici_api_key,
-            "icici_secret": icici_secret,
-            "icici_consumer_key": icici_consumer_key,
-            "kotak_api_key": kotak_api_key,
-            "kotak_secret": kotak_secret,
-            "indmoney_api_key": indmoney_api_key,
-            "indmoney_secret": indmoney_secret,
-            "groww_api_key": groww_api_key,
-            "groww_secret": groww_secret,
-            "email_smtp_server": email_smtp_server,
-            "email_port": email_port,
-            "email_username": email_username,
-            "email_password": email_password,
-            "email_recipients": email_recipients,
-            "fcm_server_key": fcm_server_key,
-            "push_enabled": push_enabled,
-            "role": role
+            "user_id": user_id, "angel_api": angel_api, "client_id": client_id, "pwd": pwd, "totp_secret": totp_secret,
+            "tg_token": tg_token, "tg_chat": tg_chat, "wa_phone": wa_phone, "wa_api": wa_api,
+            "mt5_acc": mt5_acc, "mt5_pass": mt5_pass, "mt5_server": mt5_server, "mt5_api_url": mt5_api_url,
+            "zerodha_api": zerodha_api, "zerodha_secret": zerodha_secret,
+            "coindcx_api": coindcx_api, "coindcx_secret": coindcx_secret,
+            "delta_api": delta_api, "delta_secret": delta_secret,
+            "tg_bot_token": tg_bot_token, "tg_allowed_users": tg_allowed_users,
+            "fyers_client_id": fyers_client_id, "fyers_secret": fyers_secret, "fyers_token": fyers_token,
+            "upstox_api_key": upstox_api_key, "upstox_api_secret": upstox_api_secret, "upstox_access_token": upstox_access_token,
+            "fivepaisa_client_id": fivepaisa_client_id, "fivepaisa_secret": fivepaisa_secret, "fivepaisa_access_token": fivepaisa_access_token,
+            "binance_api_key": binance_api_key, "binance_api_secret": binance_api_secret, "binance_testnet": binance_testnet,
+            "stoxkart_api_key": stoxkart_api_key, "stoxkart_secret": stoxkart_secret,
+            "dhan_client_id": dhan_client_id, "dhan_access_token": dhan_access_token,
+            "shoonya_user": shoonya_user, "shoonya_password": shoonya_password, "shoonya_totp": shoonya_totp,
+            "icici_api_key": icici_api_key, "icici_secret": icici_secret, "icici_consumer_key": icici_consumer_key,
+            "kotak_api_key": kotak_api_key, "kotak_secret": kotak_secret,
+            "indmoney_api_key": indmoney_api_key, "indmoney_secret": indmoney_secret,
+            "groww_api_key": groww_api_key, "groww_secret": groww_secret,
+            "email_smtp_server": email_smtp_server, "email_port": email_port, "email_username": email_username, "email_password": email_password, "email_recipients": email_recipients,
+            "fcm_server_key": fcm_server_key, "push_enabled": push_enabled, "role": role
         }
         try:
             supabase.table("user_credentials").upsert(data, on_conflict='user_id').execute()
@@ -6252,11 +6218,18 @@ elif st.session_state.page == "login":
                 USER_ID = st.text_input("Enter Email ID or Phone Number", value=st.session_state.user_id)
                 keep_signed = st.checkbox("Keep me signed in (auto‑login using URL)", value=True)
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("👆 Authenticate & Connect", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
+                
+                if st.button("👆 Authenticate & Connect", type="primary", use_container_width=True, on_click=lambda: trigger_click_sound("click")):
                     if is_user_blocked(USER_ID):
                         st.error("Your account has been blocked. Please contact support.")
                     else:
                         creds = load_creds(USER_ID)
+                        
+                        # 🛡️ BULLETPROOF DICTIONARY FALLBACK
+                        if not isinstance(creds, dict):
+                            creds = {}
+                            
+                        # Now creds.get() will ALWAYS work without crashing!
                         if creds and (creds.get("client_id") or creds.get("zerodha_api") or creds.get("coindcx_api") or creds.get("delta_api") or creds.get("fyers_client_id") or creds.get("upstox_api_key") or creds.get("fivepaisa_client_id") or creds.get("binance_api_key") or creds.get("stoxkart_api_key") or creds.get("dhan_client_id") or creds.get("shoonya_user") or creds.get("icici_api_key") or creds.get("kotak_api_key") or creds.get("indmoney_api_key") or creds.get("groww_api_key")):
                             temp_bot = SniperBot(
                                 api_key=creds.get("angel_api", ""), client_id=creds.get("client_id", ""), pwd=creds.get("pwd", ""), totp_secret=creds.get("totp_secret", ""),
@@ -6277,6 +6250,7 @@ elif st.session_state.page == "login":
                                 email_username=creds.get("email_username", ""), email_password=creds.get("email_password", ""), email_recipients=creds.get("email_recipients", ""),
                                 fcm_server_key=creds.get("fcm_server_key", ""), push_enabled=creds.get("push_enabled", False)
                             )
+                            
                             # Add Kotak, IndMoney, Groww settings from saved credentials
                             temp_bot.settings["kotak_api_key"] = creds.get("kotak_api_key", "")
                             temp_bot.settings["kotak_secret"] = creds.get("kotak_secret", "")
