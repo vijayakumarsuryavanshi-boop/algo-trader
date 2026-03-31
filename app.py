@@ -6310,12 +6310,21 @@ elif st.session_state.page == "login":
                 if is_user_blocked(USER_ID):
                     st.error("Your account has been blocked. Please contact support.")
                 else:
+                    # 1. Fetch credentials
                     creds = load_creds(USER_ID) if USER_ID else {}
+                    
+                    # 2. BULLETPROOF FALLBACK: If creds is None, force it to be an empty dictionary!
+                    if not isinstance(creds, dict):
+                        creds = {}
+                        
                     st.markdown("### 🏦 Select Brokers to Connect")
+                    
                     # Angel One
                     with st.container(border=True):
-                        col_img, col_t = st.columns([1, 6])
+                        col_img, col_t = st.columns()
                         with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
+                        
+                        # Now creds.get() will ALWAYS work safely!
                         with col_t: use_angel = st.toggle("Angel One India", value=bool(creds.get("client_id")))
                         if use_angel:
                             ANGEL_API = st.text_input("Angel API Key", value=creds.get("angel_api", ""))
