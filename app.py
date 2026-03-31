@@ -6321,7 +6321,7 @@ elif st.session_state.page == "login":
                     
                     # Angel One
                     with st.container(border=True):
-                        col_img, col_t = st.columns()
+                        col_img, col_t = st.columns([1, 6])
                         with col_img: st.image("https://www.google.com/s2/favicons?domain=angelone.in&sz=128", width=40)
                         
                         # Now creds.get() will ALWAYS work safely!
