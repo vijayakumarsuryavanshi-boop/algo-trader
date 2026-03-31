@@ -616,7 +616,7 @@ def load_creds(user_id):
         try:
             res = supabase.table("user_credentials").select("*").eq("user_id", user_id).execute()
             if res.data: 
-                return res.data[0]
+                return res.data
         except Exception as e:
             st.toast(f"DB Load Error: {e}")
     return {
@@ -632,6 +632,10 @@ def load_creds(user_id):
         "stoxkart_api_key": "", "stoxkart_secret": "",
         "dhan_client_id": "", "dhan_access_token": "",
         "shoonya_user": "", "shoonya_password": "", "shoonya_totp": "",
+        "icici_api_key": "", "icici_secret": "", "icici_consumer_key": "",
+        "kotak_api_key": "", "kotak_secret": "",
+        "indmoney_api_key": "", "indmoney_secret": "",
+        "groww_api_key": "", "groww_secret": "",
         "email_smtp_server": "", "email_port": 587, "email_username": "", "email_password": "", "email_recipients": "",
         "fcm_server_key": "", "push_enabled": False,
         "role": "trader",
@@ -648,8 +652,12 @@ def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_cha
                stoxkart_api_key, stoxkart_secret,
                dhan_client_id, dhan_access_token,
                shoonya_user, shoonya_password, shoonya_totp,
+               icici_api_key, icici_secret, icici_consumer_key,
                email_smtp_server, email_port, email_username, email_password, email_recipients,
-               fcm_server_key, push_enabled, role):
+               fcm_server_key, push_enabled, role,
+               kotak_api_key="", kotak_secret="",
+               indmoney_api_key="", indmoney_secret="",
+               groww_api_key="", groww_secret=""):
     if HAS_DB:
         data = {
             "user_id": user_id,
@@ -692,6 +700,15 @@ def save_creds(user_id, angel_api, client_id, pwd, totp_secret, tg_token, tg_cha
             "shoonya_user": shoonya_user,
             "shoonya_password": shoonya_password,
             "shoonya_totp": shoonya_totp,
+            "icici_api_key": icici_api_key,
+            "icici_secret": icici_secret,
+            "icici_consumer_key": icici_consumer_key,
+            "kotak_api_key": kotak_api_key,
+            "kotak_secret": kotak_secret,
+            "indmoney_api_key": indmoney_api_key,
+            "indmoney_secret": indmoney_secret,
+            "groww_api_key": groww_api_key,
+            "groww_secret": groww_secret,
             "email_smtp_server": email_smtp_server,
             "email_port": email_port,
             "email_username": email_username,
