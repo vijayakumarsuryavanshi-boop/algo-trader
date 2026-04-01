@@ -7357,12 +7357,32 @@ elif st.session_state.page == "dashboard":
     from urllib.parse import quote
     tv_target_encoded = quote(tv_target)
 
-    # 4. Build the iframe with the encoded symbol and appropriate attributes
+   # 4. Build the Advanced TradingView Widget with Search & Login capabilities
     tradingview_html = f"""
-    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tv_chart&symbol={tv_target_encoded}&interval=5&theme=dark&timezone=Asia/Kolkata&symboledit=1&saveimage=0&toolbarbg=f1f3f6&studies=[]"
-        style="width:100%; height:500px; border:none; border-radius:12px;"
-        allow="autoplay; encrypted-media; fullscreen">
-    </iframe>
+    <div class="tradingview-widget-container" style="height:100%; width:100%;">
+      <div id="tradingview_{tv_target_encoded}" style="height:500px; width:100%;"></div>
+      <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget(
+      {{
+        "autosize": true,
+        "symbol": "{tv_target}",
+        "interval": "5",
+        "timezone": "Asia/Kolkata",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "enable_publishing": false,
+        "backgroundColor": "rgba(15, 23, 42, 1)",
+        "gridColor": "rgba(255, 255, 255, 0.06)",
+        "allow_symbol_change": true,     "save_image": false,
+        "details": true,                 "hotlist": true,                 "hide_side_toolbar": false,      "show_popup_button": true,       "popup_width": "1000",
+        "popup_height": "650",
+        "container_id": "tradingview_{tv_target_encoded}"
+      }}
+      );
+      </script>
+    </div>
     """
     st.components.v1.html(tradingview_html, height=520)
     
