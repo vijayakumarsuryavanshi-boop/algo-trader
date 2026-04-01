@@ -7337,6 +7337,47 @@ elif st.session_state.page == "dashboard":
             disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
         )
     st.markdown('</div>', unsafe_allow_html=True)
+
+    # ------------------ TRADINGVIEW CHART ------------------
+    st.markdown("### 📈 TradingView Chart")
+    
+    # 1. Map standard app symbols to TradingView's required format
+    TV_SYMBOLS = {
+        "NIFTY": "NSE:NIFTY",
+        "BANKNIFTY": "NSE:BANKNIFTY",
+        "SENSEX": "BSE:SENSEX",
+        "FINNIFTY": "NSE:FINNIFTY",
+        "INDIA VIX": "NSE:INDIAVIX",
+        "CRUDEOIL": "MCX:CRUDEOIL1!",
+        "NATURALGAS": "MCX:NATURALGAS1!",
+        "GOLD": "MCX:GOLD1!",
+        "SILVER": "MCX:SILVER1!",
+        "XAUUSD": "OANDA:XAUUSD",
+        "EURUSD": "FX:EURUSD",
+        "BTCUSD": "BINANCE:BTCUSDT",
+        "ETHUSD": "BINANCE:ETHUSDT",
+        "SOLUSD": "BINANCE:SOLUSDT"
+    }
+
+    # 2. Safely format custom or crypto symbols
+    tv_target = INDEX
+    if tv_target in TV_SYMBOLS:
+        tv_target = TV_SYMBOLS[tv_target]
+    elif "USD" in tv_target or "USDT" in tv_target:
+        # Format unknown crypto dynamically for Binance
+        base = tv_target.replace('USDT', '').replace('USD', '')
+        tv_target = f"BINANCE:{base}USDT"
+    elif tv_target not in ["NIFTY", "BANKNIFTY", "SENSEX"] and ":" not in tv_target:
+        # Assume it's a standard Indian Equity (e.g., RELIANCE -> NSE:RELIANCE)
+        clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
+        tv_target = f"NSE:{clean_stock}"
+
+    # 3. Inject the correct symbol into the iframe
+    tradingview_html = f"""
+    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tv_chart&symbol={tv_target}&interval=5&theme=dark&timezone=Asia/Kolkata"
+        style="width:100%; height:500px; border:none; border-radius:12px;"></iframe>
+    """
+    st.components.v1.html(tradingview_html, height=520)
     
    
 
