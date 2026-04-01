@@ -4585,9 +4585,22 @@ class SniperBot:
 
     def get_token_info(self, index_name):
         if index_name in COMMODITIES:
-            return "MCX", "21181"
-        if index_name in ["XAUUSD", "BTCUSD", "ETHUSD"] and self.is_mt5_connected:
-            return "MT5", index_name
+            # 🚨 FIX: Dynamically fetch the current active MCX Futures contract token!
+            if self.api:
+                df = self.get_master()
+                if df is not None and not df.empty:
+                    today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
+                    # Look for Futures contract expiring in the future
+                    subset = df[(df['name'] == index_name) & (df['exch_seg'] == 'MCX') & (df['symbol'].str.endswith('FUT')) & (df['expiry'] >= today)]
+                    if not subset.empty:
+                        closest = subset.loc[subset['expiry'].idxmin()]
+                        return "MCX", str(closest['token'])
+            return "MCX", "21181" # Fallback if master fails
+            
+        # 🚨 FIX: Ensure Forex pairs are routed correctly even without MT5
+        if index_name in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"]:
+            return "MT5" if self.is_mt5_connected else "FX", index_name
+            
         if self.settings.get("primary_broker") == "CoinDCX":
             return "COINDCX", index_name
         if self.settings.get("primary_broker") == "Stoxkart":
@@ -4647,7 +4660,14 @@ class SniperBot:
             try:
                 df = yf.Ticker(YF_TICKERS[symbol]).history(period="1d", interval="1m")
                 if not df.empty:
-                    return float(df['Close'].iloc[-1])
+                    price = float(df['Close'].iloc[-1])
+                    # 🚨 Convert live tracker USD to INR
+                    if symbol in COMMODITIES:
+                        usd_inr_rate = 83.50
+                        if symbol == "GOLD": price *= (usd_inr_rate * 10) / 31.1035
+                        elif symbol == "SILVER": price *= (usd_inr_rate * 1000) / 31.1035
+                        elif symbol in ["CRUDEOIL", "NATURALGAS"]: price *= usd_inr_rate
+                    return price
             except:
                 pass
         return None
@@ -4708,6 +4728,19 @@ class SniperBot:
                 df = yf.Ticker(yf_ticker).history(period=period, interval=yf_int)
                 if not df.empty:
                     df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
+                    
+                    # 🚨 FIX: Convert Yahoo Finance USD prices to Indian MCX INR prices
+                    if symbol in COMMODITIES:
+                        usd_inr_rate = 83.50 # Standard conversion rate
+                        if symbol == "GOLD":
+                            multiplier = (usd_inr_rate * 10) / 31.1035 # USD/TroyOunce to INR/10grams
+                        elif symbol == "SILVER":
+                            multiplier = (usd_inr_rate * 1000) / 31.1035 # USD/TroyOunce to INR/1kg
+                        elif symbol in ["CRUDEOIL", "NATURALGAS"]:
+                            multiplier = usd_inr_rate # USD to INR directly
+                            
+                        df[['open', 'high', 'low', 'close']] = df[['open', 'high', 'low', 'close']] * multiplier
+
                     return df
             except Exception as e:
                 self.log(f"⚠️ YFinance fetch failed for {yf_ticker}: {e}")
@@ -5693,18 +5726,26 @@ class SniperBot:
                                             strike_sym = index
                                             strike_token, strike_exch = token, exch
                                             entry_ltp = spot
-                                    elif is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA", "ICICI"]:
+                                            
+                                    # 🚨 FIX: Force XAUUSD & Forex to trade as Spot/Futures directly, bypassing options chain
+                                    elif is_mt5_asset or index in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"] or exch == "FX":
+                                        strike_sym = index
+                                        strike_token, strike_exch = token, exch
+                                        entry_ltp = spot
+                                        
+                                    # Handle Crypto Futures/Spot and other Equity Brokers
+                                    elif (is_crypto and crypto_mode != "Options") or is_fyers or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA", "ICICI"]:
                                         strike_sym = index
                                         if is_crypto and crypto_mode == "Futures":
                                             if exch == "DELTA" and not strike_sym.endswith("USD"):
                                                 strike_sym = f"{strike_sym}USD"
-                                        strike_token, strike_exch = strike_sym, exch
-                                        entry_ltp = spot
-                                    else:
-                                        if is_hz:
-                                            strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal, otm_gamma_blast=True, premium_threshold=10000)
+                                            strike_token, strike_exch = strike_sym, exch
+                                            entry_ltp = spot
                                         else:
-                                            strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
+                                            if is_hz:
+                                                strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal, otm_gamma_blast=True, premium_threshold=10000)
+                                            else:
+                                                strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
 
                                     if strike_sym and entry_ltp:
                                         if is_mock_mode:
