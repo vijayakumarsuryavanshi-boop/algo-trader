@@ -8207,129 +8207,98 @@ elif st.session_state.page == "tools":
 
 # ==========================================
 # GLOBAL UI ELEMENTS (Visible on Dashboard & Tools)
+# PUT THIS AT THE VERY END OF YOUR SCRIPT
 # ==========================================
 if st.session_state.page in ["dashboard", "tools"]:
-    # ------------------ OPERABLE BOTTOM DOCK ------------------
-    st.markdown("""
-    <style>
-    /* Hide the default empty div we use as an anchor */
-    #operable-dock-anchor { display: none; }
     
-    /* Target the horizontal block containing our anchor and turn it into a floating dock */
-    div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
-        position: fixed;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(255, 255, 255, 0.90);
-        backdrop-filter: blur(15px);
-        -webkit-backdrop-filter: blur(15px);
-        border-radius: 50px;
-        padding: 5px 15px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255,255,255,0.4);
-        z-index: 9999;
-        width: auto;
-        gap: 5px;
-    }
-    
-    /* Dark mode support */
-    @media (prefers-color-scheme: dark) {
+    # We wrap this in a container to safely isolate it from your Tools tabs
+    with st.container():
+        st.markdown("""
+        <style>
+        #operable-dock-anchor { display: none; }
+        
+        /* Strictly target ONLY the block containing this specific anchor */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
-            background: rgba(15, 23, 42, 0.85);
-            border: 1px solid rgba(255,255,255,0.1);
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.90);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border-radius: 50px;
+            padding: 5px 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255,255,255,0.4);
+            z-index: 99999;
+            width: max-content;
+            gap: 10px;
         }
-    }
+        
+        @media (prefers-color-scheme: dark) {
+            div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
+                background: rgba(15, 23, 42, 0.85);
+                border: 1px solid rgba(255,255,255,0.1);
+            }
+        }
+        
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            font-weight: 700 !important;
+            transition: all 0.2s ease !important;
+            border-radius: 30px !important;
+        }
+        
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button:hover {
+            background: rgba(2, 132, 199, 0.2) !important;
+            color: #0284c7 !important;
+            transform: translateY(-2px);
+        }
+        </style>
+        """, unsafe_allow_html=True)
 
-    /* Style the Streamlit buttons inside this dock */
-    div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        font-weight: 700 !important;
-        transition: all 0.2s ease !important;
-        border-radius: 30px !important;
-        color: inherit;
-    }
-    div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button:hover {
-        background: rgba(2, 132, 199, 0.2) !important;
-        color: #0284c7 !important;
-        transform: translateY(-2px);
-    }
-    </style>
-    """, unsafe_allow_html=True)
+        # 4 columns: 3 for buttons, 1 tiny one for the CSS anchor
+        dock_col1, dock_col2, dock_col3, anchor_col = st.columns([1, 1, 1, 0.01])
+        
+        with anchor_col:
+            st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
 
-    # Create the columns that will be styled into the dock
-    dock_col1, dock_col2, dock_col3, anchor_col = st.columns([1, 1, 1, 0.01])
-    
-    with anchor_col:
-        # This hidden div acts as a tracking beacon for our CSS
-        st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
-
-    with dock_col1:
-        # Start Button Logic
-        if st.button("▶️ Start", key="dock_start_btn", disabled=bot.state.get("is_running", False)):
-            bot.state["is_running"] = True
-            bot.state["engine_active"] = True
-            t = threading.Thread(target=bot.trading_loop, daemon=True)
-            add_script_run_ctx(t)
-            t.start()
-            play_sound_now("click")
-            st.rerun()
-            
-    with dock_col2:
-        # Sync Button Logic
-        if st.button("🔄 Sync", key="dock_sync_btn"):
-            play_sound_now("click")
-            st.rerun()
-            
-    with dock_col3:
-        # Exit Button Logic (Disabled if no trades are active)
-        can_exit = bot.state.get("active_trade") is not None or len(bot.state.get("active_trades", [])) > 0
-        if st.button("☠️ Exit", key="dock_exit_btn", disabled=not can_exit):
-            bot.force_exit()
-            play_sound_now("click")
-            st.rerun()
+        with dock_col1:
+            if st.button("▶️ Start", key="dock_start_btn", disabled=bot.state.get("is_running", False)):
+                bot.state["is_running"] = True
+                bot.state["engine_active"] = True
+                t = threading.Thread(target=bot.trading_loop, daemon=True)
+                from streamlit.runtime.scriptrunner import add_script_run_ctx
+                add_script_run_ctx(t)
+                t.start()
+                play_sound_now("click")
+                st.rerun()
+                
+        with dock_col2:
+            if st.button("🔄 Sync", key="dock_sync_btn"):
+                play_sound_now("click")
+                st.rerun()
+                
+        with dock_col3:
+            can_exit = bot.state.get("active_trade") is not None or len(bot.state.get("active_trades", [])) > 0
+            if st.button("☠️ Exit", key="dock_exit_btn", disabled=not can_exit):
+                bot.force_exit()
+                play_sound_now("click")
+                st.rerun()
 
 # ==========================================
 # BACKGROUND QUEUES & AUDIO
 # ==========================================
-# Safely fetch the bot from session state for global execution
 active_bot = st.session_state.get("bot")
-
 if active_bot and getattr(active_bot, "state", None):
     while active_bot.state.get("ui_popups"):
         popup = active_bot.state["ui_popups"].popleft()
-        title = popup['title']
-        msg = popup['message']
-        st.toast(f"{title}: {msg}", icon="🔔")
-        js_notification = f"""
-        <script>
-        function notifyUser() {{
-            if (!("Notification" in window)) {{
-                console.log("This browser does not support desktop notification");
-            }} else if (Notification.permission === "granted") {{
-                new Notification("{title}", {{body: "{msg}", icon: "https://cdn-icons-png.flaticon.com/512/2950/2950133.png"}});
-            }} else if (Notification.permission !== "denied") {{
-                Notification.requestPermission().then(function (permission) {{
-                    if (permission === "granted") {{
-                        new Notification("{title}", {{body: "{msg}", icon: "https://cdn-icons-png.flaticon.com/512/2950/2950133.png"}});
-                    }}
-                }});
-            }}
-        }}
-        notifyUser();
-        </script>
-        """
-        st.components.v1.html(js_notification, height=0)
+        st.toast(f"{popup['title']}: {popup['message']}", icon="🔔")
         
     while active_bot.state.get("sound_queue"):
-        sound = active_bot.state["sound_queue"].popleft()
-        play_sound_ui(sound)
+        play_sound_ui(active_bot.state["sound_queue"].popleft())
 
-# ==========================================
-# PROCESS GLOBAL SOUND QUEUES
-# ==========================================
 if st.session_state.get("sound_queue"):
     while st.session_state.sound_queue:
-        latest_sound = st.session_state.sound_queue.popleft()
-        play_sound_ui(latest_sound)
+        play_sound_ui(st.session_state.sound_queue.popleft())
