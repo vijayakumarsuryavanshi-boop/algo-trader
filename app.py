@@ -7349,51 +7349,56 @@ elif st.session_state.page == "dashboard":
     if tv_target in TV_SYMBOLS:
         tv_target = TV_SYMBOLS[tv_target]
     elif "USD" in tv_target or "USDT" in tv_target:
-        # Format unknown crypto dynamically for Binance
         base = tv_target.replace('USDT', '').replace('USD', '')
         tv_target = f"BINANCE:{base}USDT"
     elif tv_target not in ["NIFTY", "BANKNIFTY", "SENSEX"] and ":" not in tv_target:
-        # Assume it's a standard Indian Equity (e.g., RELIANCE -> NSE:RELIANCE)
         clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
         tv_target = f"NSE:{clean_stock}"
 
-    # 3. URL-encode the symbol but safely KEEP the colon for TradingView
-    from urllib.parse import quote
-    tv_target_encoded = quote(tv_target, safe=':')
-
-    # 4. Build the Advanced TradingView Widget with Search & Login capabilities
+    # 3. Robust HTML wrapper for Streamlit iframe
     tradingview_html = f"""
-    <div class="tradingview-widget-container" style="height:100%; width:100%;">
-      <div id="tv_chart_container" style="height:500px; width:100%;"></div>
-      <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      new TradingView.widget(
-      {{
-        "autosize": true,
-        "symbol": "{tv_target}",
-        "interval": "5",
-        "timezone": "Asia/Kolkata",
-        "theme": "dark",
-        "style": "1",
-        "locale": "en",
-        "enable_publishing": false,
-        "backgroundColor": "rgba(15, 23, 42, 1)",
-        "gridColor": "rgba(255, 255, 255, 0.06)",
-        "allow_symbol_change": true,
-        "save_image": false,
-        "details": true,
-        "hotlist": true,
-        "hide_side_toolbar": false,
-        "show_popup_button": true,
-        "popup_width": "1000",
-        "popup_height": "650",
-        "container_id": "tv_chart_container"
-      }}
-      );
-      </script>
-    </div>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin:0; padding:0; background-color: rgba(15, 23, 42, 1); overflow: hidden;">
+        <div class="tradingview-widget-container" style="height:500px; width:100%;">
+          <div id="tv_chart_container" style="height:100%; width:100%;"></div>
+          <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
+          <script type="text/javascript">
+          new TradingView.widget(
+          {{
+            "width": "100%",
+            "height": 500,
+            "symbol": "{tv_target}",
+            "interval": "5",
+            "timezone": "Asia/Kolkata",
+            "theme": "dark",
+            "style": "1",
+            "locale": "en",
+            "enable_publishing": false,
+            "backgroundColor": "rgba(15, 23, 42, 1)",
+            "gridColor": "rgba(255, 255, 255, 0.06)",
+            "allow_symbol_change": true,
+            "save_image": false,
+            "details": true,
+            "hotlist": true,
+            "hide_side_toolbar": false,
+            "show_popup_button": true,
+            "popup_width": "1000",
+            "popup_height": "650",
+            "container_id": "tv_chart_container"
+          }}
+          );
+          </script>
+        </div>
+    </body>
+    </html>
     """
-    st.components.v1.html(tradingview_html, height=520)
+    
+    # 4. Render with exact height to prevent clipping
+    st.components.v1.html(tradingview_html, height=500)
     
     if st.button("🚀 One‑Tap BUY (Market)", use_container_width=True, on_click=lambda: play_sound_now("click")):
         st.warning("Demo: Order would be placed at market price")
