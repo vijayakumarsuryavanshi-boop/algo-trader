@@ -8244,11 +8244,11 @@ if st.session_state.page in ["dashboard", "tools"]:
             color: #0284c7 !important;
             transform: translateY(-2px);
         }
+        # Ensure st.markdown with triple quotes wraps the CSS
         st.markdown("""
         <style>
         #operable-dock-anchor { display: none; }
         
-        /* THE DOCK CONTAINER */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
             position: fixed;
             bottom: 15px;
@@ -8260,16 +8260,15 @@ if st.session_state.page in ["dashboard", "tools"]:
             padding: 5px 10px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.3);
             z-index: 999999;
-            width: 90% !important; /* Forces width on mobile */
+            width: 90% !important;
             max-width: 320px;
             display: flex !important;
-            flex-direction: row !important; /* Prevents stacking */
+            flex-direction: row !important;
             justify-content: center !important;
             align-items: center !important;
             border: 1px solid rgba(255,255,255,0.1);
         }
         
-        /* FORCE COLUMNS TO STAY SIDE-BY-SIDE */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) > div {
             flex-direction: row !important;
             display: flex !important;
@@ -8277,7 +8276,6 @@ if st.session_state.page in ["dashboard", "tools"]:
             min-width: 0 !important;
         }
 
-        /* BUTTON STYLING - Circular and Small */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
             width: 100% !important;
             height: 45px !important;
@@ -8289,32 +8287,17 @@ if st.session_state.page in ["dashboard", "tools"]:
             color: white !important;
             transition: all 0.2s;
         }
-
-        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button:hover {
-            background: rgba(255,255,255,0.1) !important;
-            transform: scale(1.1);
-        }
-
-        /* Small text labels under icons for clarity if needed */
-        .dock-label {
-            font-size: 10px;
-            display: block;
-            margin-top: -5px;
-        }
         </style>
         """, unsafe_allow_html=True)
 
-        # We use 3 equal columns. The CSS anchor is now moved inside the container 
-        # to ensure the whole block is targeted for the floating horizontal dock.
+        # NOW follow with your button code
         dock_col1, dock_col2, dock_col3 = st.columns()
-        
-        # We place the anchor here so the CSSTargets this specific horizontal block
         st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
 
         with dock_col1:
-            is_running = bot.state.get("is_running", False)
-            # Using small text + icon for a 'compact app' feel
-            if st.button("▶️\nStart", key="mob_start", disabled=is_running, use_container_width=True):
+            if st.button("▶️\nStart", key="mob_start", use_container_width=True):
+                # ... your start logic ...
+                pass
                 bot.state["is_running"] = True
                 bot.state["engine_active"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
