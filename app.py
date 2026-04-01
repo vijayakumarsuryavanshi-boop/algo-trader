@@ -5135,20 +5135,42 @@ class SniperBot:
             try:
                 p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
                 order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
-                exec_price = price if order_type.upper() == "LIMIT" and price else 0.0
-                order_params = {"variety": "NORMAL", "tradingsymbol": str(symbol), "symboltoken": str(token), "transactiontype": str(side.upper()), "exchange": str(exchange.upper()), "ordertype": str(order_type_final), "producttype": str(p_type), "duration": "DAY", "price": float(exec_price), "squareoff": 0.0, "stoploss": 0.0, "quantity": int(float(qty))}
+                
+                # 🛡️ THE FIX: Round the price to the exact NSE Tick Size (0.05)
+                if order_type_final == "LIMIT" and price:
+                    exec_price = round(round(float(price) / 0.05) * 0.05, 2)
+                else:
+                    exec_price = 0.0
+                
+                # 🛡️ THE FIX: Strict string casting and removal of invalid 0.0 parameters
+                order_params = {
+                    "variety": "NORMAL", 
+                    "tradingsymbol": str(symbol), 
+                    "symboltoken": str(token), 
+                    "transactiontype": str(side.upper()), 
+                    "exchange": str(exchange.upper()), 
+                    "ordertype": str(order_type_final), 
+                    "producttype": str(p_type), 
+                    "duration": "DAY", 
+                    "price": str(exec_price),  # Angel strictly prefers strings for prices
+                    "quantity": str(int(float(qty))) # Angel strictly prefers strings for qty
+                }
+                
+                self.log(f"📤 Sending Angel Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
+                
                 if res and isinstance(res, dict) and res.get('status'):
                     o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID')
                     return o_id, None
                 elif isinstance(res, str):
                     return res, None
                 else:
-                    return None, f"Angel validation error: {res}"
+                    # If it returns None again, we will actually see the payload in the logs to debug!
+                    return None, f"API Rejected payload or session expired. Sent: {exec_price}"
             except Exception as e:
                 return None, f"Angel exception: {str(e)}"
+        
         return None, "No broker available"
-
     def start_angel_ws(self):
         def ws_worker():
             while not self._angel_ws_stop.is_set():
