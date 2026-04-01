@@ -7124,6 +7124,61 @@ elif st.session_state.page == "dashboard":
     if not is_mkt_open:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
+    # OHLCV + LIQUIDITY ZONES BOX
+    if bot.state.get("latest_data") is not None and not bot.state["latest_data"].empty:
+        df_ohlcv = bot.state["latest_data"].iloc[-1]
+        # Calculate liquidity zones
+        try:
+            # Get historical data for liquidity calculations
+            hist_data = bot.get_historical_data(exch, token, symbol=INDEX, interval="1d") if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval="1d")
+            if hist_data is not None and not hist_data.empty:
+                prev_day = hist_data.iloc[-2] if len(hist_data) >= 2 else None
+                prev_week = hist_data.iloc[-7] if len(hist_data) >= 7 else None
+                pdc_h = prev_day['high'] if prev_day is not None else df_ohlcv['high']
+                pdc_l = prev_day['low'] if prev_day is not None else df_ohlcv['low']
+                weekly_high = hist_data['high'].rolling(5).max().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['high']
+                weekly_low = hist_data['low'].rolling(5).min().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['low']
+                # Simple order block detection: recent swing high/low
+                swings = hist_data[['high', 'low']].tail(20)
+                order_block_high = swings['high'].max()
+                order_block_low = swings['low'].min()
+            else:
+                pdc_h = df_ohlcv['high']
+                pdc_l = df_ohlcv['low']
+                weekly_high = df_ohlcv['high']
+                weekly_low = df_ohlcv['low']
+                order_block_high = df_ohlcv['high']
+                order_block_low = df_ohlcv['low']
+        except:
+            pdc_h = df_ohlcv['high']
+            pdc_l = df_ohlcv['low']
+            weekly_high = df_ohlcv['high']
+            weekly_low = df_ohlcv['low']
+            order_block_high = df_ohlcv['high']
+            order_block_low = df_ohlcv['low']
+
+        ohlcv_liquidity_html = f"""
+        <div class="ohlcv-liquidity-box">
+            <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">OPEN</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['open']:.2f}</div></div>
+                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">HIGH</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['high']:.2f}</div></div>
+                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">LOW</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['low']:.2f}</div></div>
+                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">CLOSE</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['close']:.2f}</div></div>
+                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">VOLUME</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{int(df_ohlcv['volume']):,}</div></div>
+            </div>
+            <div class="liquidity-grid">
+                <div class="liquidity-item"><div class="liquidity-label">PD High</div><div class="liquidity-value">{pdc_h:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">PD Low</div><div class="liquidity-value">{pdc_l:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Weekly High</div><div class="liquidity-value">{weekly_high:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Weekly Low</div><div class="liquidity-value">{weekly_low:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Order Block H</div><div class="liquidity-value">{order_block_high:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Order Block L</div><div class="liquidity-value">{order_block_low:.2f}</div></div>
+            </div>
+        </div>
+        """
+        st.markdown(ohlcv_liquidity_html, unsafe_allow_html=True)
+    else:
+        st.info("Fetching live data...")
      
 
     # Top button row (Start, Stop, Refresh only – Exit moved below)
@@ -7396,78 +7451,7 @@ elif st.session_state.page == "dashboard":
     # Tab1: DASHBOARD – already shown above (live tracker and stats). We'll just include the original dashboard stats and chart.
     with tab1:
        
-        # Additional stats and chart (same as original)
-        st.markdown("<br>### 📈 Technical Engine", unsafe_allow_html=True)
-        c_h1, c_h2 = st.columns(2)
-        with c_h1:
-            SHOW_CHART = st.toggle("📊 Render Chart", True, on_change=lambda: play_sound_now("click"))
-        with c_h2:
-            FULL_CHART = st.toggle("⛶ Full Screen", False, on_change=lambda: play_sound_now("click"))
-
-        if SHOW_CHART and bot.state["latest_data"] is not None:
-            chart_df = bot.state["latest_data"].copy()
-            if not isinstance(chart_df.index, pd.DatetimeIndex):
-                if 'timestamp' in chart_df.columns:
-                    chart_df['timestamp'] = pd.to_datetime(chart_df['timestamp'])
-                    chart_df.set_index('timestamp', inplace=True)
-                else:
-                    chart_df.index = pd.date_range(end=get_ist(), periods=len(chart_df), freq='T')
-            try:
-                if chart_df.index.tz is not None:
-                    chart_df.index = chart_df.index.tz_localize(None)
-            except AttributeError:
-                pass
-            chart_df['time'] = chart_df.index.astype('int64') // 10**9
-            candles = chart_df[['time', 'open', 'high', 'low', 'close']].dropna().to_dict('records')
-            if len(candles) == 0:
-                st.warning("No candle data available for chart.")
-            else:
-                fib_lines = []
-                if not bot.state["active_trade"] and bot.state.get('fib_data'):
-                    fib = bot.state['fib_data']
-                    fib_lines = [
-                        {"price": fib.get('major_high', 0), "color": '#ef4444', "lineWidth": 1, "lineStyle": 0, "title": 'Major Res'},
-                        {"price": fib.get('fib_high', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.618'},
-                        {"price": fib.get('fib_low', 0), "color": '#fbbf24', "lineWidth": 2, "lineStyle": 2, "title": 'Golden 0.65'},
-                        {"price": fib.get('major_low', 0), "color": '#22c55e', "lineWidth": 1, "lineStyle": 0, "title": 'Major Sup'}
-                    ]
-                chartOptions = {
-                    "height": 700 if FULL_CHART else 400,
-                    "layout": {"textColor": '#1e293b', "background": {"type": 'solid', "color": '#ffffff'}},
-                    "grid": {"vertLines": {"color": 'rgba(226, 232, 240, 0.8)'}, "horzLines": {"color": 'rgba(226, 232, 240, 0.8)'}},
-                    "crosshair": {"mode": 0},
-                    "timeScale": {"timeVisible": True, "secondsVisible": False}
-                }
-                chart_series = [{"type": 'Candlestick', "data": candles, "options": {"upColor": '#26a69a', "downColor": '#ef5350'}, "priceLines": fib_lines}]
-
-                if 'anchored_vwap' in chart_df.columns:
-                    avwap_data = chart_df[['time', 'anchored_vwap']].dropna().rename(columns={'anchored_vwap': 'value'}).to_dict('records')
-                    if avwap_data:
-                        chart_series.append({"type": 'Line', "data": avwap_data, "options": {"color": '#9c27b0', "lineWidth": 2, "title": 'ICT AVWAP'}})
-                if 'vwap' in chart_df.columns:
-                    vwap_data = chart_df[['time', 'vwap']].dropna().rename(columns={'vwap': 'value'}).to_dict('records')
-                    if vwap_data:
-                        chart_series.append({"type": 'Line', "data": vwap_data, "options": {"color": '#ff9800', "lineWidth": 2, "title": 'VWAP'}})
-                ema_col = None
-                if 'ema_fast' in chart_df.columns:
-                    ema_col = 'ema_fast'
-                elif 'ema_short' in chart_df.columns:
-                    ema_col = 'ema_short'
-                elif 'ema9' in chart_df.columns:
-                    ema_col = 'ema9'
-                if ema_col:
-                    ema_data = chart_df[['time', ema_col]].dropna().rename(columns={ema_col: 'value'}).to_dict('records')
-                    if ema_data:
-                        chart_series.append({"type": 'Line', "data": ema_data, "options": {"color": '#0ea5e9', "lineWidth": 2, "title": 'EMA'}})
-                if 'supertrend' in chart_df.columns:
-                    st_data = chart_df[['time', 'supertrend']].dropna().rename(columns={'supertrend': 'value'}).to_dict('records')
-                    if st_data:
-                        chart_series.append({"type": 'Line', "data": st_data, "options": {"color": '#e67e22', "lineWidth": 1, "title": 'Supertrend'}})
-
-                renderLightweightCharts([{"chart": chartOptions, "series": chart_series}], key="static_tv_chart")
-        elif not SHOW_CHART:
-            st.info("Chart is hidden. Enable 'Render Chart' to view.")
-
+        
         # FOMO Scanner
         st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
         fomo_signals = fomo_scanner.scan()
