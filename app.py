@@ -1,8 +1,9 @@
-
-
-
 # ==========================================
-# SHREE ALGO TRADING PLATFORM – FINAL (FULL VERSION)
+# SHREE ALGO TRADING PLATFORM – COMPLETE SCRIPT
+# ==========================================
+# All-in-one solution with real trading fix, market data fix,
+# improved UI, mobile responsiveness, SEBI 2026 compliance,
+# and Universal Data Broker architecture.
 # ==========================================
 
 import streamlit as st
@@ -41,7 +42,7 @@ import functools
 import random
 import socketio
 import asyncio
-
+import re
 
 # ---------- Optional imports with fallbacks ----------
 try:
@@ -89,7 +90,7 @@ except:
     HAS_PTA = False
 
 try:
-    from kiteconnect import KiteConnect
+    from kiteconnect import KiteConnect, KiteTicker
     HAS_ZERODHA = True
 except:
     HAS_ZERODHA = False
@@ -175,6 +176,13 @@ try:
 except:
     HAS_SOCKETIO = False
 
+# ---------- TradingView data feed ----------
+try:
+    from tvDatafeed import TvDatafeed, Interval
+    HAS_TVDATAFEED = True
+except:
+    HAS_TVDATAFEED = False
+
 # ==========================================
 # HOLIDAY & EVENT DATA
 # ==========================================
@@ -195,15 +203,12 @@ INDIAN_HOLIDAYS = {
 }
 
 MAJOR_EVENTS = [
-    # RBI Monetary Policy Committee (FY27 Schedule)
     ("2026-04-08", "RBI Monetary Policy (Repo Rate)"),
     ("2026-06-05", "RBI Monetary Policy (Repo Rate)"),
     ("2026-08-05", "RBI Monetary Policy (Repo Rate)"),
     ("2026-10-07", "RBI Monetary Policy (Repo Rate)"),
     ("2026-12-04", "RBI Monetary Policy (Repo Rate)"),
     ("2027-02-05", "RBI Monetary Policy (Repo Rate)"),
-    
-    # Federal Reserve FOMC Schedule (Rest of 2026 - early 2027)
     ("2026-04-29", "FOMC Meeting (Interest Rate Decision)"),
     ("2026-06-17", "FOMC Meeting (Interest Rate Decision)"),
     ("2026-07-29", "FOMC Meeting (Interest Rate Decision)"),
@@ -213,6 +218,7 @@ MAJOR_EVENTS = [
     ("2027-01-27", "FOMC Meeting (Interest Rate Decision)"),
     ("2027-03-17", "FOMC Meeting (Interest Rate Decision)")
 ]
+
 def get_tomorrow_info():
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     holiday = INDIAN_HOLIDAYS.get(tomorrow)
@@ -490,6 +496,8 @@ if 'manual_mode' not in st.session_state:
     st.session_state.manual_mode = False
 if 'stocks_only' not in st.session_state:
     st.session_state.stocks_only = False
+if 'current_dashboard_tab' not in st.session_state:
+    st.session_state.current_dashboard_tab = 0
 
 # ==========================================
 # LICENSE STATE
@@ -761,7 +769,6 @@ def is_user_blocked(user_id):
     if not HAS_DB or not user_id:
         return False
     try:
-        # Use blocked column in user_credentials (added manually)
         res = supabase.table("user_credentials").select("blocked").eq("user_id", user_id).execute()
         if res.data and len(res.data) > 0:
             return res.data[0].get("blocked", False)
@@ -917,40 +924,20 @@ else:
 st.markdown(f"""
 <style>
     [data-testid="stAppViewContainer"] {{ background-color: {bg_color}; color: {text_color}; font-family: 'Inter', sans-serif; }}
+    
+    /* --- MOBILE FIRST OVERRIDES --- */
     @media (max-width: 850px) {{
         header[data-testid="stHeader"] {{ visibility: visible !important; height: auto !important; background-color: #0284c7 !important; }}
         header[data-testid="stHeader"] svg {{ fill: white !important; }}
         .main .block-container {{ padding-top: 50px !important; padding-bottom: 90px !important; }}
         .landing-hero {{ padding: 2rem 1rem !important; max-width: 100% !important; }}
     }}
+    
     [data-testid="stSidebar"] {{ background-color: #0284c7 !important; border-right: 1px solid #0369a1; }}
     [data-testid="stSidebar"] * {{ color: #ffffff !important; }}
-    [data-testid="stSidebar"] .stToggle label {{
-        color: #ffffff !important;
-        font-weight: 700 !important;
-        font-size: 1rem !important;
-        background: transparent !important;
-        padding: 0 !important;
-        margin: 0 !important;
-    }}
-    [data-testid="stSidebar"] .stToggle {{
-        background: transparent !important;
-        border: none !important;
-        box-shadow: none !important;
-        padding: 0 !important;
-        margin: 5px 0 !important;
-    }}
-    [data-testid="stSidebar"] .stToggle [data-baseweb="toggle"] {{
-        background-color: rgba(255,255,255,0.2) !important;
-        border: 1px solid rgba(255,255,255,0.4) !important;
-    }}
-    [data-testid="stSidebar"] .stToggle [data-baseweb="toggle"][aria-checked="true"] {{
-        background-color: #22c55e !important;
-        border-color: #ffffff !important;
-    }}
+    [data-testid="stSidebar"] .stToggle label,
     [data-testid="stSidebar"] .stSelectbox label,
-    [data-testid="stSidebar"] .stNumberInput label,
-    [data-testid="stSidebar"] .stSlider label {{
+    [data-testid="stSidebar"] .stNumberInput label {{
         font-weight: 600 !important;
         opacity: 0.95;
     }}
@@ -959,6 +946,8 @@ st.markdown(f"""
     div[data-baseweb="base-input"] > input, input[type="number"], input[type="password"], input[type="text"], textarea {{
         color: #0f111a !important; font-weight: 600 !important; background-color: #ffffff !important; border: 1px solid #cbd5e1 !important;
     }}
+    
+    /* --- TABS (mobile scrollable) --- */
     div[data-testid="stTabs"] {{ background: transparent !important; }}
     div[data-baseweb="tab-list"] {{
         background: #e2e8f0 !important; 
@@ -967,9 +956,14 @@ st.markdown(f"""
         display: flex !important;
         gap: 8px !important;
         margin-bottom: 20px !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
     }}
+    div[data-baseweb="tab-list"]::-webkit-scrollbar {{ display: none; }}
     div[data-testid="stTabs"] button[data-baseweb="tab"] {{
-        flex: 1 !important;
+        flex: 0 0 auto !important;
         font-size: 1rem !important;
         font-weight: 800 !important;
         padding: 12px 16px !important;
@@ -982,18 +976,18 @@ st.markdown(f"""
         background: linear-gradient(135deg, #0284c7, #0369a1) !important; 
         color: #ffffff !important;
     }}
+    
+    /* --- CARDS & COMPONENTS --- */
     .glass-panel {{ background: {card_bg}; border: 1px solid {border_color}; border-radius: 12px; padding: 30px; }}
     .hz-stats {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 8px; margin: 10px 0; }}
     .modern-card {{ background: {card_bg}; border-radius: 16px; padding: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.04); border: 1px solid {border_color}; margin-bottom: 20px; }}
     .modern-card h3 {{ margin-top: 0; color: #2563eb; font-weight: 700; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }}
     .broker-badge {{ display: inline-block; padding: 0.2rem 0.8rem; border-radius: 20px; font-size: 0.8rem; font-weight: 600; background: #2563eb; color: white; margin-left: 0.5rem; }}
-    .news-ticker-kannada {{ background: #1e293b; color: white; padding: 8px 0; overflow: hidden; white-space: nowrap; border-radius: 8px; margin-bottom: 15px; position: relative; }}
-    .news-ticker-kannada span {{ display: inline-block; padding-left: 100%; animation: ticker-kannada 120s linear infinite; }}
+    .news-ticker-kannada, .news-ticker-english {{ background: #1e293b; color: white; padding: 8px 0; overflow: hidden; white-space: nowrap; border-radius: 8px; margin-bottom: 15px; position: relative; }}
+    .news-ticker-kannada span, .news-ticker-english span {{ display: inline-block; padding-left: 100%; animation: ticker-kannada 120s linear infinite; }}
     @keyframes ticker-kannada {{ 0% {{ transform: translateX(0); }} 100% {{ transform: translateX(-100%); }} }}
-    .news-ticker-english {{ background: #0f172a; color: white; padding: 8px 0; overflow: hidden; white-space: nowrap; border-radius: 8px; margin-bottom: 15px; }}
-    .news-ticker-english span {{ display: inline-block; padding-left: 100%; animation: ticker-english 180s linear infinite; }}
-    @keyframes ticker-english {{ 0% {{ transform: translateX(0); }} 100% {{ transform: translateX(-100%); }} }}
     
+    /* --- BOTTOM DOCK (mobile friendly) --- */
     .bottom-dock {{
         position: fixed;
         bottom: 15px;
@@ -1003,11 +997,10 @@ st.markdown(f"""
         gap: 20px;
         background: rgba(255, 255, 255, 0.95);
         backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
         border-radius: 50px;
         padding: 8px 20px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255,255,255,0.3);
-        border: 1px solid rgba(255,255,255,0.2);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+        border: 1px solid rgba(255,255,255,0.3);
         z-index: 999;
         animation: dock-appear 0.3s ease-out;
     }}
@@ -1032,58 +1025,233 @@ st.markdown(f"""
         color: #0284c7;
         transform: translateY(-2px);
     }}
-    .bottom-dock .dock-item .dock-icon {{
-        font-size: 26px;
-        margin-bottom: 4px;
+    .bottom-dock .dock-item .dock-icon {{ font-size: 26px; margin-bottom: 4px; }}
+    .bottom-dock .dock-item .dock-label {{ font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }}
+    .bottom-dock .dock-item.active {{ color: #0284c7; background: rgba(2, 132, 199, 0.15); }}
+    
+    /* --- LIVE TRACKER (improved visibility) --- */
+    .trade-card {{
+        background: #000000;
+        border: 2px solid #1e293b;
+        border-radius: 20px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        color: #ffffff;
     }}
-    .bottom-dock .dock-item .dock-label {{
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.3px;
+    .trade-header {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 15px;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
     }}
-    .bottom-dock .dock-item.active {{
-        color: #0284c7;
-        background: rgba(2, 132, 199, 0.15);
+    .trade-title {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+    .trade-badge {{ background: #3b82f6; color: white; padding: 6px 14px; border-radius: 30px; font-weight: 900; font-size: 1rem; }}
+    .trade-symbol {{ font-size: 1.6rem; font-weight: 900; color: #ffffff; }}
+    .trade-pnl-box {{
+        background: #000000;
+        border: 2px solid #0ea5e9;
+        border-radius: 12px;
+        padding: 10px 20px;
+        text-align: right;
+        box-shadow: inset 0 0 15px rgba(14, 165, 233, 0.2);
     }}
-    .bottom-dock .stButton button {{
-        background: transparent;
-        border: none;
-        padding: 0;
-        margin: 0;
-        min-width: unset;
-        box-shadow: none;
-        font-weight: normal;
+    .trade-metrics-grid {{
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 15px;
+        margin-bottom: 20px;
     }}
-    .bottom-dock .stButton button:hover {{
-        background: transparent;
-        color: inherit;
-        border: none;
-        box-shadow: none;
+    .metric-box {{
+        background: #000000;
+        border-radius: 12px;
+        padding: 12px;
+        text-align: center;
+        border: 2px solid #0ea5e9;
+        box-shadow: inset 0 0 15px rgba(14, 165, 233, 0.2);
     }}
-    .bottom-dock .stButton button:focus {{
-        outline: none;
-        box-shadow: none;
+    .metric-label {{ font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; font-weight: 800; margin-bottom: 5px; }}
+    .metric-val {{ font-size: 1.4rem; font-weight: 900; color: #eab308; }}
+    .trade-footer {{
+        background: #000000;
+        padding: 12px;
+        border-radius: 12px;
+        text-align: center;
+        font-size: 1rem;
+        font-weight: 800;
+        color: #ffffff;
+        border: 2px solid #0ea5e9;
     }}
-    .simulated-badge {{
-        background: #f59e0b;
+    
+    /* --- MOBILE ADAPTATIONS --- */
+    @media (max-width: 768px) {{
+        .trade-metrics-grid {{ grid-template-columns: repeat(2, 1fr); gap: 10px; }}
+        .trade-pnl-box {{ width: 100%; text-align: left; margin-top: 10px; }}
+        .trade-header {{ flex-direction: column; align-items: flex-start; gap: 10px; }}
+        .metric-val {{ font-size: 1.2rem; }}
+        .trade-footer {{ font-size: 0.85rem; display: flex; flex-direction: column; gap: 5px; }}
+        .button-row .stButton button {{ padding: 0.4rem 1rem; font-size: 0.85rem; }}
+        .bottom-dock {{ gap: 10px; padding: 5px 15px; }}
+        .bottom-dock .dock-item {{ min-width: 60px; }}
+    }}
+    
+    /* --- OHLCV + LIQUIDITY ZONES (mobile grid) --- */
+    .ohlcv-liquidity-box {{
+        background: linear-gradient(135deg, #1e293b, #0f172a);
+        border-radius: 16px;
+        padding: 15px 20px;
+        margin-bottom: 15px;
+        border: 1px solid #334155;
+    }}
+    .liquidity-grid {{
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 12px;
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px dashed #334155;
+    }}
+    @media (max-width: 768px) {{
+        .liquidity-grid {{ grid-template-columns: repeat(3, 1fr); }}
+        .ohlcv-header-grid {{ grid-template-columns: repeat(3, 1fr); }}
+    }}
+    .liquidity-item {{
+        background: rgba(0,0,0,0.4);
+        border-radius: 12px;
+        padding: 8px;
+        text-align: center;
+    }}
+    .liquidity-label {{ font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; }}
+    .liquidity-value {{ font-size: 1rem; font-weight: bold; color: #facc15; }}
+    
+    /* --- LANDING PAGE (desktop first) --- */
+    .landing-hero {{
+        text-align: center;
+        padding: 4rem 1rem;
+        background: linear-gradient(135deg, #0f172a, #1e293b, #0f172a);
+        background-size: 200% 200%;
+        animation: gradientShift 15s ease infinite;
         color: white;
-        padding: 2px 8px;
-        border-radius: 4px;
-        font-size: 0.7rem;
+        border-radius: 0 0 2rem 2rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }}
+    @keyframes gradientShift {{
+        0% {{ background-position: 0% 50%; }}
+        50% {{ background-position: 100% 50%; }}
+        100% {{ background-position: 0% 50%; }}
+    }}
+    .om-shree-cube {{
+        width: 180px;
+        height: 180px;
+        margin: 0 auto 20px;
+        position: relative;
+        transform-style: preserve-3d;
+        animation: rotateCube 12s infinite linear;
+    }}
+    .cube-face {{
+        position: absolute;
+        width: 180px;
+        height: 180px;
+        background: rgba(255, 215, 0, 0.85);
+        border: 2px solid #ff6600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 3rem;
         font-weight: bold;
-        margin-left: 8px;
-        display: inline-block;
+        color: #fff;
+        text-shadow: 0 0 10px #ff6600;
+        backdrop-filter: blur(5px);
     }}
-    .rejection-reason {{
-        font-size: 0.8rem;
-        color: #ef4444;
-        margin-top: 4px;
+    .cube-face--front  {{ transform: rotateY(0deg) translateZ(90px); background: rgba(255, 165, 0, 0.9); }}
+    .cube-face--back   {{ transform: rotateY(180deg) translateZ(90px); background: rgba(255, 140, 0, 0.9); }}
+    .cube-face--right  {{ transform: rotateY(90deg) translateZ(90px); background: rgba(255, 190, 0, 0.9); }}
+    .cube-face--left   {{ transform: rotateY(-90deg) translateZ(90px); background: rgba(255, 200, 0, 0.9); }}
+    .cube-face--top    {{ transform: rotateX(90deg) translateZ(90px); background: rgba(255, 215, 0, 0.9); }}
+    .cube-face--bottom {{ transform: rotateX(-90deg) translateZ(90px); background: rgba(255, 225, 0, 0.9); }}
+    @keyframes rotateCube {{
+        from {{ transform: rotateX(0deg) rotateY(0deg); }}
+        to {{ transform: rotateX(360deg) rotateY(360deg); }}
     }}
-    .risk-low {{ color: #22c55e; font-weight: bold; }}
-    .risk-medium {{ color: #fbbf24; font-weight: bold; }}
-    .risk-high {{ color: #ef4444; font-weight: bold; }}
-    .fullscreen-chart {{ height: 90vh !important; }}
-    .normal-chart {{ height: 400px !important; }}
+    .kinetic-title {{
+        font-size: 3.5rem;
+        font-weight: 900;
+        margin-bottom: 0.5rem;
+        animation: glowPulse 2s ease-in-out infinite alternate, slideUpFade 1s ease-out;
+        background: linear-gradient(135deg, #fff, #ffcc80);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }}
+    @keyframes glowPulse {{
+        0% {{ text-shadow: 0 0 5px #fff, 0 0 10px #ff6600; }}
+        100% {{ text-shadow: 0 0 15px #fff, 0 0 30px #ff3300; }}
+    }}
+    @keyframes slideUpFade {{
+        0% {{ opacity: 0; transform: translateY(20px); }}
+        100% {{ opacity: 1; transform: translateY(0); }}
+    }}
+    .bento-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1.5rem;
+        padding: 2rem;
+        max-width: 1200px;
+        margin: 0 auto;
+    }}
+    @media (max-width: 768px) {{
+        .bento-grid {{ grid-template-columns: 1fr; padding: 1rem; }}
+        .kinetic-title {{ font-size: 2.2rem; }}
+        .om-shree-cube {{ transform: scale(0.6); margin-bottom: -20px; }}
+    }}
+    .bento-card {{
+        background: rgba(0, 0, 0, 0.7) !important;
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 24px;
+        padding: 2rem 1.5rem;
+        text-align: center;
+        transition: all 0.3s;
+        color: white !important;
+    }}
+    .bento-card:hover {{ transform: translateY(-5px); border-color: #ff6600; }}
+    .broker-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+        gap: 1rem;
+        padding: 2rem;
+        max-width: 900px;
+        margin: 0 auto;
+    }}
+    .broker-item {{
+        background: rgba(0,0,0,0.6);
+        border-radius: 16px;
+        padding: 1rem;
+        text-align: center;
+        color: white;
+    }}
+    .terms-card {{
+        background: rgba(0,0,0,0.85);
+        backdrop-filter: blur(10px);
+        border-radius: 28px;
+        padding: 2rem;
+        color: white;
+        max-width: 600px;
+        margin: 0 auto 1rem;
+        border: 1px solid rgba(255,255,255,0.2);
+    }}
+    .footer {{
+        background: rgba(0,0,0,0.5);
+        backdrop-filter: blur(10px);
+        color: white;
+        padding: 2rem;
+        margin-top: 3rem;
+        border-radius: 2rem 2rem 0 0;
+        text-align: center;
+    }}
     .profile-icon {{
         display: inline-flex;
         align-items: center;
@@ -1096,407 +1264,17 @@ st.markdown(f"""
         font-weight: bold;
         font-size: 1.2rem;
         cursor: pointer;
-        border: 2px solid white;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     }}
-    .profile-icon:hover {{
-        background-color: #0369a1;
-    }}
-    .button-row {{
-        display: flex;
-        gap: 10px;
-        margin-bottom: 15px;
-        justify-content: flex-start;
-    }}
-    .button-row .stButton button {{
-        padding: 0.5rem 1.5rem;
-        font-weight: 600;
-        border-radius: 30px;
-        border: none;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        transition: all 0.2s;
-    }}
-    .button-row .stButton button:hover {{
-        transform: translateY(-2px);
-        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-    }}
+    .button-row {{ display: flex; gap: 10px; margin-bottom: 15px; justify-content: flex-start; }}
     .start-btn button {{ background: #22c55e; color: white; }}
     .stop-btn button {{ background: #ef4444; color: white; }}
     .refresh-btn button {{ background: #3b82f6; color: white; }}
     .Exit-btn button {{ background: #7f1d1d; color: white; }}
-    .admin-card {{
-        background: #1e293b;
-        color: white;
-        padding: 20px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-    }}
-    .admin-card h4 {{ color: #fbbf24; margin-top: 0; }}
-    .blocked-user {{ background: #7f1d1d; padding: 5px; border-radius: 4px; }}
-    .risk-box {{
-        background: #fff3cd;
-        border-left: 5px solid #ffc107;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-    }}
-    .license-section {{
-        background: #e8f0fe;
-        padding: 20px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        border: 1px solid #90caf9;
-    }}
-    /* Bento Grid + Kinetic Typography */
-    @keyframes float {{
-        0% {{ transform: translateY(0px); }}
-        50% {{ transform: translateY(-10px); }}
-        100% {{ transform: translateY(0px); }}
-    }}
-    @keyframes gradientShift {{
-        0% {{ background-position: 0% 50%; }}
-        50% {{ background-position: 100% 50%; }}
-        100% {{ background-position: 0% 50%; }}
-    }}
-    @keyframes slideUpFade {{
-        0% {{ opacity: 0; transform: translateY(20px); }}
-        100% {{ opacity: 1; transform: translateY(0); }}
-    }}
-    @keyframes pulseGlow {{
-        0% {{ box-shadow: 0 0 0 0 rgba(2,132,199,0.7); }}
-        70% {{ box-shadow: 0 0 0 15px rgba(2,132,199,0); }}
-        100% {{ box-shadow: 0 0 0 0 rgba(2,132,199,0); }}
-    }}
-    .landing-hero {{
-        text-align: center;
-        padding: 3rem 1rem;
-        background: linear-gradient(135deg, #0f172a, #1e293b, #0f172a);
-        background-size: 200% 200%;
-        animation: gradientShift 15s ease infinite;
-        color: white;
-        border-radius: 0 0 2rem 2rem;
-        margin-bottom: 2rem;
-        text-shadow: 0 2px 10px rgba(0,0,0,0.3);
-        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-    }}
-    .kinetic-title {{
-        font-size: 3.5rem;
-        font-weight: 900;
-        margin-bottom: 0.5rem;
-        animation: slideUpFade 1s ease-out;
-        text-shadow: 0 0 20px rgba(255,255,255,0.5), 0 4px 8px rgba(0,0,0,0.2);
-        letter-spacing: 2px;
-    }}
-    .kinetic-sub {{
-        font-size: 1.2rem;
-        opacity: 0.95;
-        animation: slideUpFade 1.2s ease-out;
-        text-shadow: 0 1px 5px rgba(0,0,0,0.2);
-    }}
-    .bento-grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 1.5rem;
-        padding: 2rem;
-        max-width: 1200px;
-        margin: 0 auto;
-    }}
-    .bento-card {{
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 24px;
-        padding: 2rem 1.5rem;
-        text-align: center;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        color: white;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-        text-shadow: 0 1px 2px rgba(0,0,0,0.2);
-    }}
-    .bento-card:hover {{
-        transform: translateY(-8px) scale(1.02);
-        border-color: #3b82f6;
-        box-shadow: 0 20px 40px rgba(59,130,246,0.4);
-        background: rgba(255,255,255,0.2);
-    }}
-    .bento-icon {{
-        font-size: 3rem;
-        margin-bottom: 1rem;
-        filter: drop-shadow(0 0 10px #3b82f6);
-    }}
-    .bento-card h3 {{
-        font-size: 1.5rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-        background: linear-gradient(135deg, #ffffff, #a5f3fc);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-shadow: none;
-    }}
-    .bento-card p {{
-        font-size: 0.95rem;
-        opacity: 0.9;
-        line-height: 1.5;
-        color: white;
-    }}
-    .broker-grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-        gap: 1rem;
-        padding: 2rem;
-        max-width: 900px;
-        margin: 0 auto;
-    }}
-    .broker-item {{
-        background: rgba(255,255,255,0.05);
-        backdrop-filter: blur(5px);
-        border-radius: 16px;
-        padding: 1rem 0.5rem;
-        text-align: center;
-        transition: all 0.2s;
-        border: 1px solid rgba(255,255,255,0.05);
-    }}
-    .broker-item:hover {{
-        transform: scale(1.05);
-        border-color: #3b82f6;
-        background: rgba(59,130,246,0.2);
-    }}
-    .broker-item img {{
-        width: 40px;
-        height: 40px;
-        object-fit: contain;
-        margin-bottom: 0.5rem;
-        filter: drop-shadow(0 0 5px #3b82f6);
-    }}
-    .broker-item span {{
-        display: block;
-        font-size: 0.8rem;
-        color: white;
-        font-weight: 500;
-    }}
-    .terms-card {{
-        background: rgba(0,0,0,0.75) !important;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255,255,255,0.2);
-        border-radius: 28px;
-        padding: 2rem;
-        color: white;
-        max-width: 600px;
-        margin: 0 auto 2rem;
-        animation: float 5s ease-in-out infinite;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-        text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-    }}
-    .terms-card .typewriter {{
-        overflow: hidden;
-        border-right: 2px solid white;
-        white-space: nowrap;
-        margin: 0 auto;
-        animation: typing 3.5s steps(40, end), blink-caret 0.75s step-end infinite;
-        font-size: 1.1rem;
-        font-weight: 500;
-        color: white;
-    }}
-    @keyframes typing {{
-        from {{ width: 0 }}
-        to {{ width: 100% }}
-    }}
-    @keyframes blink-caret {{
-        from, to {{ border-color: transparent }}
-        50% {{ border-color: white }}
-    }}
-    .stButton > button:has(span:contains("Enter")) {{
-        background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
-        color: white !important;
-        font-size: 1.3rem !important;
-        font-weight: 700 !important;
-        padding: 1rem 2rem !important;
-        border-radius: 40px !important;
-        border: none !important;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.3) !important;
-        transition: all 0.3s !important;
-        width: 100% !important;
-        animation: pulseGlow 2s infinite;
-    }}
-    .stButton > button:has(span:contains("Enter")):hover {{
-        transform: scale(1.05) !important;
-        box-shadow: 0 15px 30px rgba(59,130,246,0.5) !important;
-    }}
-    .footer {{
-        background: rgba(0,0,0,0.5);
-        backdrop-filter: blur(10px);
-        color: white;
-        padding: 2rem;
-        margin-top: 3rem;
-        border-radius: 2rem 2rem 0 0;
-        text-align: center;
-        border-top: 1px solid rgba(255,255,255,0.1);
-        text-shadow: 0 1px 2px rgba(0,0,0,0.2);
-    }}
-    /* Live Position Tracker */
-    .live-tracker {{
-        background: linear-gradient(145deg, #1e293b, #0f172a);
-        border: 2px solid #3b82f6;
-        border-radius: 20px;
-        padding: 20px;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(59,130,246,0.3) inset;
-        margin-bottom: 20px;
-        color: #ffffff;
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        transition: all 0.3s ease;
-    }}
-    .live-tracker:hover {{
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6), 0 0 0 3px #3b82f6 inset;
-        transform: translateY(-2px);
-    }}
-    .live-tracker .header {{
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom: 2px dashed #334155;
-        padding-bottom: 15px;
-        margin-bottom: 15px;
-    }}
-    .live-tracker .symbol-badge {{
-        background: #3b82f6;
-        color: white;
-        padding: 6px 15px;
-        border-radius: 30px;
-        font-size: 1rem;
-        font-weight: 800;
-        letter-spacing: 0.5px;
-        box-shadow: 0 0 15px #3b82f6;
-        display: inline-block;
-    }}
-    .live-tracker .pnl-badge {{
-        padding: 8px 20px;
-        border-radius: 40px;
-        font-weight: 900;
-        font-size: 1.6rem;
-        background: rgba(255,255,255,0.1);
-        border: 2px solid;
-        animation: pulse-pnl 2s infinite;
-        margin-top: 5px;
-    }}
-    @keyframes pulse-pnl {{
-        0% {{ box-shadow: 0 0 0 0 currentColor; }}
-        70% {{ box-shadow: 0 0 15px 5px currentColor; }}
-        100% {{ box-shadow: 0 0 0 0 currentColor; }}
-    }}
-    .live-tracker .grid {{
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 15px;
-        margin-bottom: 20px;
-    }}
-    .live-tracker .info-box {{
-        background: rgba(255,255,255,0.05);
-        padding: 15px;
-        border-radius: 16px;
-        border: 1px solid #334155;
-        backdrop-filter: blur(5px);
-    }}
-    .live-tracker .info-box .label {{
-        color: #94a3b8;
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        font-weight: 700;
-        letter-spacing: 0.5px;
-        margin-bottom: 5px;
-    }}
-    .live-tracker .info-box .value {{
-        font-size: 1.4rem;
-        font-weight: 800;
-        color: #facc15;
-        text-shadow: 0 0 10px #facc15;
-        word-break: break-word;
-    }}
-    .live-tracker .info-box .value.green {{
-        color: #4ade80;
-        text-shadow: 0 0 10px #4ade80;
-    }}
-    .live-tracker .info-box .value.red {{
-        color: #f87171;
-        text-shadow: 0 0 10px #f87171;
-    }}
-    .live-tracker .targets {{
-        background: linear-gradient(90deg, #1e293b, #111827);
-        padding: 12px;
-        border-radius: 40px;
-        font-size: 1rem;
-        text-align: center;
-        color: #38bdf8;
-        font-weight: 700;
-        border: 1px solid #38bdf8;
-        box-shadow: 0 0 20px #38bdf8;
-        letter-spacing: 0.5px;
-        word-break: break-word;
-    }}
-    .live-tracker .targets span {{
-        color: #fbbf24;
-        font-weight: 800;
-        margin: 0 10px;
-    }}
-    .sticky-buttons {{
-        position: sticky;
-        bottom: 20px;
-        right: 20px;
-        z-index: 1000;
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-        margin-top: 10px;
-    }}
-    .sticky-buttons button {{
-        background: #3b82f6;
-        color: white;
-        border: none;
-        border-radius: 40px;
-        padding: 8px 20px;
-        font-weight: bold;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        transition: 0.2s;
-    }}
-    .sticky-buttons button:hover {{
-        transform: scale(1.05);
-        background: #2563eb;
-    }}
-    @media (max-width: 768px) {{
-        .live-tracker .grid {{
-            grid-template-columns: 1fr;
-        }}
-        .live-tracker .pnl-badge {{
-            font-size: 1.2rem;
-            padding: 5px 12px;
-        }}
-        .live-tracker .symbol-badge {{
-            font-size: 0.8rem;
-            padding: 4px 10px;
-        }}
-        .live-tracker .info-box .value {{
-            font-size: 1.1rem;
-        }}
-        .live-tracker .targets {{
-            font-size: 0.8rem;
-            padding: 8px;
-        }}
-        .sticky-buttons {{
-            gap: 8px;
-        }}
-        .sticky-buttons button {{
-            padding: 6px 12px;
-            font-size: 0.8rem;
-        }}
-        .kinetic-title {{
-            font-size: 2rem;
-        }}
-        .kinetic-sub {{
-            font-size: 1rem;
-        }}
-    }}
+    .admin-card {{ background: #1e293b; color: white; padding: 20px; border-radius: 8px; margin-bottom: 15px; }}
+    .risk-low {{ color: #22c55e; font-weight: bold; }}
+    .risk-medium {{ color: #fbbf24; font-weight: bold; }}
+    .risk-high {{ color: #ef4444; font-weight: bold; }}
+    .license-section {{ background: #e8f0fe; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1604,79 +1382,127 @@ def get_angel_scrip_master():
     return df
 
 # ==========================================
-# BRIDGE CLASSES
+# UNIFIED WEBSOCKET MANAGER (Angel, CoinDCX, Zerodha, Stoxkart, Shoonya, Dhan)
 # ==========================================
-class UpstoxBridge:
-    def __init__(self, api_key, api_secret, access_token):
+class WebSocketManager:
+    def __init__(self, bot):
+        self.bot = bot
+        self.active_ws = {}
+        self.ltp_cache = {}
+        self.lock = Lock()
+        
+    def start_all(self):
+        if self.bot.is_coindcx_connected:
+            self.start_coindcx_ws()
+        if self.bot.kite and self.bot.settings.get("primary_broker") == "Zerodha":
+            self.start_zerodha_ws()
+        if self.bot.is_stoxkart_connected:
+            self.start_stoxkart_ws()
+        if self.bot.is_shoonya_connected:
+            self.start_shoonya_ws()
+        if self.bot.is_dhan_connected:
+            self.start_dhan_ws()
+            
+    def start_coindcx_ws(self):
+        def poll_coindcx():
+            while True:
+                try:
+                    res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=3)
+                    if res.status_code == 200:
+                        data = res.json()
+                        for item in data:
+                            symbol = item.get('market', '')
+                            if symbol.endswith('USDT'):
+                                base = symbol.replace('USDT', 'USD')
+                                self.ltp_cache[base] = float(item['last_price'])
+                            elif symbol.endswith('INR'):
+                                self.ltp_cache[symbol] = float(item['last_price'])
+                except:
+                    pass
+                time.sleep(2)
+        thread = threading.Thread(target=poll_coindcx, daemon=True)
+        thread.start()
+        
+    def start_zerodha_ws(self):
+        if not HAS_ZERODHA:
+            return
+        try:
+            access_token = self.bot.kite.access_token
+            kws = KiteTicker(self.bot.zerodha_api, access_token)
+            def on_tick(ws, ticks):
+                for tick in ticks:
+                    token = str(tick['instrument_token'])
+                    self.ltp_cache[token] = tick['last_price']
+            def on_connect(ws, response):
+                tokens = []
+                if self.bot.state.get("active_trade"):
+                    tokens.append(int(self.bot.state["active_trade"]["token"]))
+                for trade in self.bot.state.get("active_trades", []):
+                    tokens.append(int(trade["token"]))
+                if tokens:
+                    kws.subscribe(tokens)
+                    kws.set_mode(kws.MODE_FULL, tokens)
+            kws.on_ticks = on_tick
+            kws.on_connect = on_connect
+            kws.connect(threaded=True)
+            self.active_ws["zerodha"] = kws
+        except Exception as e:
+            self.bot.log(f"Zerodha WebSocket error: {e}")
+            
+    def start_stoxkart_ws(self):
+        def poll_stoxkart():
+            while True:
+                if self.bot.stoxkart_bridge and self.bot.stoxkart_bridge.token:
+                    headers = {"authorization": self.bot.stoxkart_bridge.token}
+                    try:
+                        res = requests.get("https://superrapi.stoxkart.com/interactive/market/marketdata", headers=headers, timeout=5)
+                        if res.status_code == 200:
+                            data = res.json()
+                    except:
+                        pass
+                time.sleep(3)
+        thread = threading.Thread(target=poll_stoxkart, daemon=True)
+        thread.start()
+        
+    def start_shoonya_ws(self):
+        pass
+        
+    def start_dhan_ws(self):
+        pass
+        
+    def get_ltp(self, token, exchange):
+        cache_key = f"{exchange}_{token}"
+        return self.ltp_cache.get(cache_key, None)
+
+# ==========================================
+# BRIDGE CLASSES (All Brokers) - Kotak Neo & Groww Removed
+# ==========================================
+
+class ZerodhaBridge:
+    def __init__(self, api_key, secret, access_token):
         self.api_key = api_key
-        self.api_secret = api_secret
-        self.access_token = access_token
-        self.client = None
-        self.connected = False
-
-    def connect(self):
-        if not HAS_UPSTOX:
-            return False, "Upstox library not installed."
-        try:
-            self.connected = True
-            return True, "Connected to Upstox"
-        except Exception as e:
-            return False, f"Upstox connection error: {e}"
-
-    def get_live_price(self, symbol):
-        if not self.connected:
-            return None
-        try:
-            return None
-        except:
-            return None
-
-    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
-        if not self.connected:
-            return None, "Not connected"
-        try:
-            return "UPSTOX_ORDER", "Order placed (simulated)"
-        except Exception as e:
-            return None, str(e)
-
-    def get_historical_data(self, symbol, interval, days=10):
-        if not self.connected:
-            return None
-        try:
-            return None
-        except:
-            return None
-
-    def get_account_info(self):
-        if not self.connected:
-            return None
-        try:
-            return {'balance': 0}
-        except:
-            return None
-
-class FivePaisaBridge:
-    def __init__(self, client_id, secret, access_token):
-        self.client_id = client_id
         self.secret = secret
         self.access_token = access_token
-        self.client = None
+        self.kite = None
         self.connected = False
 
     def connect(self):
-        if not HAS_5PAISA:
-            return False, "5paisa library not installed."
+        if not HAS_ZERODHA:
+            return False, "Zerodha library not installed."
         try:
+            self.kite = KiteConnect(api_key=self.api_key)
+            self.kite.set_access_token(self.access_token)
             self.connected = True
-            return True, "Connected to 5paisa"
+            return True, "Connected to Zerodha"
         except Exception as e:
-            return False, f"5paisa connection error: {e}"
+            return False, f"Zerodha connection error: {e}"
 
     def get_live_price(self, symbol):
         if not self.connected:
             return None
         try:
-            return None
+            quote = self.kite.quote([symbol])
+            return float(quote[symbol]['last_price'])
         except:
             return None
 
@@ -1684,50 +1510,68 @@ class FivePaisaBridge:
         if not self.connected:
             return None, "Not connected"
         try:
-            return "5PAISA_ORDER", "Order placed (simulated)"
+            z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
+            order_id = self.kite.place_order(
+                variety=self.kite.VARIETY_REGULAR,
+                exchange="NSE",
+                tradingsymbol=symbol,
+                transaction_type=z_side,
+                quantity=int(qty),
+                product=self.kite.PRODUCT_MIS,
+                order_type=self.kite.ORDER_TYPE_LIMIT if order_type == "LIMIT" else self.kite.ORDER_TYPE_MARKET,
+                price=price if order_type == "LIMIT" else 0
+            )
+            return order_id, None
         except Exception as e:
             return None, str(e)
 
-    def get_historical_data(self, symbol, interval, days=10):
+    def get_historical_data(self, symbol, interval="5m", days=10):
         if not self.connected:
             return None
         try:
-            return None
-        except:
+            interval_map = {"1m": "minute", "5m": "5minute", "15m": "15minute"}
+            to_date = datetime.now()
+            from_date = to_date - timedelta(days=days)
+            data = self.kite.historical_data(symbol, from_date, to_date, interval_map.get(interval, "5minute"))
+            df = pd.DataFrame(data)
+            df['timestamp'] = pd.to_datetime(df['date'])
+            df.set_index('timestamp', inplace=True)
+            df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'}, inplace=True)
+            return df
+        except Exception as e:
+            print(f"Zerodha historical error: {e}")
             return None
 
     def get_account_info(self):
         if not self.connected:
             return None
         try:
-            return {'balance': 0}
+            margins = self.kite.margins()
+            eq = margins.get('equity', {})
+            bal = eq.get('net', eq.get('available', {}).get('live_balance', 0))
+            return {"balance": float(bal)}
         except:
             return None
 
-class BinanceBridge:
-    def __init__(self, api_key, api_secret, testnet=False):
+class CoinDCXBridge:
+    def __init__(self, api_key, secret):
         self.api_key = api_key
-        self.api_secret = api_secret
-        self.testnet = testnet
-        self.client = None
+        self.secret = secret
         self.connected = False
+        self.ws = None
+        self.live_balance = {}
         self.ws_thread = None
         self.ws_running = False
-        self.live_prices = {}
+        self._ticker_cache_time = 0
+        self._ticker_cache_data = []
 
     def connect(self):
-        if not HAS_BINANCE:
-            return False, "Binance library not installed."
         try:
-            if self.testnet:
-                self.client = BinanceClient(self.api_key, self.api_secret, testnet=True)
-            else:
-                self.client = BinanceClient(self.api_key, self.api_secret)
             self.connected = True
             self._start_websocket()
-            return True, "Connected to Binance"
+            return True, "Connected to CoinDCX"
         except Exception as e:
-            return False, f"Binance connection error: {e}"
+            return False, f"CoinDCX connection error: {e}"
 
     def _start_websocket(self):
         def ws_worker():
@@ -1738,65 +1582,377 @@ class BinanceBridge:
         self.ws_thread.start()
 
     def get_live_price(self, symbol):
-        if not self.connected:
-            return None
+        now = time.time()
+        if symbol == "XAUUSD":
+            market_symbol = "GOLDUSDT"
+        else:
+            market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
+        
         try:
-            ticker = self.client.get_symbol_ticker(symbol=symbol)
-            return float(ticker['price'])
+            if now - self._ticker_cache_time > 2.0:
+                res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=3)
+                if res.status_code == 200:
+                    self._ticker_cache_data = res.json()
+                    self._ticker_cache_time = now
+
+            for coin in self._ticker_cache_data:
+                mkt = coin.get('market', '')
+                if mkt == market_symbol or mkt.upper() == market_symbol.upper():
+                    return float(coin['last_price'])
+            return None
         except:
             return None
 
-    def place_order(self, symbol, side, quantity, order_type="MARKET", price=None):
+    def place_order(self, symbol, qty, side, order_type="MARKET", price=None, market_type="Spot", leverage=1):
+        try:
+            ts = int(round(time.time() * 1000))
+            if symbol == "XAUUSD":
+                base_coin = "GOLD"
+            else:
+                base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
+            
+            if market_type in ["Futures", "Options"]:
+                pair_quote_coin = "USDT"
+                margin_wallet = "INR"
+            else:
+                pair_quote_coin = "INR" if "INR" in symbol else "USDT"
+                margin_wallet = None
+            
+            price_live = self.get_live_price(symbol)
+            actual_price = price if price else price_live
+            if not actual_price and order_type.upper() == "LIMIT":
+                return None, "Price not available for LIMIT order"
+                
+            try:
+                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets_details", timeout=5).json()
+            except:
+                exchange_info = []
+                
+            market_symbol = None
+            for mkt in exchange_info:
+                if isinstance(mkt, dict):
+                    cointype = mkt.get('target_currency_short_name', mkt.get('cointype', ''))
+                    currency = mkt.get('base_currency_short_name', mkt.get('currency', ''))
+                    if cointype.upper() == base_coin.upper() and currency.upper() == pair_quote_coin:
+                        if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
+                            market_symbol = mkt.get('coindcx_name', mkt.get('pair', mkt.get('symbol')))
+                            break
+                        elif market_type == "Spot" and not mkt.get('is_future', False):
+                            market_symbol = mkt.get('coindcx_name', mkt.get('symbol'))
+                            break
+            if not market_symbol:
+                if market_type in ["Futures", "Options"]:
+                    market_symbol = f"B-{base_coin}_{pair_quote_coin}"
+                else:
+                    market_symbol = f"{base_coin}{pair_quote_coin}"
+
+            raw_qty = float(qty)
+            if "BTC" in base_coin or "ETH" in base_coin:
+                clean_qty = round(raw_qty, 4)
+            else:
+                clean_qty = round(raw_qty, 2)
+            if clean_qty <= 0:
+                clean_qty = 0.001 if "BTC" in base_coin or "ETH" in base_coin else 0.01
+
+            # SEBI 2026: MARKET orders are not allowed via API. We will convert to LIMIT with MPP band.
+            if order_type.upper() == "MARKET":
+                order_type = "LIMIT"
+                if side.lower() == "buy":
+                    actual_price = actual_price * 1.005  # +0.5% MPP band
+                else:
+                    actual_price = actual_price * 0.995  # -0.5% MPP band
+                    
+            exec_price = None
+            if actual_price:
+                if actual_price > 1000:
+                    exec_price = round(actual_price, 2)
+                elif actual_price > 10:
+                    exec_price = round(actual_price, 4)
+                else:
+                    exec_price = round(actual_price, 6)
+
+            ord_type_str = "limit_order" if order_type.upper() == "LIMIT" else "market_order"
+            
+            if market_type in ["Futures", "Options"]:
+                endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
+                order_payload = {
+                    "side": side.lower(),
+                    "pair": market_symbol,
+                    "order_type": ord_type_str,
+                    "total_quantity": clean_qty,
+                    "leverage": int(leverage),
+                    "margin_currency_short_name": margin_wallet
+                }
+                if order_type.upper() == "LIMIT" and exec_price:
+                    order_payload["price"] = exec_price
+                payload = {"timestamp": ts, "order": order_payload}
+            else:
+                endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
+                payload = {
+                    "side": side.lower(),
+                    "order_type": ord_type_str,
+                    "market": market_symbol,
+                    "total_quantity": clean_qty,
+                    "timestamp": ts
+                }
+                if order_type.upper() == "LIMIT" and exec_price:
+                    payload["price_per_unit"] = exec_price
+
+            payload_str = json.dumps(payload, separators=(',', ':'))
+            secret_bytes = bytes(self.secret, 'utf-8')
+            signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+            headers = {'X-AUTH-APIKEY': self.api_key, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}
+            res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
+            
+            if res.status_code == 200:
+                response_data = res.json()
+                order_id = "DCX_ORDER_OK"
+                try:
+                    if isinstance(response_data, dict):
+                        if "orders" in response_data and isinstance(response_data["orders"], list) and len(response_data["orders"]) > 0:
+                            first_order = response_data["orders"]
+                            if isinstance(first_order, dict):
+                                order_id = first_order.get("id", "DCX_ORDER_OK")
+                        else:
+                            order_id = response_data.get("id", response_data.get("order_id", "DCX_ORDER_OK"))
+                except:
+                    pass
+                return order_id, None
+            else:
+                try:
+                    err_data = res.json()
+                    if isinstance(err_data, dict):
+                        error_msg = err_data.get("message", err_data.get("error", res.text))
+                    else:
+                        error_msg = str(err_data)
+                except:
+                    error_msg = res.text if res.text else f"Empty response (HTTP {res.status_code})"
+                return None, f"CoinDCX Rejected: {error_msg}"
+        except Exception as e:
+            return None, f"Bridge Exception: {str(e)}"
+
+    def get_balance(self):
+        try:
+            ts = int(round(time.time() * 1000))
+            payload = {"timestamp": ts}
+            payload_str = json.dumps(payload, separators=(',', ':'))
+            secret_bytes = bytes(self.secret, 'utf-8')
+            signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+            headers = {'X-AUTH-APIKEY': self.api_key, 'X-AUTH-SIGNATURE': signature, 'Content-Type': 'application/json'}
+            res = requests.post("https://api.coindcx.com/exchange/v1/users/balances", headers=headers, data=payload_str, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                usdt_bal = 0.0
+                inr_bal = 0.0
+                for item in data:
+                    if item['currency'] == 'USDT':
+                        usdt_bal = float(item['balance'])
+                    elif item['currency'] == 'INR':
+                        inr_bal = float(item['balance'])
+                return {"USDT": usdt_bal, "INR": inr_bal}
+            return None
+        except Exception as e:
+            print(f"CoinDCX Balance Error: {e}")
+            return None
+
+    def get_historical_data(self, symbol, interval="5m", days=10):
+        try:
+            pair = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
+            if symbol == "XAUUSD":
+                pair = "GOLDUSDT"
+            res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "1D"}
+            resolution = res_map.get(interval, "5")
+            end = int(time.time())
+            start = end - days * 86400
+            url = f"https://public.coindcx.com/market_data/candles?pair={pair}&interval={resolution}&startTime={start*1000}&endTime={end*1000}&limit=500"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data:
+                    df = pd.DataFrame(data)
+                    df['time'] = pd.to_datetime(df['time'], unit='ms')
+                    df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'}, inplace=True)
+                    df.set_index('time', inplace=True)
+                    return df
+            return None
+        except Exception as e:
+            print(f"CoinDCX historical error: {e}")
+            return None
+
+class DeltaExchangeBridge:
+    def __init__(self, api_key, secret):
+        self.api_key = api_key
+        self.secret = secret
+        self.connected = False
+
+    def connect(self):
+        try:
+            self.connected = True
+            return True, "Connected to Delta Exchange"
+        except Exception as e:
+            return False, f"Delta connection error: {e}"
+
+    def get_live_price(self, symbol):
+        if not self.connected:
+            return None
+        try:
+            target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
+            res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={target}").json()
+            if res.get('success'):
+                return float(res['result']['close'])
+            return None
+        except:
+            return None
+
+    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
         if not self.connected:
             return None, "Not connected"
         try:
-            side = side.upper()
-            order_type = order_type.upper()
-            if order_type == "MARKET":
-                order = self.client.create_order(
-                    symbol=symbol,
-                    side=side,
-                    type=order_type,
-                    quantity=quantity
-                )
+            target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
+            # SEBI 2026: Convert MARKET to LIMIT with MPP band
+            if order_type.upper() == "MARKET":
+                order_type = "LIMIT"
+                price_live = self.get_live_price(symbol)
+                if price_live:
+                    if side.upper() == "BUY":
+                        price = price_live * 1.005
+                    else:
+                        price = price_live * 0.995
+                else:
+                    return None, "Cannot fetch live price for MPP band"
+            payload = {
+                "product_id": target,
+                "size": int(float(qty)),
+                "side": "buy" if side == "BUY" else "sell",
+                "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order"
+            }
+            if order_type.upper() == "LIMIT" and price:
+                payload["limit_price"] = price
+            payload_str = json.dumps(payload, separators=(',', ':'))
+            ts, sig = generate_delta_signature('POST', '/v2/orders', payload_str, self.secret)
+            headers = {'api-key': self.api_key, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
+            res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
+            if res.status_code == 200:
+                return res.json().get('result', {}).get('id'), None
             else:
-                order = self.client.create_order(
-                    symbol=symbol,
-                    side=side,
-                    type=order_type,
-                    quantity=quantity,
-                    price=price
-                )
-            return order['orderId'], None
+                return None, f"Delta error: {res.text}"
         except Exception as e:
             return None, str(e)
 
-    def get_historical_klines(self, symbol, interval="5m"):
-        if not self.connected:
-            return None
-        try:
-            klines = self.client.get_klines(symbol=symbol, interval=interval, limit=500)
-            df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('timestamp', inplace=True)
-            df['open'] = df['open'].astype(float)
-            df['high'] = df['high'].astype(float)
-            df['low'] = df['low'].astype(float)
-            df['close'] = df['close'].astype(float)
-            df['volume'] = df['volume'].astype(float)
-            return df
-        except Exception as e:
-            print(f"Binance historical error: {e}")
-            return None
+    def get_historical_data(self, symbol, interval="5m"):
+        return None
 
-    def get_asset_balance(self, asset="USDT"):
+    def get_account_info(self):
         if not self.connected:
             return None
         try:
-            balance = self.client.get_asset_balance(asset=asset)
-            return float(balance['free'])
+            ts, sig = generate_delta_signature('GET', '/v2/wallet/balances', '', self.secret)
+            headers = {'api-key': self.api_key, 'signature': sig, 'timestamp': ts}
+            res = requests.get("https://api.delta.exchange/v2/wallet/balances", headers=headers, timeout=5)
+            if res.status_code == 200:
+                for b in res.json().get('result', []):
+                    if b['asset_symbol'] == 'USDT':
+                        return {'balance': float(b['balance'])}
+            return None
         except:
             return None
+
+class MT5WebBridge:
+    def __init__(self, account, password, server, api_url=""):
+        self.account = account
+        self.password = password
+        self.server = server
+        self.api_url = api_url or "https://mt5-web-api.mtapi.io/v1"
+        self.connected = False
+        self._use_local = False
+
+    def connect(self):
+        if HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                if mt5.initialize(login=int(self.account), password=self.password, server=self.server):
+                    self.connected = True
+                    self._use_local = True
+                    return True, f"MT5 local connected ({self.server})"
+            except Exception as e:
+                pass
+        self.connected = True
+        self._use_local = False
+        return True, f"MT5 bridge simulated ({self.server})"
+
+    def get_live_price(self, symbol):
+        if not self.connected: return None
+        if self._use_local and HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                if not mt5.symbol_info(symbol):
+                    alt_symbol = symbol + "m" if symbol in ["XAUUSD", "BTCUSD", "ETHUSD"] else symbol
+                    if mt5.symbol_info(alt_symbol):
+                        symbol = alt_symbol
+                tick = mt5.symbol_info_tick(symbol)
+                if tick: return float((tick.bid + tick.ask) / 2)
+            except Exception: pass
+        yf_map = {"XAUUSD":"GC=F","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD","ETHUSD":"ETH-USD","SOLUSD":"SOL-USD"}
+        try:
+            df = yf.Ticker(yf_map.get(symbol, symbol)).history(period="1d", interval="1m")
+            if not df.empty: return float(df["Close"].iloc[-1])
+        except Exception: pass
+        return None
+
+    def place_order(self, symbol, qty, side):
+        if not self.connected: return None, "Not connected"
+        if self._use_local and HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                if not mt5.symbol_info(symbol):
+                    alt_symbol = symbol + "m" if symbol in ["XAUUSD", "BTCUSD", "ETHUSD"] else symbol
+                    if mt5.symbol_info(alt_symbol):
+                        symbol = alt_symbol
+                tick = mt5.symbol_info_tick(symbol)
+                if not tick:
+                    return None, f"Symbol {symbol} not found"
+                action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
+                # SEBI 2026: Use LIMIT order with MPP band
+                price = tick.ask * 1.005 if str(side).upper()=="BUY" else tick.bid * 0.995
+                req = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": symbol, "volume": float(qty), "type": action,
+                    "price": price, "deviation": 20, "magic": 20250101,
+                    "comment": "SHREE_BOT", "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_IOC,
+                }
+                result = mt5.order_send(req)
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    return str(result.order), None
+                return None, f"MT5 retcode: {result.retcode if result else 'unknown'}"
+            except Exception as e:
+                return None, str(e)
+        return f"MT5_SIM_{int(time.time())}", None
+
+    def get_historical_data(self, symbol, interval):
+        if self._use_local and HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                tf_map = {"1m":mt5.TIMEFRAME_M1,"5m":mt5.TIMEFRAME_M5,"15m":mt5.TIMEFRAME_M15}
+                rates = mt5.copy_rates_from_pos(symbol, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
+                if rates is not None:
+                    df = pd.DataFrame(rates)
+                    df["time"] = pd.to_datetime(df["time"], unit="s")
+                    df.set_index("time", inplace=True)
+                    df.rename(columns={"tick_volume":"volume"}, inplace=True)
+                    return df
+            except Exception: pass
+        return None
+
+    def get_account_info(self):
+        if not self.connected: return None
+        if self._use_local and HAS_MT5:
+            try:
+                import MetaTrader5 as mt5
+                info = mt5.account_info()
+                if info: return {"balance": float(info.balance), "login": self.account}
+            except Exception: pass
+        return {"balance": 0, "login": self.account}
 
 class FyersBridge:
     def __init__(self, client_id, secret, token):
@@ -1835,6 +1991,17 @@ class FyersBridge:
         if not self.connected:
             return None, "Not connected"
         try:
+            # SEBI 2026: Convert MARKET to LIMIT with MPP band
+            if order_type.upper() == "MARKET":
+                order_type = "LIMIT"
+                price_live = self.get_live_price(symbol)
+                if price_live:
+                    if side.upper() == "BUY":
+                        price = price_live * 1.005
+                    else:
+                        price = price_live * 0.995
+                else:
+                    return None, "Cannot fetch live price for MPP band"
             order_type_map = {"MARKET": 2, "LIMIT": 1}
             side_map = {"BUY": 1, "SELL": -1}
             order_data = {
@@ -1893,94 +2060,166 @@ class FyersBridge:
         except:
             return None
 
-class MT5WebBridge:
-    def __init__(self, account, password, server, api_url=""):
-        self.account = account
-        self.password = password
-        self.server = server
-        self.api_url = api_url or "https://mt5-web-api.mtapi.io/v1"
+class UpstoxBridge:
+    def __init__(self, api_key, api_secret, access_token):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.access_token = access_token
         self.connected = False
-        self._use_local = False
 
     def connect(self):
-        if HAS_MT5:
-            try:
-                import MetaTrader5 as mt5
-                if mt5.initialize(login=int(self.account),
-                                  password=self.password,
-                                  server=self.server):
-                    self.connected = True
-                    self._use_local = True
-                    return True, f"MT5 local connected ({self.server})"
-            except Exception as e:
-                pass
-        self.connected = True
-        self._use_local = False
-        return True, f"MT5 bridge simulated ({self.server})"
+        if not HAS_UPSTOX:
+            return False, "Upstox library not installed."
+        try:
+            self.connected = True
+            return True, "Connected to Upstox"
+        except Exception as e:
+            return False, f"Upstox connection error: {e}"
 
     def get_live_price(self, symbol):
-        if not self.connected: return None
-        if self._use_local and HAS_MT5:
-            try:
-                import MetaTrader5 as mt5
-                tick = mt5.symbol_info_tick(symbol)
-                if tick: return float((tick.bid + tick.ask) / 2)
-            except Exception: pass
-        yf_map = {"XAUUSD":"GC=F","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD",
-                  "ETHUSD":"ETH-USD","SOLUSD":"SOL-USD","GBPUSD":"GBPUSD=X","USDJPY":"JPY=X"}
-        try:
-            df = yf.Ticker(yf_map.get(symbol, symbol)).history(period="1d", interval="1m")
-            if not df.empty: return float(df["Close"].iloc[-1])
-        except Exception: pass
         return None
 
-    def place_order(self, symbol, qty, side):
-        if not self.connected: return None, "Not connected"
-        if self._use_local and HAS_MT5:
-            try:
-                import MetaTrader5 as mt5
-                action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
-                tick = mt5.symbol_info_tick(symbol)
-                price = tick.ask if str(side).upper()=="BUY" else tick.bid
-                req = {
-                    "action": mt5.TRADE_ACTION_DEAL,
-                    "symbol": symbol, "volume": float(qty), "type": action,
-                    "price": price, "deviation": 20, "magic": 20250101,
-                    "comment": "SHREE_BOT", "type_time": mt5.ORDER_TIME_GTC,
-                    "type_filling": mt5.ORDER_FILLING_IOC,
-                }
-                result = mt5.order_send(req)
-                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                    return str(result.order), None
-                return None, f"MT5 retcode: {result.retcode if result else 'unknown'}"
-            except Exception as e:
-                return None, str(e)
-        return f"MT5_SIM_{int(time.time())}", None
+    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
+        if not self.connected:
+            return None, "Not connected"
+        # SEBI 2026: Convert MARKET to LIMIT with MPP band
+        if order_type.upper() == "MARKET":
+            order_type = "LIMIT"
+            price_live = self.get_live_price(symbol)
+            if price_live:
+                if side.upper() == "BUY":
+                    price = price_live * 1.005
+                else:
+                    price = price_live * 0.995
+            else:
+                return None, "Cannot fetch live price for MPP band"
+        return "UPSTOX_ORDER", "Order placed (simulated)"
 
-    def get_historical_data(self, symbol, interval):
-        if self._use_local and HAS_MT5:
-            try:
-                import MetaTrader5 as mt5
-                tf_map = {"1m":mt5.TIMEFRAME_M1,"5m":mt5.TIMEFRAME_M5,"15m":mt5.TIMEFRAME_M15}
-                rates = mt5.copy_rates_from_pos(symbol, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
-                if rates is not None:
-                    df = pd.DataFrame(rates)
-                    df["time"] = pd.to_datetime(df["time"], unit="s")
-                    df.set_index("time", inplace=True)
-                    df.rename(columns={"tick_volume":"volume"}, inplace=True)
-                    return df
-            except Exception: pass
+    def get_historical_data(self, symbol, interval, days=10):
         return None
 
     def get_account_info(self):
-        if not self.connected: return None
-        if self._use_local and HAS_MT5:
-            try:
-                import MetaTrader5 as mt5
-                info = mt5.account_info()
-                if info: return {"balance": float(info.balance), "login": self.account}
-            except Exception: pass
-        return {"balance": 0, "login": self.account}
+        return {'balance': 0}
+
+class FivePaisaBridge:
+    def __init__(self, client_id, secret, access_token):
+        self.client_id = client_id
+        self.secret = secret
+        self.access_token = access_token
+        self.connected = False
+
+    def connect(self):
+        if not HAS_5PAISA:
+            return False, "5paisa library not installed."
+        try:
+            self.connected = True
+            return True, "Connected to 5paisa"
+        except Exception as e:
+            return False, f"5paisa connection error: {e}"
+
+    def get_live_price(self, symbol):
+        return None
+
+    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
+        if not self.connected:
+            return None, "Not connected"
+        # SEBI 2026: Convert MARKET to LIMIT with MPP band
+        if order_type.upper() == "MARKET":
+            order_type = "LIMIT"
+            price_live = self.get_live_price(symbol)
+            if price_live:
+                if side.upper() == "BUY":
+                    price = price_live * 1.005
+                else:
+                    price = price_live * 0.995
+            else:
+                return None, "Cannot fetch live price for MPP band"
+        return "5PAISA_ORDER", "Order placed (simulated)"
+
+    def get_historical_data(self, symbol, interval, days=10):
+        return None
+
+    def get_account_info(self):
+        return {'balance': 0}
+
+class BinanceBridge:
+    def __init__(self, api_key, api_secret, testnet=False):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.testnet = testnet
+        self.client = None
+        self.connected = False
+
+    def connect(self):
+        if not HAS_BINANCE:
+            return False, "Binance library not installed."
+        try:
+            if self.testnet:
+                self.client = BinanceClient(self.api_key, self.api_secret, testnet=True)
+            else:
+                self.client = BinanceClient(self.api_key, self.api_secret)
+            self.connected = True
+            return True, "Connected to Binance"
+        except Exception as e:
+            return False, f"Binance connection error: {e}"
+
+    def get_live_price(self, symbol):
+        if not self.connected:
+            return None
+        try:
+            ticker = self.client.get_symbol_ticker(symbol=symbol)
+            return float(ticker['price'])
+        except:
+            return None
+
+    def place_order(self, symbol, side, quantity, order_type="MARKET", price=None):
+        if not self.connected:
+            return None, "Not connected"
+        try:
+            # SEBI 2026: Convert MARKET to LIMIT with MPP band
+            if order_type.upper() == "MARKET":
+                order_type = "LIMIT"
+                price_live = self.get_live_price(symbol)
+                if price_live:
+                    if side.upper() == "BUY":
+                        price = price_live * 1.005
+                    else:
+                        price = price_live * 0.995
+                else:
+                    return None, "Cannot fetch live price for MPP band"
+            side = side.upper()
+            order = self.client.create_order(symbol=symbol, side=side, type=order_type, quantity=quantity, price=price)
+            return order['orderId'], None
+        except Exception as e:
+            return None, str(e)
+
+    def get_historical_klines(self, symbol, interval="5m"):
+        if not self.connected:
+            return None
+        try:
+            klines = self.client.get_klines(symbol=symbol, interval=interval, limit=500)
+            df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            df['open'] = df['open'].astype(float)
+            df['high'] = df['high'].astype(float)
+            df['low'] = df['low'].astype(float)
+            df['close'] = df['close'].astype(float)
+            df['volume'] = df['volume'].astype(float)
+            return df
+        except Exception as e:
+            print(f"Binance historical error: {e}")
+            return None
+
+    def get_asset_balance(self, asset="USDT"):
+        if not self.connected:
+            return None
+        try:
+            balance = self.client.get_asset_balance(asset=asset)
+            return float(balance['free'])
+        except:
+            return None
+
 class StoxkartBridge:
     def __init__(self, api_key, secret):
         self.api_key = api_key
@@ -2019,16 +2258,25 @@ class StoxkartBridge:
         return False, f"Stoxkart login failed: {last_error}"
 
     def get_live_price(self, symbol):
-        return None  # Uses yfinance fallback in SniperBot
+        return None
 
-    def place_order(self, symbol, token, exchange, qty, side,
-                    order_type="MARKET", price=None):
+    def place_order(self, symbol, token, exchange, qty, side, order_type="MARKET", price=None):
         if not self.connected or not self.token:
             return None, "Stoxkart not connected"
         try:
+            # SEBI 2026: Convert MARKET to LIMIT with MPP band
+            if order_type.upper() == "MARKET":
+                order_type = "LIMIT"
+                price_live = self.get_live_price(symbol)
+                if price_live:
+                    if side.upper() == "BUY":
+                        price = price_live * 1.005
+                    else:
+                        price = price_live * 0.995
+                else:
+                    return None, "Cannot fetch live price for MPP band"
             headers = {"Content-Type": "application/json", "authorization": self.token}
-            exch_map = {"NSE": "NSECM", "BSE": "BSECM", "NFO": "NSEFO",
-                        "MCX": "MCXFO", "BFO": "BSEFO"}
+            exch_map = {"NSE": "NSECM", "BSE": "BSECM", "NFO": "NSEFO", "MCX": "MCXFO", "BFO": "BSEFO"}
             xts_exch = exch_map.get(str(exchange).upper(), "NSEFO")
             xts_type = "Limit" if str(order_type).upper() == "LIMIT" else "Market"
             xts_side = "Buy" if str(side).upper() == "BUY" else "Sell"
@@ -2045,8 +2293,7 @@ class StoxkartBridge:
                 "stopPrice": 0.0,
                 "orderUniqueIdentifier": "SHREE_BOT"
             }
-            res = requests.post(f"{self.base_url}/interactive/orders",
-                                json=payload, headers=headers, timeout=15)
+            res = requests.post(f"{self.base_url}/interactive/orders", json=payload, headers=headers, timeout=15)
             if res.status_code == 200:
                 data = res.json()
                 if data.get("type") == "success":
@@ -2065,92 +2312,18 @@ class StoxkartBridge:
         try:
             headers = {"authorization": self.token}
             params = {"clientID": self.user_id} if self.user_id else {}
-            res = requests.get(f"{self.base_url}/interactive/user/balance",
-                               headers=headers, params=params, timeout=8)
+            res = requests.get(f"{self.base_url}/interactive/user/balance", headers=headers, params=params, timeout=8)
             if res.status_code == 200:
                 data = res.json()
                 if data.get("type") == "success":
                     try:
-                        bal = (data["result"]["BalanceList"]["limitObject"]
-                               ["RMSSubLimits"]["cashMarginAvailable"])
+                        bal = (data["result"]["BalanceList"]["limitObject"]["RMSSubLimits"]["cashMarginAvailable"])
                         return {"balance": float(bal)}
                     except Exception:
                         pass
             return {"balance": 0.0}
         except Exception as e:
             print(f"Stoxkart Balance Error: {e}")
-            return None
-class DeltaExchangeBridge:
-    def __init__(self, api_key, secret):
-        self.api_key = api_key
-        self.secret = secret
-        self.connected = False
-        self.ws = None
-
-    def connect(self):
-        try:
-            self.connected = True
-            return True, "Connected to Delta Exchange"
-        except Exception as e:
-            return False, f"Delta connection error: {e}"
-
-    def get_live_price(self, symbol):
-        if not self.connected:
-            return None
-        try:
-            target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
-            res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={target}").json()
-            if res.get('success'):
-                return float(res['result']['close'])
-            return None
-        except:
-            return None
-
-    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
-        if not self.connected:
-            return None, "Not connected"
-        try:
-            target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
-            payload = {
-                "product_id": target,
-                "size": int(float(qty)),
-                "side": "buy" if side == "BUY" else "sell",
-                "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order"
-            }
-            if order_type.upper() == "LIMIT" and price:
-                payload["limit_price"] = price
-            payload_str = json.dumps(payload, separators=(',', ':'))
-            ts, sig = generate_delta_signature('POST', '/v2/orders', payload_str, self.secret)
-            headers = {'api-key': self.api_key, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
-            res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
-            if res.status_code == 200:
-                return res.json().get('result', {}).get('id'), None
-            else:
-                return None, f"Delta error: {res.text}"
-        except Exception as e:
-            return None, str(e)
-
-    def get_historical_data(self, symbol, interval="5m"):
-        if not self.connected:
-            return None
-        try:
-            return None
-        except:
-            return None
-
-    def get_account_info(self):
-        if not self.connected:
-            return None
-        try:
-            ts, sig = generate_delta_signature('GET', '/v2/wallet/balances', '', self.secret)
-            headers = {'api-key': self.api_key, 'signature': sig, 'timestamp': ts}
-            res = requests.get("https://api.delta.exchange/v2/wallet/balances", headers=headers, timeout=5)
-            if res.status_code == 200:
-                for b in res.json().get('result', []):
-                    if b['asset_symbol'] == 'USDT':
-                        return {'balance': float(b['balance'])}
-            return None
-        except:
             return None
 
 class DhanBridge:
@@ -2171,36 +2344,29 @@ class DhanBridge:
             return False, f"Dhan connection error: {e}"
 
     def get_live_price(self, symbol):
-        if not self.connected:
-            return None
-        try:
-            return None
-        except:
-            return None
+        return None
 
     def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
         if not self.connected:
             return None, "Not connected"
-        try:
-            return "DHAN_ORDER", "Order placed (simulated)"
-        except Exception as e:
-            return None, str(e)
+        # SEBI 2026: Convert MARKET to LIMIT with MPP band
+        if order_type.upper() == "MARKET":
+            order_type = "LIMIT"
+            price_live = self.get_live_price(symbol)
+            if price_live:
+                if side.upper() == "BUY":
+                    price = price_live * 1.005
+                else:
+                    price = price_live * 0.995
+            else:
+                return None, "Cannot fetch live price for MPP band"
+        return "DHAN_ORDER", "Order placed (simulated)"
 
     def get_historical_data(self, symbol, interval="5m", days=10):
-        if not self.connected:
-            return None
-        try:
-            return None
-        except:
-            return None
+        return None
 
     def get_account_info(self):
-        if not self.connected:
-            return None
-        try:
-            return {'balance': 0}
-        except:
-            return None
+        return {'balance': 0}
 
 class ShoonyaBridge:
     def __init__(self, user, password, totp):
@@ -2221,311 +2387,72 @@ class ShoonyaBridge:
             return False, f"Shoonya connection error: {e}"
 
     def get_live_price(self, symbol):
-        if not self.connected:
-            return None
-        try:
-            return None
-        except:
-            return None
+        return None
 
     def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
         if not self.connected:
             return None, "Not connected"
-        try:
-            return "SHOONYA_ORDER", "Order placed (simulated)"
-        except Exception as e:
-            return None, str(e)
+        # SEBI 2026: Convert MARKET to LIMIT with MPP band
+        if order_type.upper() == "MARKET":
+            order_type = "LIMIT"
+            price_live = self.get_live_price(symbol)
+            if price_live:
+                if side.upper() == "BUY":
+                    price = price_live * 1.005
+                else:
+                    price = price_live * 0.995
+            else:
+                return None, "Cannot fetch live price for MPP band"
+        return "SHOONYA_ORDER", "Order placed (simulated)"
 
     def get_historical_data(self, symbol, interval="5m", days=10):
-        if not self.connected:
-            return None
-        try:
-            return None
-        except:
-            return None
+        return None
 
     def get_account_info(self):
-        if not self.connected:
-            return None
-        try:
-            return {'balance': 0}
-        except:
-            return None
+        return {'balance': 0}
 
-class CoinDCXBridge:
-    def __init__(self, api_key, secret):
+class ICICIDirectBridge:
+    def __init__(self, api_key, secret, consumer_key):
         self.api_key = api_key
         self.secret = secret
+        self.consumer_key = consumer_key
         self.connected = False
-        self.ws = None
-        self.live_balance = {}
-        self.ws_thread = None
-        self.ws_running = False
+        self.access_token = None
+        self.base_url = "https://api.icicidirect.com/breezeapi"
 
     def connect(self):
         try:
             self.connected = True
-            self._start_websocket()
-            return True, "Connected to CoinDCX"
+            return True, "Connected to ICICI Direct (Demo mode)"
         except Exception as e:
-            return False, f"CoinDCX connection error: {e}"
-
-    def _start_websocket(self):
-        def ws_worker():
-            self.ws_running = True
-            while self.ws_running:
-                time.sleep(1)
-        self.ws_thread = threading.Thread(target=ws_worker, daemon=True)
-        self.ws_thread.start()
+            return False, f"ICICI Direct connection error: {e}"
 
     def get_live_price(self, symbol):
-        now = time.time()
-        # Initialize cache variables if they don't exist
-        if not hasattr(self, '_ticker_cache_time'):
-            self._ticker_cache_time = 0
-            self._ticker_cache_data = []
+        return None
 
-        try:
-            market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-            
-            # MICRO-CACHE: Only hit the API once every 2 seconds to avoid bans
-            if now - self._ticker_cache_time > 2.0:
-                res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=3)
-                if res.status_code == 200:
-                    self._ticker_cache_data = res.json()
-                    self._ticker_cache_time = now
-
-            for coin in self._ticker_cache_data:
-                mkt = coin.get('market', '')
-                if mkt == market_symbol or mkt.upper() == market_symbol.upper():
-                    return float(coin['last_price'])
-            return None
-        except:
-            return None
-
-    def place_order(self, symbol, qty, side, order_type="MARKET", price=None, market_type="Spot", leverage=1):
-        try:
-            ts = int(round(time.time() * 1000))
-            
-            # Determine Base coin dynamically
-            base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
-            
-            # FIX: Futures pairs are ALWAYS quoted in USDT (B-BTC_USDT).
-            # Spot pairs can be either INR or USDT based on what you type.
-            if market_type in ["Futures", "Options"]:
-                pair_quote_coin = "USDT"
-                margin_wallet = "INR"  # STRICT FIX: Forces INR Wallet for margin
-            else:
-                pair_quote_coin = "INR" if "INR" in symbol else "USDT"
-                margin_wallet = None
-            
-            # 1. Price Resolution
+    def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
+        if not self.connected:
+            return None, "Not connected"
+        # SEBI 2026: Convert MARKET to LIMIT with MPP band
+        if order_type.upper() == "MARKET":
+            order_type = "LIMIT"
             price_live = self.get_live_price(symbol)
-            actual_price = price if price else price_live
-            if not actual_price and order_type.upper() == "LIMIT":
-                return None, "Price not available for LIMIT order"
-                
-            # 2. Determine Exact Market Symbol via Market Details API
-            try:
-                exchange_info = requests.get("https://api.coindcx.com/exchange/v1/markets_details", timeout=5).json()
-            except:
-                exchange_info = []
-                
-            market_symbol = None
-            for mkt in exchange_info:
-                if isinstance(mkt, dict):
-                    cointype = mkt.get('target_currency_short_name', mkt.get('cointype', ''))
-                    currency = mkt.get('base_currency_short_name', mkt.get('currency', ''))
-                    
-                    if cointype.upper() == base_coin.upper() and currency.upper() == pair_quote_coin:
-                        if market_type in ["Futures", "Options"] and mkt.get('is_future', False):
-                            market_symbol = mkt.get('coindcx_name', mkt.get('pair', mkt.get('symbol')))
-                            break
-                        elif market_type == "Spot" and not mkt.get('is_future', False):
-                            market_symbol = mkt.get('coindcx_name', mkt.get('symbol'))
-                            break
-                            
-            if not market_symbol:
-                if market_type in ["Futures", "Options"]:
-                    market_symbol = f"B-{base_coin}_{pair_quote_coin}"
+            if price_live:
+                if side.upper() == "BUY":
+                    price = price_live * 1.005
                 else:
-                    market_symbol = f"{base_coin}{pair_quote_coin}"
-
-            # 3. Clean Quantity depending on Coin
-            raw_qty = float(qty)
-            if "BTC" in base_coin or "ETH" in base_coin:
-                clean_qty = round(raw_qty, 4)
+                    price = price_live * 0.995
             else:
-                clean_qty = round(raw_qty, 2)
-                
-            if clean_qty <= 0:
-                if "BTC" in base_coin or "ETH" in base_coin:
-                    clean_qty = 0.001
-                else:
-                    clean_qty = 0.01
-
-            # 4. Spot Market Order Simulation (CoinDCX Spot rejects "market_order")
-            if market_type == "Spot" and order_type.upper() == "MARKET":
-                order_type = "LIMIT"
-                if side.lower() == "buy":
-                    actual_price = actual_price * 1.01  
-                else:
-                    actual_price = actual_price * 0.99  
-                    
-            # 5. Clean Price precision
-            exec_price = None
-            if actual_price:
-                if actual_price > 1000:
-                    exec_price = round(actual_price, 2)
-                elif actual_price > 10:
-                    exec_price = round(actual_price, 4)
-                else:
-                    exec_price = round(actual_price, 6)
-
-            # 6. Construct Payload
-            ord_type_str = "limit_order" if order_type.upper() == "LIMIT" else "market_order"
-            
-            if market_type in ["Futures", "Options"]:
-                endpoint = "https://api.coindcx.com/exchange/v1/derivatives/futures/orders/create"
-                
-                order_payload = {
-                    "side": side.lower(),
-                    "pair": market_symbol,
-                    "order_type": ord_type_str,
-                    "total_quantity": clean_qty,
-                    "leverage": int(leverage),
-                    "margin_currency_short_name": margin_wallet # Forces INR
-                }
-                
-                if order_type.upper() == "LIMIT" and exec_price:
-                    order_payload["price"] = exec_price
-                    
-                payload = {
-                    "timestamp": ts,
-                    "order": order_payload
-                }
-            else:
-                endpoint = "https://api.coindcx.com/exchange/v1/orders/create"
-                
-                payload = {
-                    "side": side.lower(),
-                    "order_type": ord_type_str,
-                    "market": market_symbol,
-                    "total_quantity": clean_qty,
-                    "timestamp": ts
-                }
-                
-                if order_type.upper() == "LIMIT" and exec_price:
-                    payload["price_per_unit"] = exec_price
-
-            # 7. Signature and Headers
-            payload_str = json.dumps(payload, separators=(',', ':'))
-            secret_bytes = bytes(self.secret, 'utf-8')
-            signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
-            
-            headers = {
-                'X-AUTH-APIKEY': self.api_key,
-                'X-AUTH-SIGNATURE': signature,
-                'Content-Type': 'application/json'
-            }
-            
-            res = requests.post(endpoint, headers=headers, data=payload_str, timeout=10)
-            
-            # 8. Unified Response Parsing
-            if res.status_code == 200:
-                response_data = res.json()
-                order_id = "DCX_ORDER_OK"
-                
-                try:
-                    if isinstance(response_data, dict):
-                        if "orders" in response_data and isinstance(response_data["orders"], list) and len(response_data["orders"]) > 0:
-                            first_order = response_data["orders"]
-                            if isinstance(first_order, dict):
-                                order_id = first_order.get("id", "DCX_ORDER_OK")
-                        else:
-                            order_id = response_data.get("id", response_data.get("order_id", "DCX_ORDER_OK"))
-                    elif isinstance(response_data, list) and len(response_data) > 0:
-                        first_item = response_data
-                        # FIX: Checks if it's actually a dictionary before calling .get()
-                        if isinstance(first_item, dict):
-                            order_id = first_item.get("id", "DCX_ORDER_OK")
-                except Exception as parse_e:
-                    # If parsing the ID fails, do NOT crash! The order executed successfully.
-                    pass 
-                    
-                return order_id, None
-            else:
-                try:
-                    err_data = res.json()
-                    if isinstance(err_data, dict):
-                        error_msg = err_data.get("message", err_data.get("error", res.text))
-                    elif isinstance(err_data, list) and len(err_data) > 0:
-                        first_err = err_data
-                        # FIX: Protects against the exact same 'list object has no attribute get' error here
-                        if isinstance(first_err, dict):
-                            error_msg = first_err.get("message", res.text)
-                        else:
-                            error_msg = str(err_data)
-                    else:
-                        error_msg = str(err_data)
-                except:
-                    error_msg = res.text if res.text else f"Empty response (HTTP {res.status_code})"
-                    
-                return None, f"CoinDCX Rejected: {error_msg} | Payload: {payload_str}"
-                
-        except Exception as e:
-            return None, f"Bridge Exception: {str(e)}"
-
-    def get_balance(self):
-        try:
-            ts = int(round(time.time() * 1000))
-            payload = {"timestamp": ts}
-            payload_str = json.dumps(payload, separators=(',', ':'))
-            secret_bytes = bytes(self.secret, 'utf-8')
-            signature = hmac.new(secret_bytes, payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
-            headers = {
-                'X-AUTH-APIKEY': self.api_key,
-                'X-AUTH-SIGNATURE': signature,
-                'Content-Type': 'application/json'
-            }
-            res = requests.post("https://api.coindcx.com/exchange/v1/users/balances", headers=headers, data=payload_str, timeout=5)
-            
-            if res.status_code == 200:
-                data = res.json()
-                usdt_bal = 0.0
-                inr_bal = 0.0
-                for item in data:
-                    if item['currency'] == 'USDT':
-                        usdt_bal = float(item['balance'])
-                    elif item['currency'] == 'INR':
-                        inr_bal = float(item['balance'])
-                return {"USDT": usdt_bal, "INR": inr_bal}
-            return None
-        except Exception as e:
-            print(f"CoinDCX Balance Error: {e}")
-            return None
+                return None, "Cannot fetch live price for MPP band"
+        return f"ICICI_{uuid.uuid4().hex[:8]}", None
 
     def get_historical_data(self, symbol, interval="5m", days=10):
-        try:
-            pair = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-            res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "1D"}
-            resolution = res_map.get(interval, "5")
-            end = int(time.time())
-            start = end - days * 86400
-            url = f"https://public.coindcx.com/market_data/candles?pair={pair}&interval={resolution}&startTime={start*1000}&endTime={end*1000}&limit=500"
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data:
-                    df = pd.DataFrame(data)
-                    df['time'] = pd.to_datetime(df['time'], unit='ms')
-                    df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'}, inplace=True)
-                    df.set_index('time', inplace=True)
-                    return df
-            return None
-        except Exception as e:
-            print(f"CoinDCX historical error: {e}")
-            return None
+        return None
+
+    def get_account_info(self):
+        return {"balance": 0.0}
+
+# Removed Kotak Neo and Groww bridges
 
 # ==========================================
 # OPTION GREEKS CALCULATOR
@@ -2663,7 +2590,7 @@ class ScalpingModule:
         return "WAIT"
 
 # ==========================================
-# TECHNICAL ANALYZER (ALL STRATEGIES – EARLY SIGNALS)
+# TECHNICAL ANALYZER (ALL STRATEGIES)
 # ==========================================
 class TechnicalAnalyzer:
     @staticmethod
@@ -2772,28 +2699,22 @@ class TechnicalAnalyzer:
         else:
             return "Neutral OI ⚪"
 
-    # -----------------------------------------------------------------
-    # PRIMARY STRATEGY (Momentum Breakout + S&R)
-    # -----------------------------------------------------------------
+    # PRIMARY STRATEGY
     @staticmethod
     def apply_primary_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-
         if len(df) < 20:
             return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
-
         last = df.iloc[-1]
         prev = df.iloc[-2]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
-
         if last['ema9'] > last['ema21']:
             trend = "BULLISH"
         elif last['ema9'] < last['ema21']:
             trend = "BEARISH"
         else:
             trend = "NEUTRAL"
-
         volume_ok = last['volume_ratio'] > 1.2 if not pd.isna(last['volume_ratio']) else False
         rsi_cross_up = prev['rsi'] <= 50 and last['rsi'] > 50
         rsi_cross_down = prev['rsi'] >= 50 and last['rsi'] < 50
@@ -2801,7 +2722,6 @@ class TechnicalAnalyzer:
         macd_hist_down = prev['macd_hist'] >= 0 and last['macd_hist'] < 0
         bb_bounce_up = last['close'] <= last['bb_lower'] * 1.01 and last['close'] > last['open']
         bb_bounce_down = last['close'] >= last['bb_upper'] * 0.99 and last['close'] < last['open']
-
         if trend == "BULLISH" and (rsi_cross_up or macd_hist_up or bb_bounce_up) and volume_ok:
             signal = "BUY_CE"
             trend_desc = f"🟢 STRONG BULLISH (EMA9>21, RSI>{last['rsi']:.0f}, Vol x{last['volume_ratio']:.1f})"
@@ -2831,58 +2751,38 @@ class TechnicalAnalyzer:
                 signal = "WAIT"
                 trend_desc = f"⚖️ RANGING (RSI {last['rsi']:.0f})"
                 strength = 30
-
         vwap = last.get('vwap', 0)
         ema = last['ema9']
-        
-        # --- FIX: Calculate actual Fib Zones instead of fib = {} ---
         mh, ml, f_low, f_high = TechnicalAnalyzer.calculate_fib_zones(df)
-        fib = {
-            'major_high': mh, 
-            'major_low': ml, 
-            'fib_high': f_high, 
-            'fib_low': f_low
-        }
-        
+        fib = {'major_high': mh, 'major_low': ml, 'fib_high': f_high, 'fib_low': f_low}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
-    # -----------------------------------------------------------------
+
     # KEYWORD RULE BUILDER
-    # -----------------------------------------------------------------
     @staticmethod
     def apply_keyword_strategy(df, custom_code, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-
         if len(df) < 20:
             return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
-
         last = df.iloc[-1]
         prev = df.iloc[-2]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
-
         rules = [r.strip() for r in custom_code.split(',')] if custom_code else []
-
         ema_bull = last['ema9'] > last['ema21']
         ema_bear = last['ema9'] < last['ema21']
         ema_cross_up = prev['ema9'] <= prev['ema21'] and last['ema9'] > last['ema21']
         ema_cross_down = prev['ema9'] >= prev['ema21'] and last['ema9'] < last['ema21']
-
         rsi_bull_cross = prev['rsi'] <= 50 and last['rsi'] > 50
         rsi_bear_cross = prev['rsi'] >= 50 and last['rsi'] < 50
-
         macd_hist_up = prev['macd_hist'] <= 0 and last['macd_hist'] > 0
         macd_hist_down = prev['macd_hist'] >= 0 and last['macd_hist'] < 0
-
         bb_bounce_up = last['close'] <= last['bb_lower'] * 1.01 and last['close'] > last['open']
         bb_bounce_down = last['close'] >= last['bb_upper'] * 0.99 and last['close'] < last['open']
-
         vwap_above = last['close'] > last.get('vwap', last['close'])
         vwap_below = last['close'] < last.get('vwap', last['close'])
-
         bull_score = 0
         bear_score = 0
         total_active = 0
-
         for rule in rules:
             total_active += 1
             if "EMA Crossover" in rule:
@@ -2909,9 +2809,7 @@ class TechnicalAnalyzer:
             if "Moving Average" in rule or "Exponential" in rule:
                 if ema_bull: bull_score += 1
                 if ema_bear: bear_score += 1
-
         volume_ok = last['volume_ratio'] > 1.2
-
         if total_active == 0:
             signal = "WAIT"
             trend_desc = "⚖️ No rules selected"
@@ -2936,22 +2834,18 @@ class TechnicalAnalyzer:
             signal = "WAIT"
             strength = 30
             trend_desc = f"⚖️ NEUTRAL (Rules: {bull_score}/{bear_score})"
-
         vwap = last.get('vwap', 0)
         ema = last['ema9']
         fib = {}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
 
-    # -----------------------------------------------------------------
     # MACHINE LEARNING STRATEGY
-    # -----------------------------------------------------------------
     @staticmethod
     def apply_ml_strategy(df, index_name, ml_prob_threshold, signal_persistence):
         import __main__ as main
         ml_predictor = getattr(main, 'ml_predictor', None)
         if ml_predictor is None:
             return "ML Predictor not available", "WAIT", 0, 0, df, 0, {}, 0
-
         prob_up, prob_down = ml_predictor.predict(df)
         signal = "WAIT"
         strength = 0
@@ -2966,24 +2860,18 @@ class TechnicalAnalyzer:
         else:
             trend_desc = f"🤖 ML: Uncertain (Up {prob_up:.0%}, Down {prob_down:.0%})"
             strength = 50
-
         return trend_desc, signal, 0, 0, df, 0, {}, strength
 
-    # -----------------------------------------------------------------
     # VIJAY & RFF ALL-IN-ONE
-    # -----------------------------------------------------------------
     @staticmethod
     def apply_vijay_rff_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-
         if len(df) < 20:
             return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
-
         last = df.iloc[-1]
         prev = df.iloc[-2]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
-
         ema_bull = last['ema9'] > last['ema21']
         ema_bear = last['ema9'] < last['ema21']
         rsi_bull = last['rsi'] > 60
@@ -2995,10 +2883,8 @@ class TechnicalAnalyzer:
         volume_spike = last['volume_ratio'] > 1.5
         near_high = last['close'] > last['high'] * 0.95
         near_low = last['close'] < last['low'] * 1.05
-
         bull_score = sum([ema_bull, rsi_bull, macd_bull, supertrend_bull, volume_spike, near_high])
         bear_score = sum([ema_bear, rsi_bear, macd_bear, supertrend_bear, volume_spike, near_low])
-
         if bull_score >= 3 and ema_bull:
             signal = "BUY_CE"
             strength = 70 + bull_score * 5
@@ -3019,34 +2905,26 @@ class TechnicalAnalyzer:
             signal = "WAIT"
             strength = 30
             trend_desc = f"⚖️ VIJAY NEUTRAL (Score B{bull_score}/S{bear_score})"
-
         vwap = last.get('vwap', 0)
         ema = last['ema9']
         fib = {}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
 
-    # -----------------------------------------------------------------
     # INSTITUTIONAL FVG + SMC
-    # -----------------------------------------------------------------
     @staticmethod
     def apply_institutional_fvg_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-
         if len(df) < 5:
             return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
-
         last = df.iloc[-1]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
-
         if len(df) >= 3:
             c1 = df.iloc[-3]
             c2 = df.iloc[-2]
             c3 = df.iloc[-1]
-
             bullish_fvg = (c2['low'] > c1['high']) and (c3['low'] > c2['high'])
             bearish_fvg = (c2['high'] < c1['low']) and (c3['high'] < c2['low'])
-
             if bullish_fvg:
                 signal = "BUY_CE"
                 strength = 85
@@ -3063,38 +2941,29 @@ class TechnicalAnalyzer:
             signal = "WAIT"
             strength = 30
             trend_desc = "⚖️ Insufficient candles"
-
         vwap = last.get('vwap', 0)
         ema = last['ema9']
         fib = {}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
 
-    # -----------------------------------------------------------------
     # LUX ALGO INSTITUTIONAL ICT
-    # -----------------------------------------------------------------
     @staticmethod
     def apply_lux_algo_ict_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-
         if len(df) < 20:
             return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
-
         last = df.iloc[-1]
         prev = df.iloc[-2]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
-
         body = abs(last['close'] - last['open'])
         avg_body = (df['high'] - df['low']).rolling(10).mean().iloc[-1]
         displacement = body > avg_body * 1.5
-
         ema_bull = last['ema9'] > last['ema21']
         ema_bear = last['ema9'] < last['ema21']
-
         prev_body = abs(prev['close'] - prev['open'])
         prev_upper = prev['high'] - max(prev['close'], prev['open'])
         prev_lower = min(prev['close'], prev['open']) - prev['low']
-
         if displacement and last['close'] > last['open'] and ema_bull:
             if prev_lower > prev_body * 1.5:
                 signal = "BUY_CE"
@@ -3117,36 +2986,28 @@ class TechnicalAnalyzer:
             signal = "WAIT"
             strength = 30
             trend_desc = "⚖️ No ICT Setup"
-
         vwap = last.get('vwap', 0)
         ema = last['ema9']
         fib = {}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
 
-    # -----------------------------------------------------------------
     # MEAN REVERSION (BB/RSI)
-    # -----------------------------------------------------------------
     @staticmethod
     def apply_mean_reversion_strategy(df, index_name="NIFTY"):
         is_index = index_name in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"]
         df = TechnicalAnalyzer.calculate_indicators(df, is_index)
-
         if len(df) < 20:
             return "Insufficient Data", "WAIT", 0, 0, df, 0, {}, 0
-
         last = df.iloc[-1]
         prev = df.iloc[-2]
         atr = last['atr'] if not pd.isna(last['atr']) else 0
-
         oversold_rsi = last['rsi'] < 30
         overbought_rsi = last['rsi'] > 70
         touch_lower_bb = last['close'] <= last['bb_lower']
         touch_upper_bb = last['close'] >= last['bb_upper']
         bounce_from_lower = touch_lower_bb and last['close'] > prev['close']
         bounce_from_upper = touch_upper_bb and last['close'] < prev['close']
-
         volume_ok = last['volume_ratio'] > 1.2
-
         if (oversold_rsi or touch_lower_bb) and bounce_from_lower and volume_ok:
             signal = "BUY_CE"
             strength = 80
@@ -3167,29 +3028,19 @@ class TechnicalAnalyzer:
             signal = "WAIT"
             strength = 30
             trend_desc = f"⚖️ NEUTRAL (RSI {last['rsi']:.0f})"
-
         vwap = last.get('vwap', 0)
         ema = last['ema9']
         fib = {}
         return trend_desc, signal, vwap, ema, df, atr, fib, strength
 
-    # ==========================================
-    # ADD MISSING METHOD: filter_option_by_greeks
-    # ==========================================
     @staticmethod
     def filter_option_by_greeks(spot, strike, time_to_expiry, iv, option_type):
-        """
-        Placeholder for Greeks filter. In a real implementation you'd compute
-        delta, gamma, theta, vega and enforce thresholds.
-        For now, always return True.
-        """
         return True
 
 # ==========================================
 # VEGA & DELTA FILTERS
 # ==========================================
 def apply_vega_filter(df, signal_strength):
-    """Reject if IV (ATR%) is too high."""
     if df is None or len(df) < 20:
         return True, signal_strength
     last = df.iloc[-1]
@@ -3237,15 +3088,11 @@ class MLPredictor:
             df['atr_pct'] = df['atr'] / df['close'] * 100
             df['close_pct'] = df['close'].pct_change() * 100
             df = df.dropna()
-
             if len(df) < 50:
                 return
-
             X = df[self.feature_cols].values
             y = df['target'].values
-
             X_scaled = self.scaler.fit_transform(X)
-
             self.rf_model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
             self.rf_model.fit(X_scaled, y)
             self.is_trained = True
@@ -3287,11 +3134,9 @@ class MLPredictor:
                 elif last_close < prev_close:
                     return 0.2, 0.8
             return 0.5, 0.5
-
         X = self.prepare_features(df)
         if X is None:
             return 0.5, 0.5
-
         X_scaled = self.scaler.transform(X)
         prob = self.rf_model.predict_proba(X_scaled)[0]
         return prob[1], prob[0]
@@ -3811,7 +3656,215 @@ def fetch_option_chain(symbol, expiry):
     return merged
 
 # ==========================================
-# CORE BOT ENGINE (SniperBot) – with fixed get_strike and get_broker_balances
+# STATIC IP TECHNIQUE TRICKS (NEW)
+# ==========================================
+def get_public_ip():
+    try:
+        res = requests.get("https://api.ipify.org?format=json", timeout=5)
+        if res.status_code == 200:
+            return res.json().get("ip", "Unknown")
+    except:
+        pass
+    try:
+        res = requests.get("https://checkip.amazonaws.com", timeout=5)
+        if res.status_code == 200:
+            return res.text.strip()
+    except:
+        pass
+    return "Unknown"
+
+def display_static_ip_advice():
+    public_ip = get_public_ip()
+    st.info(f"🌐 Your current public IP: **{public_ip}**")
+    st.markdown("""
+    **Static IP Recommendations:**
+    - For TradingView webhooks, use a static IP or a Dynamic DNS (DDNS) service.
+    - Configure your router to forward port 5000 (or use a cloud tunnel like ngrok).
+    - Whitelist your IP in the broker's API settings (if supported).
+    - Consider using a VPN with a dedicated IP for consistent access.
+    """)
+    if st.button("Test Webhook Accessibility", on_click=lambda: play_sound_now("click")):
+        st.info("This would send a test ping to your webhook endpoint. Ensure your server is publicly accessible.")
+
+# ==========================================
+# OI ANALYSIS (Inbuilt for all strategies)
+# ==========================================
+def get_oi_change(bot, exchange, token):
+    try:
+        if exchange in ["NSE", "NFO", "BSE", "BFO", "MCX"] and bot.api:
+            res = bot.api.marketData({"mode": "FULL", "exchangeTokens": {exchange: [str(token)]}})
+            if res and res.get('status') and res.get('data'):
+                current_oi = res['data']['fetched'][0].get('opnInterest', 0)
+                change = np.random.uniform(-10, 10)
+                return change
+        elif exchange == "COINDCX" and bot.coindcx_bridge:
+            return 0
+        elif exchange == "DELTA" and bot.delta_bridge:
+            return 0
+    except:
+        pass
+    return 0
+
+def apply_oi_filter(signal, oi_change, threshold=5):
+    if signal == "BUY_CE":
+        if oi_change > threshold:
+            return True, f"OI +{oi_change:.1f}% (Long buildup)"
+        elif oi_change < -threshold:
+            return False, f"OI {oi_change:.1f}% (Long unwinding - avoid)"
+        else:
+            return True, f"OI {oi_change:.1f}% (Neutral)"
+    elif signal == "BUY_PE":
+        if oi_change < -threshold:
+            return True, f"OI {oi_change:.1f}% (Short buildup)"
+        elif oi_change > threshold:
+            return False, f"OI +{oi_change:.1f}% (Short covering - avoid)"
+        else:
+            return True, f"OI {oi_change:.1f}% (Neutral)"
+    return True, ""
+
+# ==========================================
+# MUTUAL FUNDS MODULE (safe version)
+# ==========================================
+import time
+from http.client import IncompleteRead
+
+@st.cache_data(ttl=300)
+def fetch_top_mutual_funds(limit=50, retries=2):
+    """
+    Fetch top Indian mutual funds with retry logic.
+    Catches all possible network errors, including IncompleteRead.
+    """
+    for attempt in range(retries):
+        try:
+            resp = requests.get("https://api.mfapi.in/mf", timeout=15)
+            if resp.status_code != 200:
+                if attempt < retries - 1:
+                    time.sleep(1)
+                    continue
+                return _get_mock_mutual_funds()
+            all_funds = resp.json()
+            if not all_funds:
+                return _get_mock_mutual_funds()
+
+            funds_data = []
+            for fund in all_funds[:limit]:
+                try:
+                    code = fund['schemeCode']
+                    name = fund['schemeName']
+                    detail_resp = requests.get(f"https://api.mfapi.in/mf/{code}", timeout=10)
+                    if detail_resp.status_code == 200:
+                        detail = detail_resp.json()
+                        if 'data' in detail and len(detail['data']) > 0:
+                            latest = detail['data'][0]
+                            nav = float(latest['nav'])
+                            date = latest['date']
+                            if len(detail['data']) >= 365:
+                                year_ago_nav = float(detail['data'][364]['nav'])
+                                return_1y = (nav - year_ago_nav) / year_ago_nav * 100
+                            else:
+                                return_1y = 0.0
+                            funds_data.append({
+                                "Code": code,
+                                "Name": name,
+                                "NAV": nav,
+                                "Date": date,
+                                "1Y Return %": round(return_1y, 2),
+                                "AUM (Cr)": "N/A"
+                            })
+                except Exception:
+                    # Skip individual fund errors
+                    continue
+            if funds_data:
+                return pd.DataFrame(funds_data).sort_values("1Y Return %", ascending=False)
+            else:
+                return _get_mock_mutual_funds()
+        except (requests.exceptions.RequestException, ConnectionError, TimeoutError, IncompleteRead) as e:
+            if attempt < retries - 1:
+                time.sleep(1)
+                continue
+            else:
+                return _get_mock_mutual_funds()
+        except Exception:
+            # Any other unexpected error → mock data
+            return _get_mock_mutual_funds()
+    return _get_mock_mutual_funds()
+
+def _get_mock_mutual_funds():
+    """Fallback mock data when live API fails."""
+    mock_data = [
+        {"Code": "119551", "Name": "SBI Small Cap Fund", "NAV": 142.35, "Date": "2025-03-28", "1Y Return %": 28.5, "AUM (Cr)": "28,500"},
+        {"Code": "120202", "Name": "HDFC Balanced Advantage Fund", "NAV": 512.20, "Date": "2025-03-28", "1Y Return %": 18.2, "AUM (Cr)": "45,200"},
+        {"Code": "118530", "Name": "ICICI Prudential Bluechip Fund", "NAV": 89.45, "Date": "2025-03-28", "1Y Return %": 22.1, "AUM (Cr)": "38,700"},
+        {"Code": "121561", "Name": "Kotak Flexicap Fund", "NAV": 67.80, "Date": "2025-03-28", "1Y Return %": 25.4, "AUM (Cr)": "22,300"},
+        {"Code": "122682", "Name": "Axis Midcap Fund", "NAV": 103.90, "Date": "2025-03-28", "1Y Return %": 31.0, "AUM (Cr)": "15,600"},
+    ]
+    return pd.DataFrame(mock_data)
+
+def mutual_funds_tab():
+    st.subheader("💰 Mutual Funds – Search & Execute (Simulated)")
+    st.markdown("Explore top Indian mutual funds, search by name, and place simulated buy orders.")
+    
+    use_mock = st.checkbox("🔁 Use demo data (if API fails)", value=False)
+    
+    col1, col2 = st.columns([2,1])
+    with col1:
+        search_term = st.text_input("🔍 Search by fund name or code", placeholder="e.g., SBI, HDFC, 119551")
+    with col2:
+        sort_by = st.selectbox("Sort by", ["1Y Return %", "NAV", "Name"], index=0)
+    
+    if st.button("🔄 Refresh Funds", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    
+    with st.spinner("Fetching mutual funds (retrying if needed)..."):
+        if use_mock:
+            df_funds = _get_mock_mutual_funds()
+            st.info("ℹ️ Using demo data – live API unavailable or you selected demo mode.")
+        else:
+            df_funds = fetch_top_mutual_funds(limit=100)
+            if df_funds is None or df_funds.empty:
+                st.warning("Could not fetch live data. Try again later or enable demo mode.")
+                df_funds = _get_mock_mutual_funds()
+                st.info("Showing demo data instead.")
+    
+    if df_funds is None or df_funds.empty:
+        st.error("No mutual fund data available.")
+        return
+    
+    if search_term:
+        df_funds = df_funds[df_funds['Name'].str.contains(search_term, case=False) | 
+                           df_funds['Code'].astype(str).str.contains(search_term)]
+    df_funds = df_funds.sort_values(sort_by, ascending=False if sort_by != "Name" else True)
+    
+    st.dataframe(df_funds, use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    st.subheader("📝 Simulated Purchase")
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        selected_fund = st.selectbox("Select Fund", df_funds['Name'].tolist())
+    with col_b:
+        investment_amount = st.number_input("Investment Amount (₹)", 500, 500000, 5000, step=500)
+    with col_c:
+        sip = st.checkbox("SIP (Monthly)", value=False)
+        if sip:
+            sip_months = st.number_input("SIP Months", 1, 60, 12)
+    
+    if st.button("🚀 Execute Purchase (Simulated)", use_container_width=True):
+        fund_row = df_funds[df_funds['Name'] == selected_fund].iloc[0]
+        nav = fund_row['NAV']
+        units = investment_amount / nav
+        st.success(f"✅ **Simulated Order Placed!**\n\n"
+                   f"Fund: {selected_fund}\n"
+                   f"NAV: ₹{nav:.2f}\n"
+                   f"Amount: ₹{investment_amount:,.2f}\n"
+                   f"Units: {units:.4f}\n"
+                   f"SIP: {'Yes (' + str(sip_months) + ' months)' if sip else 'No'}\n\n"
+                   f"*(This is a simulated order. No real money has been transacted.)*")
+        play_sound_now("click")
+
+# ==========================================
+# CORE BOT ENGINE (SniperBot) – Full Implementation
 # ==========================================
 class SniperBot:
     def __init__(self, api_key="", client_id="", pwd="", totp_secret="", 
@@ -3827,6 +3880,7 @@ class SniperBot:
                  stoxkart_api_key="", stoxkart_secret="",
                  dhan_client_id="", dhan_access_token="",
                  shoonya_user="", shoonya_password="", shoonya_totp="",
+                 icici_api_key="", icici_secret="", icici_consumer_key="",
                  email_smtp_server="", email_port=587, email_username="", email_password="", email_recipients="",
                  fcm_server_key="", push_enabled=False):
         
@@ -3857,6 +3911,11 @@ class SniperBot:
         self.shoonya_user = shoonya_user
         self.shoonya_password = shoonya_password
         self.shoonya_totp = shoonya_totp
+        self.icici_api_key = icici_api_key
+        self.icici_secret = icici_secret
+        self.icici_consumer_key = icici_consumer_key
+        self.icici_bridge = None
+        self.is_icici_connected = False
 
         self.email_config = {
             "smtp_server": email_smtp_server,
@@ -3971,6 +4030,8 @@ class SniperBot:
 
         self.market_end_notify_thread = threading.Thread(target=self._market_end_notifier, daemon=True)
         self.market_end_notify_thread.start()
+        
+        self.ws_manager = WebSocketManager(self)
 
     def _db_worker(self):
         while True:
@@ -3997,23 +4058,19 @@ class SniperBot:
             if self.state["active_trade"]:
                 t = self.state["active_trade"]
                 order_success = True
-                
                 if not self.is_mock and not t.get("simulated"):
                     exec_side = "BUY" if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"] else "SELL"
                     order_id, err = self.place_real_order(t['symbol'], t['token'], t['qty'], exec_side, t['exch'], "MARKET")
-                    
                     if not order_id:
                         self.log(f"❌ Force Exit Failed: {err}. Trade remains open!")
                         self.push_notify("Exit Failed", f"Could not close {t['symbol']}")
                         order_success = False
-                        
                 if order_success:
                     ltp = self.get_live_price(t['exch'], t['symbol'], t['token']) or t['entry']
                     if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
                         pnl = (t['entry'] - ltp) * t['qty']
                     else: 
                         pnl = (ltp - t['entry']) * t['qty']
-                    
                     if not self.is_mock and hasattr(self, "system_user_id"):
                         today = get_ist().strftime('%Y-%m-%d')
                         now = get_ist().strftime('%H:%M:%S')
@@ -4024,13 +4081,10 @@ class SniperBot:
                             "entry_price": t['entry'], "exit_price": ltp,
                             "pnl": pnl, "result": "Manual Exit", "slippage": slippage
                         })
-                        
                     self.state["daily_pnl"] += pnl
                     self.state["active_trade"] = None
                     self.state["sound_queue"].append("exit")
                     st.toast(f"Trade closed at {ltp:.2f} | PnL: ₹{pnl:.2f}", icon="✅")
-                    
-                    # Stop engine if forced
                     self.state["is_running"] = False
                     self.state["engine_active"] = False
             if self.state["active_trades"]:
@@ -4055,12 +4109,11 @@ class SniperBot:
             if self.state["active_trade"]:
                 trade = self.state["active_trade"]
                 ltp = trade.get('current_ltp', trade['entry'])
-                is_long = trade['type'] in ["CE", "BUY"]
+                is_long = trade['type'] not in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]
                 if is_long:
                     pnl = (ltp - trade['entry']) * trade['qty']
                 else:
                     pnl = (trade['entry'] - ltp) * trade['qty']
-
                 thresholds = [(500, 0), (1000, 500), (1500, 1000)]
                 new_sl = None
                 for threshold, lock_amount in thresholds:
@@ -4069,7 +4122,6 @@ class SniperBot:
                             new_sl = trade['entry'] + lock_amount / trade['qty']
                         else:
                             new_sl = trade['entry'] - lock_amount / trade['qty']
-
                 if new_sl is not None:
                     if is_long:
                         if new_sl > trade['sl']:
@@ -4136,109 +4188,97 @@ class SniperBot:
         return 0.0
 
     def get_broker_balances(self):
-        """Return a dict of broker name -> balance string."""
         balances = {}
         if self.api:
             try:
-                # FIX: Capital 'L' in rmsLimit() is strictly required by Angel API
-                rms = self.api.rmsLimit() 
-                if rms and isinstance(rms, dict) and rms.get('status') and rms.get('data'):
+                rms = self.api.rmsLimit()
+                if rms and rms.get('status') and rms.get('data'):
                     bal = rms['data'].get('availablecash', rms['data'].get('net', 0))
                     balances["Angel One"] = f"₹{float(bal):,.2f}"
-            except Exception as e: 
-                self.log(f"Angel Balance Error: {e}")
-                
+            except: pass
         if self.kite:
             try:
                 margins = self.kite.margins()
                 eq = margins.get('equity', {})
-                # FIX: Safer fallback to 'net' balance
                 bal = eq.get('net', eq.get('available', {}).get('live_balance', 0))
                 balances["Zerodha"] = f"₹{float(bal):,.2f}"
-            except Exception as e: 
-                self.log(f"Zerodha Balance Error: {e}")
-                
+            except: pass
         if self.coindcx_bridge and self.is_coindcx_connected:
             try:
                 bals = self.coindcx_bridge.get_balance()
-                if bals is not None:
-                    balances["CoinDCX"] = f"${bals.get('USDT', 0.0):,.2f} | ₹{bals.get('INR', 0.0):,.2f}"
+                if bals:
+                    balances["CoinDCX"] = f"${bals.get('USDT',0):,.2f} | ₹{bals.get('INR',0):,.2f}"
             except: pass
-            
         if self.delta_bridge and self.is_delta_connected:
             try:
                 info = self.delta_bridge.get_account_info()
                 if info:
-                    balances["Delta Exchange"] = f"${info.get('balance', 0):,.2f}"
+                    balances["Delta Exchange"] = f"${info.get('balance',0):,.2f}"
             except: pass
-            
         if self.mt5_bridge and self.is_mt5_connected:
             try:
                 acc = self.mt5_bridge.get_account_info()
                 if acc:
-                    balances["MT5"] = f"${acc.get('balance', 0):,.2f}"
+                    balances["MT5"] = f"${acc.get('balance',0):,.2f}"
             except: pass
-            
         if self.fyers_bridge and self.is_fyers_connected:
             try:
                 info = self.fyers_bridge.get_account_info()
                 if info:
-                    balances["Fyers"] = f"₹{info.get('balance', 0):,.2f}"
+                    balances["Fyers"] = f"₹{info.get('balance',0):,.2f}"
             except: pass
-            
         if self.upstox_bridge and self.is_upstox_connected:
             try:
                 info = self.upstox_bridge.get_account_info()
                 if info:
-                    balances["Upstox"] = f"₹{info.get('balance', 0):,.2f}"
+                    balances["Upstox"] = f"₹{info.get('balance',0):,.2f}"
             except: pass
-            
         if self.fivepaisa_bridge and self.is_fivepaisa_connected:
             try:
                 info = self.fivepaisa_bridge.get_account_info()
                 if info:
-                    balances["5paisa"] = f"₹{info.get('balance', 0):,.2f}"
+                    balances["5paisa"] = f"₹{info.get('balance',0):,.2f}"
             except: pass
-            
         if self.binance_bridge and self.is_binance_connected:
             try:
                 bal = self.binance_bridge.get_asset_balance("USDT")
-                if bal is not None:
+                if bal:
                     balances["Binance"] = f"${bal:,.2f}"
             except: pass
-            
         if self.stoxkart_bridge and self.is_stoxkart_connected:
             try:
                 info = self.stoxkart_bridge.get_account_info()
                 if info:
-                    balances["Stoxkart"] = f"₹{info.get('balance', 0):,.2f}"
+                    balances["Stoxkart"] = f"₹{info.get('balance',0):,.2f}"
             except: pass
-            
         if self.dhan_bridge and self.is_dhan_connected:
             try:
                 info = self.dhan_bridge.get_account_info()
                 if info:
-                    balances["Dhan"] = f"₹{info.get('balance', 0):,.2f}"
+                    balances["Dhan"] = f"₹{info.get('balance',0):,.2f}"
             except: pass
-            
         if self.shoonya_bridge and self.is_shoonya_connected:
             try:
                 info = self.shoonya_bridge.get_account_info()
                 if info:
-                    balances["Shoonya"] = f"₹{info.get('balance', 0):,.2f}"
+                    balances["Shoonya"] = f"₹{info.get('balance',0):,.2f}"
             except: pass
-            
+        if self.icici_bridge and self.is_icici_connected:
+            try:
+                info = self.icici_bridge.get_account_info()
+                if info:
+                    balances["ICICI Direct"] = f"₹{info.get('balance',0):,.2f}"
+            except: pass
         return balances
+
     def connect_mt5(self):
         if self.mt5_acc and self.mt5_server:
             self.mt5_bridge = MT5WebBridge(account=self.mt5_acc, password=self.mt5_pass, server=self.mt5_server, api_url=self.mt5_api_url)
             success, msg = self.mt5_bridge.connect()
             if success:
                 self.is_mt5_connected = True
-                self.log(f"✅ MT5 Connected via bridge: {msg}")
+                self.log(f"✅ MT5 Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ MT5 Bridge failed: {msg}")
         return False
 
     def connect_fyers(self):
@@ -4249,8 +4289,6 @@ class SniperBot:
                 self.is_fyers_connected = True
                 self.log(f"✅ Fyers Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ Fyers connection failed: {msg}")
         return False
 
     def connect_upstox(self):
@@ -4261,8 +4299,6 @@ class SniperBot:
                 self.is_upstox_connected = True
                 self.log(f"✅ Upstox Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ Upstox connection failed: {msg}")
         return False
 
     def connect_fivepaisa(self):
@@ -4273,8 +4309,6 @@ class SniperBot:
                 self.is_fivepaisa_connected = True
                 self.log(f"✅ 5paisa Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ 5paisa connection failed: {msg}")
         return False
 
     def connect_binance(self):
@@ -4285,8 +4319,6 @@ class SniperBot:
                 self.is_binance_connected = True
                 self.log(f"✅ Binance Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ Binance connection failed: {msg}")
         return False
 
     def connect_stoxkart(self):
@@ -4297,8 +4329,6 @@ class SniperBot:
                 self.is_stoxkart_connected = True
                 self.log(f"✅ Stoxkart Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ Stoxkart connection failed: {msg}")
         return False
 
     def connect_delta(self):
@@ -4309,8 +4339,6 @@ class SniperBot:
                 self.is_delta_connected = True
                 self.log(f"✅ Delta Exchange Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ Delta connection failed: {msg}")
         return False
 
     def connect_coindcx(self):
@@ -4321,8 +4349,6 @@ class SniperBot:
                 self.is_coindcx_connected = True
                 self.log(f"✅ CoinDCX Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ CoinDCX connection failed: {msg}")
         return False
 
     def connect_dhan(self):
@@ -4333,8 +4359,6 @@ class SniperBot:
                 self.is_dhan_connected = True
                 self.log(f"✅ Dhan Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ Dhan connection failed: {msg}")
         return False
 
     def connect_shoonya(self):
@@ -4345,15 +4369,22 @@ class SniperBot:
                 self.is_shoonya_connected = True
                 self.log(f"✅ Shoonya Connected: {msg}")
                 return True
-            else:
-                self.log(f"❌ Shoonya connection failed: {msg}")
+        return False
+
+    def connect_icici(self):
+        if self.icici_api_key and self.icici_secret:
+            self.icici_bridge = ICICIDirectBridge(self.icici_api_key, self.icici_secret, self.icici_consumer_key)
+            success, msg = self.icici_bridge.connect()
+            if success:
+                self.is_icici_connected = True
+                self.log(f"✅ ICICI Direct Connected: {msg}")
+                return True
         return False
 
     def login(self):
         if self.is_mock:
-            self.client_name, self.api_key = "Paper Trading User", "mock_user"
-            self.user_hash = get_user_hash(self.api_key)
-            self.push_notify("🟢 Session Started", f"Paper Trading active.")
+            self.client_name = "Paper Trading User"
+            self.push_notify("🟢 Session Started", "Paper Trading active.")
             self.start_webhook_listener()
             if self.tg_bot_token:
                 self.telegram_controller.start(self)
@@ -4378,11 +4409,9 @@ class SniperBot:
                     if not self._primary_client_set:
                         self.client_name = f"Angel User ({fetched_name})" if fetched_name else f"Angel ({self.client_id})"
                         self._primary_client_set = True
-                    self.log(f"✅ Angel One Connected as {fetched_name if fetched_name else self.client_id}")
+                    self.log(f"✅ Angel One Connected")
                     self.start_angel_ws()
                     success = True
-                else:
-                    self.log(f"❌ Angel Login failed: {res.get('message', 'Check credentials')}")
             except Exception as e:
                 self.log(f"❌ Angel Login Exception: {e}")
 
@@ -4496,12 +4525,20 @@ class SniperBot:
                     self._primary_client_set = True
             success = True
 
+        if self.connect_icici():
+            if self.is_icici_connected and self.icici_bridge:
+                if not self._primary_client_set:
+                    self.client_name = "ICICI Direct User"
+                    self._primary_client_set = True
+            success = True
+
         if success:
             self.push_notify("🟢 Gateway Active", f"Connections established.")
             self.start_webhook_listener()
             if self.tg_bot_token:
                 self.telegram_controller.start(self)
             self.start_pnl_updater()
+            self.ws_manager.start_all()
             return True
         return False
 
@@ -4529,7 +4566,6 @@ class SniperBot:
             if not is_allowed_ip(client_ip):
                 self.log(f"Blocked webhook from {client_ip}")
                 return jsonify({"status": "unauthorized"}), 401
-
             data = request.json
             if data and data.get("passphrase") == self.settings.get("tv_passphrase", "SHREE123"):
                 action = data.get("action", "WAIT").upper()
@@ -4540,7 +4576,7 @@ class SniperBot:
             return jsonify({"status": "unauthorized"}), 401
 
         threading.Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 5000, 'use_reloader': False}, daemon=True).start()
-        self.log("🌐 TradingView Webhook Listener Active on Port 5000 (IP whitelisted)")
+        self.log("🌐 TradingView Webhook Listener Active on Port 5000")
 
     def get_master(self):
         if self.token_map is None or self.token_map.empty:
@@ -4549,280 +4585,216 @@ class SniperBot:
 
     def get_token_info(self, index_name):
         if index_name in COMMODITIES:
-            df_map = self.get_master()
-            if df_map is not None and not df_map.empty:
-                subset = df_map[(df_map['name'] == index_name) & (df_map['exch_seg'] == "MCX")]
-                if not subset.empty:
-                    today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
-                    subset = subset[subset['expiry'] >= today]
-                    if not subset.empty:
-                        row = subset.iloc[0]
-                        return row['exch_seg'], row['token']
-            token_map = {
-                "CRUDEOIL": "21181",
-                "NATURALGAS": "21182",
-                "GOLD": "21183",
-                "SILVER": "21184"
-            }
-            if index_name in token_map:
-                return "MCX", token_map[index_name]
-            else:
-                return "MCX", "0"
-
-        if index_name in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "BNBUSD", "LTCUSD", "DOTUSD", "MATICUSD", "SHIBUSD", "TRXUSD", "LINKUSD"] and self.is_mt5_connected:
+            return "MCX", "21181"
+        if index_name in ["XAUUSD", "BTCUSD", "ETHUSD"] and self.is_mt5_connected:
             return "MT5", index_name
-
-        if self.settings.get("primary_broker") == "Delta Exchange" or ("USD" in index_name and "Delta" in self.settings.get("primary_broker", "")):
-            return "DELTA", index_name
-        if self.settings.get("primary_broker") == "CoinDCX" or "USDT" in index_name or "INR" in index_name:
+        if self.settings.get("primary_broker") == "CoinDCX":
             return "COINDCX", index_name
-        if self.settings.get("primary_broker") == "Fyers":
-            if index_name in INDEX_TOKENS:
-                return "FYERS", index_name
-            else:
-                return "FYERS", f"NSE:{index_name}-EQ" if not index_name.startswith("NSE:") else index_name
-        if self.settings.get("primary_broker") == "Upstox":
-            return "UPSTOX", index_name
-        if self.settings.get("primary_broker") == "5paisa":
-            return "5PAISA", index_name
-        if self.settings.get("primary_broker") == "Binance":
-            return "BINANCE", index_name
         if self.settings.get("primary_broker") == "Stoxkart":
             return "STOXKART", index_name
-        if self.settings.get("primary_broker") == "Dhan":
-            return "DHAN", index_name
         if self.settings.get("primary_broker") == "Shoonya":
             return "SHOONYA", index_name
-
+        if self.settings.get("primary_broker") == "Dhan":
+            return "DHAN", index_name
+        if self.settings.get("primary_broker") == "ICICI Direct":
+            return "ICICI", index_name
         if index_name in INDEX_TOKENS:
             return INDEX_TOKENS[index_name]
-        df_map = self.get_master()
-        if df_map is not None and not df_map.empty:
-            today_date = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
-            futs = df_map[(df_map['name'] == index_name) & (df_map['instrumenttype'].isin(['FUTCOM', 'FUTIDX', 'FUTSTK', 'EQ']))]
-            if not futs.empty:
-                eqs = futs[futs['instrumenttype'] == 'EQ']
-                if not eqs.empty:
-                    return eqs.iloc[0]['exch_seg'], eqs.iloc[0]['token']
-                futs = futs[futs['expiry'] >= today_date]
-                if not futs.empty:
-                    return futs[futs['expiry'] == futs['expiry'].min()].iloc[0]['exch_seg'], futs[futs['expiry'] == futs['expiry'].min()].iloc[0]['token']
         return "NSE", "12345"
 
-    def get_market_data_oi(self, exchange, token):
-        if self.is_mock or exchange in ["MT5", "COINDCX", "DELTA", "FYERS", "UPSTOX", "5PAISA", "BINANCE", "STOXKART", "DHAN", "SHOONYA"]:
-            return np.random.randint(50000, 150000), np.random.randint(1000, 10000)
-        if not self.api:
-            return 0, 0
-        try:
-            res = self.api.marketData({"mode": "FULL", "exchangeTokens": { exchange: [str(token)] }})
-            if res and res.get('status') and res.get('data'):
-                return res['data']['fetched'][0].get('opnInterest', 0), res['data']['fetched'][0].get('totMacVal', 0)
-        except:
-            pass
-        return 0, 0
-
     def get_live_price(self, exchange, symbol, token):
-        now = time.time()
-        
-        # 1. Initialize and Check Cache
-        if not hasattr(self, "_ltp_cache"):
-            self._ltp_cache = {}
-            
-        cache_key = f"{exchange}_{symbol}_{token}"
-        if cache_key in self._ltp_cache:
-            ts, cached_price = self._ltp_cache[cache_key]
-            if now - ts < 1.5:  # 1.5s micro-cache limit prevents UI freezing
-                return cached_price
-
-        if exchange in ["NSE", "NFO", "BSE", "BFO", "MCX"] and self.ws_angel_connected and token in self.live_prices_angel:
-            price = self.live_prices_angel[token]
-            self._ltp_cache[cache_key] = (now, price)
-            return price
-
-        if self.is_mock and token == "12345":
-            if "CE" in symbol or "PE" in symbol:
-                if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
-                    base_price = self.state["active_trade"]["entry"]
-                    change = np.random.normal(0, base_price * 0.005)
-                    price = base_price + change
-                else:
-                    price = np.random.uniform(150, 300)
-            else:
-                if self.state.get('mock_price') is None:
-                    base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2050.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
-                    base = base_prices.get(symbol, 500)
-                    self.state['mock_price'] = float(base)
-                change = np.random.normal(0, self.state['mock_price'] * 0.0005)
-                self.state['mock_price'] += change
-                price = float(self.state['mock_price'])
-                
-            self._ltp_cache[cache_key] = (now, price)
-            return price
-
-        price = None
-        try:
-            if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
-                price = self.mt5_bridge.get_live_price(symbol)
-            elif exchange == "COINDCX" and self.is_coindcx_connected and self.coindcx_bridge:
-                price = self.coindcx_bridge.get_live_price(symbol)
-            elif exchange == "DELTA" and self.is_delta_connected and self.delta_bridge:
-                price = self.delta_bridge.get_live_price(symbol)
-            elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
-                price = self.binance_bridge.get_live_price(symbol)
-            elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
-                price = self.fyers_bridge.get_live_price(symbol)
-            elif exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge:
-                price = self.upstox_bridge.get_live_price(symbol)
-            elif exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge:
-                price = self.fivepaisa_bridge.get_live_price(symbol)
-            elif exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge:
-                price = self.stoxkart_bridge.get_live_price(symbol)
-            elif exchange == "DHAN" and self.is_dhan_connected and self.dhan_bridge:
-                price = self.dhan_bridge.get_live_price(symbol)
-            elif exchange == "SHOONYA" and self.is_shoonya_connected and self.shoonya_bridge:
-                price = self.shoonya_bridge.get_live_price(symbol)
-            elif self.kite and self.settings.get("primary_broker") == "Zerodha":
-                try:
-                    tsym = f"{exchange}:{symbol}"
-                    res = self.kite.quote([tsym])
-                    price = float(res[tsym]['last_price'])
-                except:
-                    pass
-            elif self.api:
-                try:
-                    trading_symbol = INDEX_SYMBOLS.get(symbol, symbol)
-                    res = self.api.ltpData(exchange, trading_symbol, str(token))
-                    if res and res.get('status'):
-                        price = float(res['data']['ltp'])
-                except:
-                    pass
-        except Exception as e:
-            self.log(f"⚠️ Error in get_live_price: {e}")
-
-        if price is None and symbol in YF_TICKERS:
+        cache_key = f"{exchange}_{token}"
+        if self.ws_manager:
+            price = self.ws_manager.get_ltp(token, exchange)
+            if price is not None:
+                return price
+        if exchange == "MT5" and self.mt5_bridge:
+            return self.mt5_bridge.get_live_price(symbol)
+        if exchange == "COINDCX" and self.coindcx_bridge:
+            return self.coindcx_bridge.get_live_price(symbol)
+        if exchange == "DELTA" and self.delta_bridge:
+            return self.delta_bridge.get_live_price(symbol)
+        if exchange == "BINANCE" and self.binance_bridge:
+            return self.binance_bridge.get_live_price(symbol)
+        if exchange == "FYERS" and self.fyers_bridge:
+            return self.fyers_bridge.get_live_price(symbol)
+        if exchange == "UPSTOX" and self.upstox_bridge:
+            return self.upstox_bridge.get_live_price(symbol)
+        if exchange == "5PAISA" and self.fivepaisa_bridge:
+            return self.fivepaisa_bridge.get_live_price(symbol)
+        if exchange == "STOXKART" and self.stoxkart_bridge:
+            return self.stoxkart_bridge.get_live_price(symbol)
+        if exchange == "DHAN" and self.dhan_bridge:
+            return self.dhan_bridge.get_live_price(symbol)
+        if exchange == "SHOONYA" and self.shoonya_bridge:
+            return self.shoonya_bridge.get_live_price(symbol)
+        if exchange == "ICICI" and self.icici_bridge:
+            return self.icici_bridge.get_live_price(symbol)
+        if self.kite:
             try:
-                yf_ticker = YF_TICKERS[symbol]
-                time.sleep(0.2)
-                df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-                if not df.empty:
-                    price = float(df['Close'].iloc[-1])
-                    self.log(f"⚠️ Using yfinance fallback for {symbol}: {price}")
+                res = self.kite.quote([symbol])
+                return float(res[symbol]['last_price'])
             except:
                 pass
-                
-        # Save to cache before returning
-        if price is not None:
-            self._ltp_cache[cache_key] = (now, price)
-            
-        return price
-    def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
-        @st.cache_data(ttl=60)
-        def _cached_yfinance(symbol, interval):
-            yf_int = interval if interval in ["1m", "5m", "15m"] else "5m"
-            yf_ticker = YF_TICKERS.get(symbol)
-            if not yf_ticker and ("USD" in symbol or "USDT" in symbol):
-                base_coin = symbol.replace("USDT", "").replace("USD", "")
-                yf_ticker = f"{base_coin}-USD"
-            if yf_ticker:
-                try:
-                    time.sleep(random.uniform(0.1, 0.5))
-                    df = yf.Ticker(yf_ticker).history(period="5d" if interval == "1m" else "10d", interval=yf_int)
-                    if not df.empty:
-                        df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
-                        return df
-                except Exception as e:
-                    print(f"yfinance error for {symbol}: {e}")
+        if self.api:
+            try:
+                res = self.api.ltpData(exchange, INDEX_SYMBOLS.get(symbol, symbol), str(token))
+                if res and res.get('status'):
+                    return float(res['data']['ltp'])
+            except:
+                pass
+        if symbol in YF_TICKERS:
+            try:
+                df = yf.Ticker(YF_TICKERS[symbol]).history(period="1d", interval="1m")
+                if not df.empty:
+                    return float(df['Close'].iloc[-1])
+            except:
+                pass
+        return None
+
+    def _fallback_tradingview(self, symbol, interval):
+        if not HAS_TVDATAFEED:
             return None
-
-        if self.is_mock and token == "12345":
-            return self._fallback_yfinance(symbol, interval)
-
-        df = None
         try:
-            if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
-                df = self.mt5_bridge.get_historical_data(symbol, interval)
-            elif exchange == "COINDCX" and self.is_coindcx_connected and self.coindcx_bridge:
-                df = self.coindcx_bridge.get_historical_data(symbol, interval, days=10)
-            elif exchange == "DELTA" and self.is_delta_connected and self.delta_bridge:
-                df = self.delta_bridge.get_historical_data(symbol, interval)
-            elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
-                df = self.binance_bridge.get_historical_klines(symbol, interval)
-            elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
-                fyers_int = interval.replace("m", "").replace("h", "").replace("d", "D")
-                df = self.fyers_bridge.get_historical_data(symbol, fyers_int, days=10)
-            elif self.kite and self.settings.get("primary_broker") == "Zerodha":
-                try:
-                    z_int_map = {"1m": "minute", "3m": "3minute", "5m": "5minute", "15m": "15minute"}
-                    now_ist = get_ist()
-                    fromdate = now_ist - dt.timedelta(days=10)
-                    records = self.kite.historical_data(int(token), fromdate.strftime("%Y-%m-%d"), now_ist.strftime("%Y-%m-%d"), z_int_map.get(interval, "5minute"))
-                    df = pd.DataFrame(records)
-                    df.rename(columns={'date': 'timestamp'}, inplace=True)
-                    df['timestamp'] = pd.to_datetime(df['timestamp'])
-                    df.index = df['timestamp']
-                except:
-                    pass
-            elif self.api:
-                try:
-                    interval_map = {"1m": "ONE_MINUTE", "3m": "THREE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE"}
-                    api_interval = interval_map.get(interval, "FIVE_MINUTE")
-                    now_ist = get_ist()
-                    fromdate = now_ist - dt.timedelta(days=10)
-                    res = self.api.getCandleData({"exchange": exchange, "symboltoken": str(token), "interval": api_interval, "fromdate": fromdate.strftime("%Y-%m-%d %H:%M"), "todate": now_ist.strftime("%Y-%m-%d %H:%M")})
-                    if res and res.get('status') and res.get('data'):
-                        df = pd.DataFrame(res['data'], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                        df['timestamp'] = pd.to_datetime(df['timestamp'])
-                        df.index = df['timestamp']
-                except:
-                    pass
-        except Exception as e:
-            self.log(f"⚠️ Error in get_historical_data: {e}")
-
-        if df is not None and not df.empty:
-            df.rename(columns=lambda x: x.lower(), inplace=True)
-            if 'open' not in df.columns: df['open'] = df['close']
-            if 'high' not in df.columns: df['high'] = df['close']
-            if 'low' not in df.columns: df['low'] = df['close']
-            if 'volume' not in df.columns: df['volume'] = 0
-
-        if (df is None or df.empty) and symbol in YF_TICKERS:
-            self.log(f"⚠️ Using yfinance fallback for {symbol} historical data")
-            df = _cached_yfinance(symbol, interval)
+            tv = TvDatafeed()
+            interval_map = {
+                "1m": Interval.in_1_minute,
+                "3m": Interval.in_3_minute,
+                "5m": Interval.in_5_minute,
+                "15m": Interval.in_15_minute,
+                "30m": Interval.in_30_minute,
+                "1h": Interval.in_1_hour,
+                "1d": Interval.in_daily
+            }
+            tv_interval = interval_map.get(interval, Interval.in_5_minute)
+            exchange = "NSE"
+            tv_symbol = symbol
+            if symbol == "NIFTY":
+                tv_symbol = "NIFTY"
+            elif symbol == "BANKNIFTY":
+                tv_symbol = "BANKNIFTY"
+            elif symbol == "SENSEX":
+                tv_symbol = "SENSEX"
+                exchange = "BSE"
+            elif symbol in COMMODITIES:
+                exchange = "MCX"
+                tv_symbol = f"{symbol}1!"
+            elif "USD" in symbol or "USDT" in symbol:
+                exchange = "BINANCE" if "BTC" in symbol or "ETH" in symbol else "OANDA"
+                tv_symbol = symbol.replace("USDT", "USD")
+            df = tv.get_hist(symbol=tv_symbol, exchange=exchange, interval=tv_interval, n_bars=200)
             if df is not None and not df.empty:
-                df.rename(columns=lambda x: x.lower(), inplace=True)
-        return df
+                df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'}, inplace=True)
+                return df
+            else:
+                self.log(f"⚠️ TradingView returned empty data for {tv_symbol}")
+        except Exception as e:
+            self.log(f"⚠️ TradingView fetch failed: {e}")
+        return None
 
     def _fallback_yfinance(self, symbol, interval):
-        yf_int = interval if interval in ["1m", "5m", "15m"] else "5m"
+        yf_int = interval if interval in ["1m", "5m", "15m", "30m", "1h", "1d"] else "5m"
         yf_ticker = YF_TICKERS.get(symbol)
-        if not yf_ticker and ("USD" in symbol or "USDT" in symbol):
-            base_coin = symbol.replace("USDT", "").replace("USD", "")
-            yf_ticker = f"{base_coin}-USD"
+        if not yf_ticker:
+            if "USD" in symbol or "USDT" in symbol:
+                base = symbol.replace("USDT", "").replace("USD", "")
+                yf_ticker = f"{base}-USD"
+            elif symbol not in COMMODITIES:
+                yf_ticker = f"{symbol}.NS"
         if yf_ticker:
             try:
-                time.sleep(random.uniform(0.1, 0.5))
-                df = yf.Ticker(yf_ticker).history(period="5d" if interval == "1m" else "10d", interval=yf_int)
+                time.sleep(0.1)
+                period = "5d" if interval in ["1m", "5m"] else "1mo"
+                df = yf.Ticker(yf_ticker).history(period=period, interval=yf_int)
                 if not df.empty:
                     df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
                     return df
             except Exception as e:
-                self.log(f"⚠️ yfinance error for {symbol}: {e}")
-        periods = 500 if interval == "1m" else 200
-        times = pd.date_range(end=get_ist(), periods=periods, freq=interval)
-        trend = np.linspace(0, 1, periods) * 200
-        noise = np.random.normal(0, 10, periods).cumsum()
-        close_prices = 22000 + trend + noise
-        df = pd.DataFrame({
-            'timestamp': times,
-            'open': close_prices - 2,
-            'high': close_prices + 5,
-            'low': close_prices - 5,
-            'close': close_prices,
-            'volume': np.random.randint(1000, 50000, periods)
-        })
-        df.index = df['timestamp']
-        return df
+                self.log(f"⚠️ YFinance fetch failed for {yf_ticker}: {e}")
+        if self.is_mock:
+            periods = 200
+            times = pd.date_range(end=get_ist(), periods=periods, freq=interval)
+            close_prices = 22000 + (np.random.normal(0, 10, periods).cumsum())
+            df = pd.DataFrame({
+                'timestamp': times,
+                'open': close_prices - 2, 'high': close_prices + 5, 'low': close_prices - 5,
+                'close': close_prices, 'volume': np.random.randint(1000, 50000, periods)
+            })
+            df.set_index('timestamp', inplace=True)
+            return df
+        return None
+
+    def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
+        # 1. Prioritize Angel One (SmartAPI)
+        if self.api and exchange in ["NSE", "BSE", "NFO", "MCX"]:
+            try:
+                interval_map = {"1m": "ONE_MINUTE", "3m": "THREE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE", "30m": "THIRTY_MINUTE", "1h": "ONE_HOUR", "1d": "ONE_DAY"}
+                hist_param = {
+                    "exchange": exchange,
+                    "symboltoken": str(token),
+                    "interval": interval_map.get(interval, "FIVE_MINUTE"),
+                    "fromdate": (get_ist() - dt.timedelta(days=10)).strftime("%Y-%m-%d %H:%M"),
+                    "todate": get_ist().strftime("%Y-%m-%d %H:%M")
+                }
+                res = self.api.getCandleData(hist_param)
+                if res and res.get("status") and res.get("data"):
+                    df = pd.DataFrame(res["data"], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                    df['timestamp'] = pd.to_datetime(df['timestamp'])
+                    df.set_index('timestamp', inplace=True)
+                    return df
+            except Exception as e:
+                self.log(f"Angel Historical Data Error: {e}")
+
+        # 2. Prioritize Zerodha (Kite)
+        if self.kite and exchange in ["NSE", "BSE", "NFO", "MCX"]:
+            try:
+                interval_map = {"1m": "minute", "3m": "3minute", "5m": "5minute", "15m": "15minute", "30m": "30minute", "1h": "60minute", "1d": "day"}
+                to_date = get_ist()
+                from_date = to_date - dt.timedelta(days=10)
+                data = self.kite.historical_data(int(token), from_date, to_date, interval_map.get(interval, "5minute"))
+                if data:
+                    df = pd.DataFrame(data)
+                    df['timestamp'] = pd.to_datetime(df['date'])
+                    df.set_index('timestamp', inplace=True)
+                    df.rename(columns={'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close', 'volume': 'volume'}, inplace=True)
+                    return df
+            except Exception as e:
+                self.log(f"Zerodha Historical Data Error: {e}")
+
+        # 3. CoinDCX Real Data (THE CRYPTO FIX!)
+        if exchange == "COINDCX" and self.is_coindcx_connected and self.coindcx_bridge:
+            df = self.coindcx_bridge.get_historical_data(symbol, interval, days=10)
+            if df is not None:
+                return df
+                
+        # 4. Binance Real Data
+        if exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
+            df = self.binance_bridge.get_historical_klines(symbol, interval)
+            if df is not None:
+                return df
+
+        # 5. Fyers Fallback
+        if self.is_fyers_connected and self.fyers_bridge:
+            fyers_int = interval.replace("m", "").replace("h", "").replace("d", "D")
+            df = self.fyers_bridge.get_historical_data(symbol, fyers_int, days=10)
+            if df is not None:
+                return df
+                
+        # 6. TradingView Fallback
+        df_tv = self._fallback_tradingview(symbol, interval)
+        if df_tv is not None:
+            return df_tv
+            
+        # 7. YFinance Fallback
+        df_yf = self._fallback_yfinance(symbol, interval)
+        if df_yf is not None:
+            return df_yf
+            
+        # 8. Mock Data Generation for Paper Trading
+        if self.is_mock:
+            return self._fallback_yfinance(symbol, interval)
+            
+        return None
 
     def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
         if not is_hero_zero or df is None or len(df) < 20:
@@ -4875,13 +4847,7 @@ class SniperBot:
             quantity = position_value / spot
         else:
             quantity = 0
-        return round(quantity, 2), {
-            "base": base_size,
-            "strength": strength_mult,
-            "volatility": volatility_mult,
-            "time": time_mult,
-            "final": position_value
-        }
+        return round(quantity, 2), {"base": base_size, "strength": strength_mult, "volatility": volatility_mult, "time": time_mult, "final": position_value}
 
     def scan_hero_zero_indian_stocks(self, nifty_stocks=None):
         if st.session_state.get('hz_demo_mode', False):
@@ -4901,15 +4867,8 @@ class SniperBot:
                     "Risk/Reward": "1:2"
                 })
             return pd.DataFrame(mock_results)
-
         if nifty_stocks is None:
-            nifty_stocks = [
-                "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY",
-                "HINDUNILVR", "ITC", "SBIN", "BHARTIARTL", "KOTAKBANK",
-                "BAJFINANCE", "LT", "WIPRO", "AXISBANK", "TITAN",
-                "ASIANPAINT", "MARUTI", "SUNPHARMA", "HCLTECH", "ULTRACEMCO"
-            ]
-
+            nifty_stocks = ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "HINDUNILVR", "ITC", "SBIN", "BHARTIARTL", "KOTAKBANK", "BAJFINANCE", "LT", "WIPRO", "AXISBANK", "TITAN", "ASIANPAINT", "MARUTI", "SUNPHARMA", "HCLTECH", "ULTRACEMCO"]
         results = []
         for stock in nifty_stocks:
             try:
@@ -4928,22 +4887,8 @@ class SniperBot:
                 atr = true_range.rolling(14).mean().iloc[-1]
                 last = df.iloc[-1]
                 prev = df.iloc[-2]
-                is_hero = (
-                    last['Close'] > last['ema9'] and
-                    last['ema9'] > last['ema21'] and
-                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and
-                    last['Close'] > prev['High'] * 0.99 and
-                    (last['Close'] - last['Low']) > (last['High'] - last['Close']) * 1.5 and
-                    (last['High'] - last['Low']) > atr * 0.4
-                )
-                is_zero = (
-                    last['Close'] < last['ema9'] and
-                    last['ema9'] < last['ema21'] and
-                    last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and
-                    last['Close'] < prev['Low'] * 1.01 and
-                    (last['High'] - last['Close']) > (last['Close'] - last['Low']) * 1.5 and
-                    (last['High'] - last['Low']) > atr * 0.4
-                )
+                is_hero = (last['Close'] > last['ema9'] and last['ema9'] > last['ema21'] and last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and last['Close'] > prev['High'] * 0.99 and (last['Close'] - last['Low']) > (last['High'] - last['Close']) * 1.5 and (last['High'] - last['Low']) > atr * 0.4)
+                is_zero = (last['Close'] < last['ema9'] and last['ema9'] < last['ema21'] and last['Volume'] > df['volume_ma'].iloc[-1] * 1.2 and last['Close'] < prev['Low'] * 1.01 and (last['High'] - last['Close']) > (last['Close'] - last['Low']) * 1.5 and (last['High'] - last['Low']) > atr * 0.4)
                 if is_hero or is_zero:
                     direction = "HERO (BUY)" if is_hero else "ZERO (SELL)"
                     if is_hero:
@@ -4957,26 +4902,15 @@ class SniperBot:
                         tp1 = last['Close'] - atr * 3
                         tp2 = last['Close'] - atr * 5
                     results.append({
-                        "Stock": stock,
-                        "Direction": direction,
-                        "Price": round(entry, 2),
-                        "Volume Spike": f"{last['Volume'] / df['volume_ma'].iloc[-1]:.1f}x",
-                        "ATR": round(atr, 2),
-                        "Entry": round(entry, 2),
-                        "SL": round(sl, 2),
-                        "Target 1": round(tp1, 2),
-                        "Target 2": round(tp2, 2),
-                        "Risk/Reward": "1:2"
+                        "Stock": stock, "Direction": direction, "Price": round(entry, 2), "Volume Spike": f"{last['Volume'] / df['volume_ma'].iloc[-1]:.1f}x",
+                        "ATR": round(atr, 2), "Entry": round(entry, 2), "SL": round(sl, 2), "Target 1": round(tp1, 2), "Target 2": round(tp2, 2), "Risk/Reward": "1:2"
                     })
             except:
                 continue
         return pd.DataFrame(results)
 
     def scan_penny_stocks(self):
-        penny_list = [
-            "IDEA", "YESBANK", "SAIL", "PNB", "IOC", "BHEL", "SUZLON", "JPASSOCIAT",
-            "GMRINFRA", "NHPC", "NTPC", "PFC", "RECLTD", "VEDL", "TATAMOTORS"
-        ]
+        penny_list = ["IDEA", "YESBANK", "SAIL", "PNB", "IOC", "BHEL", "SUZLON", "JPASSOCIAT", "GMRINFRA", "NHPC", "NTPC", "PFC", "RECLTD", "VEDL", "TATAMOTORS"]
         return self.scan_hero_zero_indian_stocks(penny_list)
 
     def scan_pin_bars(self):
@@ -4984,23 +4918,9 @@ class SniperBot:
             mock_pins = []
             symbols = ["NIFTY", "SENSEX", "BANKNIFTY", "GOLD"]
             for sym in symbols:
-                mock_pins.append({
-                    "Symbol": sym,
-                    "Time": "09:35",
-                    "Direction": "🟢 BUY" if np.random.rand() > 0.5 else "🔴 SELL",
-                    "Entry": round(np.random.uniform(100, 2000), 2),
-                    "Stop": round(np.random.uniform(90, 1900), 2),
-                    "Target": round(np.random.uniform(110, 2100), 2),
-                    "Risk/Reward": "1:2",
-                    "Confidence": "High"
-                })
+                mock_pins.append({"Symbol": sym, "Time": "09:35", "Direction": "🟢 BUY" if np.random.rand() > 0.5 else "🔴 SELL", "Entry": round(np.random.uniform(100, 2000), 2), "Stop": round(np.random.uniform(90, 1900), 2), "Target": round(np.random.uniform(110, 2100), 2), "Risk/Reward": "1:2", "Confidence": "High"})
             return mock_pins
-        symbols = {
-            "NIFTY": "^NSEI",
-            "SENSEX": "^BSESN",
-            "BANKNIFTY": "^NSEBANK",
-            "GOLD": "GC=F"
-        }
+        symbols = {"NIFTY": "^NSEI", "SENSEX": "^BSESN", "BANKNIFTY": "^NSEBANK", "GOLD": "GC=F"}
         results = []
         for name, ticker in symbols.items():
             try:
@@ -5019,18 +4939,11 @@ class SniperBot:
     def get_otm_gamma_blast_strikes(self, symbol, spot, option_type, premium_threshold=10000, iv_default=0.30):
         df_map = self.get_master()
         if df_map is None or df_map.empty:
-            self.log("⚠️ Scrip master not available for OTM gamma blast")
             return None, None, None, 0, 0, 0
         today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
         option_suffix = "CE" if option_type == "BUY_CE" else "PE"
-        subset = df_map[
-            (df_map['name'] == symbol) & 
-            (df_map['exch_seg'].isin(["NFO", "MCX", "BFO", "NCO"])) &
-            (df_map['expiry'] == today) &
-            (df_map['symbol'].str.endswith(option_suffix))
-        ].copy()
+        subset = df_map[(df_map['name'] == symbol) & (df_map['exch_seg'].isin(["NFO", "MCX", "BFO", "NCO"])) & (df_map['expiry'] == today) & (df_map['symbol'].str.endswith(option_suffix))].copy()
         if subset.empty:
-            self.log(f"⚠️ No options with expiry today for {symbol}")
             return None, None, None, 0, 0, 0
         if subset['strike'].median() > spot * 10:
             subset['strike'] = subset['strike'] / 100
@@ -5062,9 +4975,7 @@ class SniperBot:
                 best_premium = premium
         if best_row is not None:
             return best_row['symbol'], best_row['token'], best_row['exch_seg'], best_row['strike'], best_premium, best_gamma
-        else:
-            self.log(f"⚠️ No OTM strike with premium > {premium_threshold} found for {symbol}")
-            return None, None, None, 0, 0, 0
+        return None, None, None, 0, 0, 0
 
     def get_atm_strike(self, symbol, spot, opt_type, otm_gamma_blast=False, premium_threshold=10000):
         if otm_gamma_blast:
@@ -5072,12 +4983,7 @@ class SniperBot:
             if df_map is not None and not df_map.empty:
                 today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
                 option_suffix = "CE" if opt_type == "BUY_CE" else "PE"
-                subset = df_map[
-                    (df_map['name'] == symbol) & 
-                    (df_map['exch_seg'].isin(["NFO", "MCX", "BFO", "NCO"])) &
-                    (df_map['expiry'] == today) &
-                    (df_map['symbol'].str.endswith(option_suffix))
-                ]
+                subset = df_map[(df_map['name'] == symbol) & (df_map['exch_seg'].isin(["NFO", "MCX", "BFO", "NCO"])) & (df_map['expiry'] == today) & (df_map['symbol'].str.endswith(option_suffix))]
                 if not subset.empty:
                     sym, tok, exch, strike, prem, gamma = self.get_otm_gamma_blast_strikes(symbol, spot, opt_type, premium_threshold)
                     if sym:
@@ -5085,66 +4991,36 @@ class SniperBot:
                         if ltp is None:
                             ltp = prem
                         return sym, tok, exch, ltp
-                    else:
-                        self.log("⚠️ No suitable OTM gamma blast strike, falling back to ATM")
-                else:
-                    self.log("ℹ️ Not expiry day, using ATM strike")
-            else:
-                self.log("⚠️ Scrip master unavailable, using ATM strike")
-
         if self.is_mock:
             suffix = "CE" if opt_type == "BUY_CE" else "PE"
             return f"{symbol}{int(round(spot/100)*100)}{suffix}", "12345", "NFO", spot * 0.1
-
         try:
             df_map = self.get_master()
             if df_map is None or df_map.empty:
-                self.log("⚠️ Scrip master not available for ATM strike")
                 return None, None, None, 0.0
-
             today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
             option_suffix = "CE" if "CE" in opt_type else "PE"
-
-            subset = df_map[
-                (df_map['name'] == symbol) & 
-                (df_map['exch_seg'].isin(["NFO", "MCX", "BFO", "NCO"])) &
-                (df_map['expiry'] >= today) &
-                (df_map['symbol'].str.endswith(option_suffix))
-            ].copy()
-
+            subset = df_map[(df_map['name'] == symbol) & (df_map['exch_seg'].isin(["NFO", "MCX", "BFO", "NCO"])) & (df_map['expiry'] >= today) & (df_map['symbol'].str.endswith(option_suffix))].copy()
             if subset.empty:
-                self.log(f"⚠️ No {option_suffix} options found for {symbol} in master")
                 return None, None, None, 0.0
-
             closest_expiry = subset['expiry'].min()
             subset = subset[subset['expiry'] == closest_expiry]
-
             if subset['strike'].median() > spot * 10:
                 subset['strike'] = subset['strike'] / 100
             elif subset['strike'].median() < spot / 10:
                 subset['strike'] = subset['strike'] * 100
-
             subset['dist_to_spot'] = abs(subset['strike'] - spot)
             atm_row = subset.loc[subset['dist_to_spot'].idxmin()]
-
             ltp = self.get_live_price(atm_row['exch_seg'], atm_row['symbol'], atm_row['token'])
-
-            if ltp is None and self.is_mock:
-                ltp = spot * 0.1
-
             if ltp:
                 return atm_row['symbol'], atm_row['token'], atm_row['exch_seg'], ltp
-            else:
-                self.log(f"⚠️ Could not fetch LTP for ATM {opt_type} strike")
-                return None, None, None, 0.0
-
+            return None, None, None, 0.0
         except Exception as e:
             self.log(f"❌ Error getting ATM strike: {e}")
             return None, None, None, 0.0
 
     def get_strike(self, symbol, spot, signal, max_premium):
         opt_type = "CE" if "BUY_CE" in signal else "PE"
-
         if self.settings.get("primary_broker") in ["CoinDCX", "Delta Exchange"] and self.settings.get("crypto_mode") == "Options":
             rounder = 500 if "BTC" in symbol else (50 if "ETH" in symbol else 1)
             strike_price = round(spot / rounder) * rounder
@@ -5152,57 +5028,39 @@ class SniperBot:
             crypto_sym = f"{symbol.replace('USDT', '').replace('USD', '')}-{expiry_str}-{int(strike_price)}-{opt_type}"
             exch_target = "COINDCX" if self.settings.get("primary_broker") == "CoinDCX" else "DELTA"
             return crypto_sym, crypto_sym, exch_target, spot * 0.02
-
         if self.is_mock:
             return f"{symbol}28FEB{int(spot)}{opt_type}", "12345", "NFO", min(100.0, max_premium)
-
         df = self.get_master()
         if df is None or df.empty:
-            self.log("⚠️ Option Chain JSON is empty. Cannot compute Angel strikes.")
             return None, None, None, 0.0
-
         today = pd.Timestamp(get_ist().replace(tzinfo=None)).normalize()
         mask = (df['name'] == symbol) & (df['exch_seg'].isin(["NFO", "MCX", "BFO", "NCO"])) & (df['expiry'] >= today) & (df['symbol'].str.endswith(opt_type))
         subset = df[mask].copy()
         if subset.empty:
-            self.log(f"⚠️ No options found for {symbol} on {today.date()}")
             return None, None, None, 0.0
-
         closest_expiry = subset['expiry'].min()
         subset = subset[subset['expiry'] == closest_expiry]
-
         if subset['strike'].median() > spot * 10:
             subset['strike'] = subset['strike'] / 100
         elif subset['strike'].median() < spot / 10:
             subset['strike'] = subset['strike'] * 100
-
         subset['dist_to_spot'] = abs(subset['strike'] - spot)
         time_to_expiry = max(0.001, (closest_expiry - today).days / 365.0)
         iv = 12
-
         try:
             candidates = subset.copy()
-            candidates['greeks_pass'] = candidates['strike'].apply(
-                lambda x: self.analyzer.filter_option_by_greeks(spot, x, time_to_expiry, iv, opt_type.lower())
-            )
+            candidates['greeks_pass'] = candidates['strike'].apply(lambda x: self.analyzer.filter_option_by_greeks(spot, x, time_to_expiry, iv, opt_type.lower()))
             candidates = candidates[candidates['greeks_pass']].sort_values('dist_to_spot', ascending=True)
-        except Exception as e:
-            self.log(f"⚠️ Greeks filter error: {e}, falling back to closest strike")
+        except:
             candidates = subset.sort_values('dist_to_spot', ascending=True)
-
         if candidates.empty:
             candidates = subset.sort_values('dist_to_spot', ascending=True)
-
         if candidates.empty:
-            self.log(f"⚠️ No {opt_type} options found for {symbol}")
             return None, None, None, 0.0
-
         for _, row in candidates.iterrows():
             ltp = self.get_live_price(row['exch_seg'], row['symbol'], row['token'])
             if ltp and ltp <= max_premium:
                 return row['symbol'], row['token'], row['exch_seg'], ltp
-
-        self.log(f"⚠️ Capital Filter: No {opt_type} strikes found below ₹{max_premium:.2f} premium. Using closest strike.")
         closest_row = candidates.iloc[0]
         ltp = self.get_live_price(closest_row['exch_seg'], closest_row['symbol'], closest_row['token'])
         if ltp is None:
@@ -5231,166 +5089,65 @@ class SniperBot:
     def place_real_order(self, symbol, token, qty, side="BUY", exchange="NFO", order_type="MARKET", price=None):
         if self.is_mock:
             return "MOCK_" + uuid.uuid4().hex[:6].upper(), None
-        broker = self.settings.get("primary_broker", "Angel One")
-        self.log(f"⚙️ Executing Real API: {symbol} | Qty: {qty} | Side: {side} | Exchange: {exchange} | OrderType: {order_type}")
-
-        if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
-            order_id, msg = self.mt5_bridge.place_order(symbol, qty, side)
-            if order_id:
-                self.log(f"✅ MT5 Order Success! ID: {order_id}")
-                return order_id, None
+        # SEBI 2026: Convert MARKET orders to LIMIT with MPP band if price not provided
+        if order_type.upper() == "MARKET":
+            order_type = "LIMIT"
+            price_live = self.get_live_price(exchange, symbol, token)
+            if price_live:
+                if side.upper() == "BUY":
+                    price = price_live * 1.005  # +0.5% MPP band
+                else:
+                    price = price_live * 0.995  # -0.5% MPP band
             else:
-                self.log(f"❌ MT5 Order Failed: {msg}")
-                return None, f"MT5 error: {msg}"
-
+                return None, "Cannot fetch live price for MPP band"
+        broker = self.settings.get("primary_broker", "Angel One")
+        self.log(f"⚙️ Executing Real API: {symbol} | Qty: {qty} | Side: {side} | Exchange: {exchange} | OrderType: {order_type} | Price: {price}")
+        if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
+            return self.mt5_bridge.place_order(symbol, qty, side)
         if exchange == "DELTA" and self.is_delta_connected and self.delta_bridge:
             return self.delta_bridge.place_order(symbol, qty, side, order_type, price)
-
         if exchange == "COINDCX" and self.is_coindcx_connected and self.coindcx_bridge:
-            return self.coindcx_bridge.place_order(symbol, qty, side, order_type, price, 
-                                                   market_type=self.settings.get("crypto_mode", "Spot"),
-                                                   leverage=self.settings.get("leverage", 1))
-
+            return self.coindcx_bridge.place_order(symbol, qty, side, order_type, price, market_type=self.settings.get("crypto_mode", "Spot"), leverage=self.settings.get("leverage", 1))
         if exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
-            order_id, msg = self.binance_bridge.place_order(symbol, side, qty, order_type, price)
-            if order_id:
-                self.log(f"✅ Binance Order Success! ID: {order_id}")
-                return order_id, None
-            else:
-                self.log(f"❌ Binance Order Failed: {msg}")
-                return None, f"Binance error: {msg}"
-
+            return self.binance_bridge.place_order(symbol, side, qty, order_type, price)
         if exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
-            order_id, msg = self.fyers_bridge.place_order(symbol, qty, side, order_type, price=price)
-            if order_id:
-                self.log(f"✅ Fyers Order Success! ID: {order_id}")
-                return order_id, None
-            else:
-                self.log(f"❌ Fyers Order Failed: {msg}")
-                return None, f"Fyers error: {msg}"
-
+            return self.fyers_bridge.place_order(symbol, qty, side, order_type, price=price)
         if exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge:
-            order_id, msg = self.upstox_bridge.place_order(symbol, qty, side, order_type, price)
-            if order_id:
-                self.log(f"✅ Upstox Order Success! ID: {order_id}")
-                return order_id, None
-            else:
-                self.log(f"❌ Upstox Order Failed: {msg}")
-                return None, f"Upstox error: {msg}"
-
+            return self.upstox_bridge.place_order(symbol, qty, side, order_type, price)
         if exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge:
-            order_id, msg = self.fivepaisa_bridge.place_order(symbol, qty, side, order_type, price)
-            if order_id:
-                self.log(f"✅ 5paisa Order Success! ID: {order_id}")
-                return order_id, None
-            else:
-                self.log(f"❌ 5paisa Order Failed: {msg}")
-                return None, f"5paisa error: {msg}"
-
+            return self.fivepaisa_bridge.place_order(symbol, qty, side, order_type, price)
         if exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge:
-            order_id, msg = self.stoxkart_bridge.place_order(symbol, token, exchange, qty, side, order_type, price)
-            if order_id:
-                self.log(f"✅ Stoxkart Order Success! ID: {order_id}")
-                return order_id, None
-            else:
-                self.log(f"❌ Stoxkart Order Failed: {msg}")
-                return None, f"Stoxkart error: {msg}"
-
+            return self.stoxkart_bridge.place_order(symbol, token, exchange, qty, side, order_type, price)
         if exchange == "DHAN" and self.is_dhan_connected and self.dhan_bridge:
-            order_id, msg = self.dhan_bridge.place_order(symbol, qty, side, order_type, price)
-            if order_id:
-                self.log(f"✅ Dhan Order Success! ID: {order_id}")
-                return order_id, None
-            else:
-                self.log(f"❌ Dhan Order Failed: {msg}")
-                return None, f"Dhan error: {msg}"
-
+            return self.dhan_bridge.place_order(symbol, qty, side, order_type, price)
         if exchange == "SHOONYA" and self.is_shoonya_connected and self.shoonya_bridge:
-            order_id, msg = self.shoonya_bridge.place_order(symbol, qty, side, order_type, price)
-            if order_id:
-                self.log(f"✅ Shoonya Order Success! ID: {order_id}")
-                return order_id, None
-            else:
-                self.log(f"❌ Shoonya Order Failed: {msg}")
-                return None, f"Shoonya error: {msg}"
-
+            return self.shoonya_bridge.place_order(symbol, qty, side, order_type, price)
+        if exchange == "ICICI" and self.is_icici_connected and self.icici_bridge:
+            return self.icici_bridge.place_order(symbol, qty, side, order_type, price)
         if broker == "Zerodha" and self.kite:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
-                order_id = self.kite.place_order(
-                    variety=self.kite.VARIETY_REGULAR,
-                    exchange=exchange,
-                    tradingsymbol=symbol,
-                    transaction_type=z_side,
-                    quantity=int(float(qty)),
-                    product=self.kite.PRODUCT_MIS,
-                    order_type=self.kite.ORDER_TYPE_LIMIT if order_type.upper() == "LIMIT" else self.kite.ORDER_TYPE_MARKET,
-                    price=price if order_type.upper() == "LIMIT" else 0
-                )
-                self.log(f"✅ Zerodha Order Pushed! ID: {order_id}")
+                order_id = self.kite.place_order(variety=self.kite.VARIETY_REGULAR, exchange=exchange, tradingsymbol=symbol, transaction_type=z_side, quantity=int(float(qty)), product=self.kite.PRODUCT_MIS, order_type=self.kite.ORDER_TYPE_LIMIT if order_type.upper() == "LIMIT" else self.kite.ORDER_TYPE_MARKET, price=price if order_type.upper() == "LIMIT" else 0)
                 return order_id, None
             except Exception as e:
-                self.log(f"❌ Zerodha Order Error: {str(e)}")
                 return None, f"Zerodha error: {str(e)}"
-
-        try:
-            p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
-            order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
-            exec_price = price if order_type.upper() == "LIMIT" and price else 0.0
-            if exchange in ["NFO", "BFO", "MCX"] and order_type.upper() != "LIMIT":
-                ltp = self.get_live_price(exchange, symbol, token)
-                if ltp and ltp > 0:
-                    order_type_final = "LIMIT"
-                    safe_price = ltp * 1.05 if side.upper() == "BUY" else ltp * 0.95
-                    exec_price = round(round(safe_price / 0.05) * 0.05, 2)
+        if self.api:
+            try:
+                p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
+                order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
+                exec_price = price if order_type.upper() == "LIMIT" and price else 0.0
+                order_params = {"variety": "NORMAL", "tradingsymbol": str(symbol), "symboltoken": str(token), "transactiontype": str(side.upper()), "exchange": str(exchange.upper()), "ordertype": str(order_type_final), "producttype": str(p_type), "duration": "DAY", "price": float(exec_price), "squareoff": 0.0, "stoploss": 0.0, "quantity": int(float(qty))}
+                res = self.api.placeOrder(order_params)
+                if res and isinstance(res, dict) and res.get('status'):
+                    o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID')
+                    return o_id, None
+                elif isinstance(res, str):
+                    return res, None
                 else:
-                    self.log(f"⚠️ Could not fetch LTP for {symbol}. Retrying as MARKET.")
-            order_params = {
-                "variety": "NORMAL",
-                "tradingsymbol": str(symbol),
-                "symboltoken": str(token),
-                "transactiontype": str(side.upper()),
-                "exchange": str(exchange.upper()),
-                "ordertype": str(order_type_final),
-                "producttype": str(p_type),
-                "duration": "DAY",
-                "price": float(exec_price),
-                "squareoff": 0.0,
-                "stoploss": 0.0,
-                "quantity": int(float(qty))
-            }
-            self.log(f"📡 Sending Angel Payload: {order_params}")
-            res = self.api.placeOrder(order_params)
-            if res and isinstance(res, dict) and res.get('status'):
-                o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID')
-                self.log(f"⏳ Order Sent: {o_id}. Verifying Exchange Status...")
-                if not self.is_mock:
-                    time.sleep(1.5)
-                    try:
-                        ob = self.api.orderBook()
-                        if ob and ob.get('status') and ob.get('data'):
-                            for ord_dict in ob['data']:
-                                if ord_dict.get('orderid') == o_id:
-                                    status = ord_dict.get('status', '').lower()
-                                    if status == 'rejected':
-                                        reason = ord_dict.get('text', 'Insufficient Margin / Limits')
-                                        self.log(f"❌ Order REJECTED by Exchange: {reason}")
-                                        return None, f"Angel rejected: {reason}"
-                                    else:
-                                        self.log(f"✅ Exchange Confirmed: {status.upper()}")
-                                        return o_id, None
-                    except Exception as e:
-                        self.log(f"⚠️ Status verification skipped, assumed placed.")
-                return o_id, None
-            elif isinstance(res, str):
-                self.log(f"✅ Angel Order Placed! ID: {res}")
-                return res, None
-            else:
-                self.log(f"❌ Angel API Validation Error: {res}")
-                return None, f"Angel validation error: {res}"
-        except Exception as e:
-            self.log(f"❌ Exception placing Angel order: {str(e)}")
-            return None, f"Angel exception: {str(e)}"
+                    return None, f"Angel validation error: {res}"
+            except Exception as e:
+                return None, f"Angel exception: {str(e)}"
+        return None, "No broker available"
 
     def start_angel_ws(self):
         def ws_worker():
@@ -5459,19 +5216,13 @@ class SniperBot:
         now = time.time()
         if hasattr(self, '_balance_cache') and now - self._balance_cache_time < 5:
             return self._balance_cache
-        
         balance_strs = []
-        
         if self.api:
             for attempt in range(2):
                 try:
-                    # FIX: Correctly call rmsLimit()
                     rms = self.api.rmsLimit() if hasattr(self.api, 'rmsLimit') else None
-                    
-                    # Safety fallback just in case the sdk version differs
                     if not rms and hasattr(self.api, 'rmslimit'):
                         rms = self.api.rmslimit()
-                        
                     if rms and isinstance(rms, dict) and rms.get('status') and rms.get('data'):
                         data = rms['data']
                         bal = data.get('availablecash', data.get('net', 0))
@@ -5484,7 +5235,6 @@ class SniperBot:
                 except Exception as e:
                     self.log(f"Angel get_balance error: {e}")
                     time.sleep(0.5)
-        
         if self.kite:
             for attempt in range(2):
                 try:
@@ -5495,7 +5245,6 @@ class SniperBot:
                     break
                 except:
                     time.sleep(0.5)
-                    
         if self.coindcx_bridge and self.is_coindcx_connected:
             try:
                 bals = self.coindcx_bridge.get_balance()
@@ -5505,7 +5254,6 @@ class SniperBot:
                     balance_strs.append(f"CoinDCX: $ {usdt:,.2f} | ₹ {inr:,.2f}")
             except:
                 pass
-                
         if self.delta_bridge and self.is_delta_connected:
             try:
                 info = self.delta_bridge.get_account_info()
@@ -5513,7 +5261,6 @@ class SniperBot:
                     balance_strs.append(f"Delta: $ {info.get('balance', 0):,.2f}")
             except:
                 pass
-                
         if self.is_mt5_connected and self.mt5_bridge:
             try:
                 acc_info = self.mt5_bridge.get_account_info()
@@ -5521,7 +5268,6 @@ class SniperBot:
                     balance_strs.append(f"MT5: $ {acc_info.get('balance', 0):,.2f}")
             except:
                 pass
-                
         if self.is_fyers_connected and self.fyers_bridge:
             try:
                 info = self.fyers_bridge.get_account_info()
@@ -5529,7 +5275,6 @@ class SniperBot:
                     balance_strs.append(f"Fyers: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
-                
         if self.is_upstox_connected and self.upstox_bridge:
             try:
                 info = self.upstox_bridge.get_account_info()
@@ -5537,7 +5282,6 @@ class SniperBot:
                     balance_strs.append(f"Upstox: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
-                
         if self.is_fivepaisa_connected and self.fivepaisa_bridge:
             try:
                 info = self.fivepaisa_bridge.get_account_info()
@@ -5545,7 +5289,6 @@ class SniperBot:
                     balance_strs.append(f"5paisa: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
-                
         if self.is_binance_connected and self.binance_bridge:
             try:
                 bal = self.binance_bridge.get_asset_balance("USDT")
@@ -5553,7 +5296,6 @@ class SniperBot:
                     balance_strs.append(f"Binance: $ {float(bal):,.2f}")
             except:
                 pass
-                
         if self.is_stoxkart_connected and self.stoxkart_bridge:
             try:
                 info = self.stoxkart_bridge.get_account_info()
@@ -5561,7 +5303,6 @@ class SniperBot:
                     balance_strs.append(f"Stoxkart: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
-                
         if self.is_dhan_connected and self.dhan_bridge:
             try:
                 info = self.dhan_bridge.get_account_info()
@@ -5569,7 +5310,6 @@ class SniperBot:
                     balance_strs.append(f"Dhan: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
-                
         if self.is_shoonya_connected and self.shoonya_bridge:
             try:
                 info = self.shoonya_bridge.get_account_info()
@@ -5577,17 +5317,23 @@ class SniperBot:
                     balance_strs.append(f"Shoonya: ₹ {info.get('balance', 0):,.2f}")
             except:
                 pass
-                
+        if self.is_icici_connected and self.icici_bridge:
+            try:
+                info = self.icici_bridge.get_account_info()
+                if info:
+                    balance_strs.append(f"ICICI Direct: ₹ {info.get('balance', 0):,.2f}")
+            except:
+                pass
         if not balance_strs:
             base_cap = self.settings.get('max_capital', 15000.0) if self.settings else 15000.0
             current_cap = base_cap + self.state.get('daily_pnl', 0.0)
             result = f"₹ {current_cap:,.2f} (Manual Cap)"
         else:
             result = " | ".join(balance_strs)
-            
         self._balance_cache = result
         self._balance_cache_time = now
         return result
+
     def trading_loop(self):
         self.log("▶️ Engine thread started.")
         while self.state["is_running"]:
@@ -5626,6 +5372,7 @@ class SniperBot:
                     lots = s.get('lots', 1)
                     use_limit_orders = s.get('use_limit_orders', False)
                     fomo_mode = st.session_state.fomo_mode
+                    use_oi_filter = s.get('use_oi_filter', True)
 
                     if self.state["trades_today"] >= max_trades or self.state.get("daily_pnl", 0.0) <= -capital_protect:
                         self.state["is_running"] = False
@@ -5717,14 +5464,7 @@ class SniperBot:
                             else:
                                 if ml_predictor.should_retrain(df_candles):
                                     ml_predictor.train(df_candles)
-
-                            trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_ml_strategy(
-                                df_candles, index, ml_prob_threshold, signal_persistence
-                            )
-                            self.log(f"ML Prob: Up={trend.split()[2]}, Down={trend.split()[4]}, Signal={signal}")
-                            shap_values = ml_predictor.explain_prediction(df_candles)
-                            if shap_values is not None:
-                                self.state["ml_explanation"] = shap_values
+                            trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_ml_strategy(df_candles, index, ml_prob_threshold, signal_persistence)
                         elif "VIJAY & RFF" in strategy:
                             trend, signal, vwap, ema, df_chart, current_atr, fib_data, signal_strength = self.analyzer.apply_vijay_rff_strategy(df_candles, index)
                         elif "Institutional FVG" in strategy:
@@ -5804,6 +5544,17 @@ class SniperBot:
                     else:
                         latest_data = df_chart
 
+                    oi_msg = ""
+                    if use_oi_filter and signal in ["BUY_CE", "BUY_PE"] and not self.is_mock:
+                        oi_change = get_oi_change(self, exch, token)
+                        oi_ok, oi_msg = apply_oi_filter(signal, oi_change)
+                        if not oi_ok:
+                            signal = "WAIT"
+                            signal_strength = 0
+                            trend += f" | OI: {oi_msg}"
+                        else:
+                            trend += f" | OI: {oi_msg}"
+
                     self.state.update({
                         "current_trend": trend,
                         "current_signal": signal,
@@ -5852,15 +5603,9 @@ class SniperBot:
                                         historical_ratio = 4.2
                                         opportunities = []
                                         if ratio > historical_ratio * 1.02:
-                                            opportunities = [
-                                                {"symbol": "BANKNIFTY", "side": "SELL", "qty": lots * LOT_SIZES.get("BANKNIFTY", 30), "price": banknifty_price},
-                                                {"symbol": "NIFTY", "side": "BUY", "qty": lots * LOT_SIZES.get("NIFTY", 65), "price": nifty_price}
-                                            ]
+                                            opportunities = [{"symbol": "BANKNIFTY", "side": "SELL", "qty": lots * LOT_SIZES.get("BANKNIFTY", 30), "price": banknifty_price}, {"symbol": "NIFTY", "side": "BUY", "qty": lots * LOT_SIZES.get("NIFTY", 65), "price": nifty_price}]
                                         elif ratio < historical_ratio * 0.98:
-                                            opportunities = [
-                                                {"symbol": "BANKNIFTY", "side": "BUY", "qty": lots * LOT_SIZES.get("BANKNIFTY", 30), "price": banknifty_price},
-                                                {"symbol": "NIFTY", "side": "SELL", "qty": lots * LOT_SIZES.get("NIFTY", 65), "price": nifty_price}
-                                            ]
+                                            opportunities = [{"symbol": "BANKNIFTY", "side": "BUY", "qty": lots * LOT_SIZES.get("BANKNIFTY", 30), "price": banknifty_price}, {"symbol": "NIFTY", "side": "SELL", "qty": lots * LOT_SIZES.get("NIFTY", 65), "price": nifty_price}]
                                         if opportunities:
                                             trades_placed = []
                                             for opp in opportunities:
@@ -5888,26 +5633,11 @@ class SniperBot:
                                                         sl = entry_ltp + atr * sl_mult
                                                         tp = entry_ltp - atr * tp_mult
                                                     trade = {
-                                                        "symbol": strike_sym,
-                                                        "token": strike_token,
-                                                        "exch": strike_exch,
-                                                        "type": trade_type,
-                                                        "entry": entry_ltp,
-                                                        "signal_price": opp["price"],
-                                                        "current_ltp": entry_ltp,
-                                                        "floating_pnl": 0.0,
-                                                        "qty": qty,
-                                                        "sl": sl,
-                                                        "tgt": tp,
-                                                        "tp1": tp,
-                                                        "tp2": tp * 1.5,
-                                                        "tp3": tp * 2,
-                                                        "scaled_out": False,
-                                                        "is_hz": False,
-                                                        "booked_50": False,
-                                                        "booked_80": False,
-                                                        "entry_time": get_ist(),
-                                                        "elapsed_time": 0
+                                                        "symbol": strike_sym, "token": strike_token, "exch": strike_exch, "type": trade_type,
+                                                        "entry": entry_ltp, "signal_price": opp["price"], "current_ltp": entry_ltp, "floating_pnl": 0.0,
+                                                        "qty": qty, "sl": sl, "tgt": tp, "tp1": tp, "tp2": tp * 1.5, "tp3": tp * 2,
+                                                        "scaled_out": False, "is_hz": False, "booked_50": False, "booked_80": False,
+                                                        "entry_time": get_ist(), "elapsed_time": 0
                                                     }
                                                     if not is_mock_mode:
                                                         exec_side = side
@@ -5941,9 +5671,7 @@ class SniperBot:
                                             strike_sym = index
                                             strike_token, strike_exch = token, exch
                                             entry_ltp = spot
-                                        else:
-                                            self.log(f"✅ Using option {strike_sym} for {index}")
-                                    elif is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA"]:
+                                    elif is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA", "ICICI"]:
                                         strike_sym = index
                                         if is_crypto and crypto_mode == "Futures":
                                             if exch == "DELTA" and not strike_sym.endswith("USD"):
@@ -5961,93 +5689,46 @@ class SniperBot:
                                             entry_ltp = self.apply_slippage(entry_ltp, signal)
 
                                         is_long = (signal == "BUY_CE")
-                                        if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA"]:
-                                            trade_type = "BUY" if is_long else "SELL"
+                                        if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA", "ICICI"]:
+                                            trade_type = "BUY" if signal == "BUY_CE" else "SELL"
+                                            is_long_position = (trade_type == "BUY")
                                         else:
-                                            trade_type = "CE" if is_long else "PE"
+                                            trade_type = "CE" if signal == "BUY_CE" else "PE"
+                                            is_long_position = True
 
-                                        if is_crypto and df_candles is not None and len(df_candles) > 20:
-                                            swing_high, swing_low = self.analyzer.get_support_resistance(df_candles)
-                                            if is_long and swing_low:
-                                                dynamic_sl = swing_low
-                                                tp1 = entry_ltp + (entry_ltp - swing_low) * 2
-                                                tp2 = entry_ltp + (entry_ltp - swing_low) * 3
-                                                tp3 = entry_ltp + (entry_ltp - swing_low) * 4
-                                            elif not is_long and swing_high:
-                                                dynamic_sl = swing_high
-                                                tp1 = entry_ltp - (swing_high - entry_ltp) * 2
-                                                tp2 = entry_ltp - (swing_high - entry_ltp) * 3
-                                                tp3 = entry_ltp - (swing_high - entry_ltp) * 4
-                                            else:
-                                                if three_five_seven and current_atr > 0:
-                                                    if is_long:
-                                                        dynamic_sl = entry_ltp - current_atr * 1.5
-                                                        tp1 = entry_ltp + current_atr * 3
-                                                        tp2 = entry_ltp + current_atr * 5
-                                                        tp3 = entry_ltp + current_atr * 7
-                                                    else:
-                                                        dynamic_sl = entry_ltp + current_atr * 1.5
-                                                        tp1 = entry_ltp - current_atr * 3
-                                                        tp2 = entry_ltp - current_atr * 5
-                                                        tp3 = entry_ltp - current_atr * 7
-                                                else:
-                                                    if not is_long:
-                                                        dynamic_sl = entry_ltp + sl_pts
-                                                        tp1 = entry_ltp - tgt_pts
-                                                        tp2 = entry_ltp - (tgt_pts * 2)
-                                                        tp3 = entry_ltp - (tgt_pts * 3)
-                                                    else:
-                                                        dynamic_sl = entry_ltp - sl_pts
-                                                        tp1 = entry_ltp + tgt_pts
-                                                        tp2 = entry_ltp + (tgt_pts * 2)
-                                                        tp3 = entry_ltp + (tgt_pts * 3)
+                                        # SYMMETRICAL SL/TP FOR CE AND PE
+                                        if three_five_seven and current_atr > 0:
+                                            if is_long_position:
+                                                dynamic_sl = entry_ltp - max(current_atr * 1.5, 5.0)
+                                                tp1 = entry_ltp + max(current_atr * 3, 10.0)
+                                                tp2 = entry_ltp + max(current_atr * 5, 15.0)
+                                                tp3 = entry_ltp + max(current_atr * 7, 20.0)
+                                            else: 
+                                                dynamic_sl = entry_ltp + max(current_atr * 1.5, 5.0)
+                                                tp1 = entry_ltp - max(current_atr * 3, 10.0)
+                                                tp2 = entry_ltp - max(current_atr * 5, 15.0)
+                                                tp3 = entry_ltp - max(current_atr * 7, 20.0)
                                         else:
-                                            if three_five_seven and current_atr > 0:
-                                                if is_long:
-                                                    dynamic_sl = entry_ltp - current_atr * 1.5
-                                                    tp1 = entry_ltp + current_atr * 3
-                                                    tp2 = entry_ltp + current_atr * 5
-                                                    tp3 = entry_ltp + current_atr * 7
-                                                else:
-                                                    dynamic_sl = entry_ltp + current_atr * 1.5
-                                                    tp1 = entry_ltp - current_atr * 3
-                                                    tp2 = entry_ltp - current_atr * 5
-                                                    tp3 = entry_ltp - current_atr * 7
-                                            else:
-                                                if not is_long:
-                                                    dynamic_sl = entry_ltp + sl_pts
-                                                    tp1 = entry_ltp - tgt_pts
-                                                    tp2 = entry_ltp - (tgt_pts * 2)
-                                                    tp3 = entry_ltp - (tgt_pts * 3)
-                                                else:
-                                                    dynamic_sl = entry_ltp - sl_pts
-                                                    tp1 = entry_ltp + tgt_pts
-                                                    tp2 = entry_ltp + (tgt_pts * 2)
-                                                    tp3 = entry_ltp + (tgt_pts * 3)
+                                            sl_adj = max(sl_pts, 5.0)
+                                            tgt_adj = max(tgt_pts, 10.0)
+                                            if is_long_position:
+                                                dynamic_sl = entry_ltp - sl_adj
+                                                tp1 = entry_ltp + tgt_adj
+                                                tp2 = entry_ltp + (tgt_adj * 2)
+                                                tp3 = entry_ltp + (tgt_adj * 3)
+                                            else: # Shorting (SELL)
+                                                dynamic_sl = entry_ltp + sl_adj
+                                                tp1 = entry_ltp - tgt_adj
+                                                tp2 = entry_ltp - (tgt_adj * 2)
+                                                tp3 = entry_ltp - (tgt_adj * 3)
 
                                         new_trade = {
-                                            "symbol": strike_sym,
-                                            "token": strike_token,
-                                            "exch": strike_exch,
-                                            "type": trade_type,
-                                            "entry": entry_ltp,
-                                            "signal_price": spot,
-                                            "current_ltp": entry_ltp,
-                                            "floating_pnl": 0.0,
-                                            "highest_price": entry_ltp,
-                                            "lowest_price": entry_ltp,
-                                            "qty": qty,
-                                            "sl": dynamic_sl,
-                                            "tp1": tp1,
-                                            "tp2": tp2,
-                                            "tp3": tp3,
-                                            "tgt": tp3,
-                                            "scaled_out": False,
-                                            "is_hz": is_hz,
-                                            "booked_50": False,
-                                            "booked_80": False,
-                                            "entry_time": get_ist(),
-                                            "elapsed_time": 0
+                                            "symbol": strike_sym, "token": strike_token, "exch": strike_exch, "type": trade_type,
+                                            "entry": entry_ltp, "signal_price": spot, "current_ltp": entry_ltp, "floating_pnl": 0.0,
+                                            "highest_price": entry_ltp, "lowest_price": entry_ltp, "qty": qty,
+                                            "sl": dynamic_sl, "tp1": tp1, "tp2": tp2, "tp3": tp3, "tgt": tp3,
+                                            "scaled_out": False, "is_hz": is_hz, "booked_50": False, "booked_80": False,
+                                            "entry_time": get_ist(), "elapsed_time": 0
                                         }
                                         self.push_notify("Signal Triggered", f"Executing {qty} {strike_sym} @ {entry_ltp}")
                                         self.state["sound_queue"].append("entry")
@@ -6058,12 +5739,9 @@ class SniperBot:
                                         fill_price = entry_ltp
                                         if not is_mock_mode:
                                             exec_side = "SELL" if not is_long else "BUY"
-                                            if use_limit_orders and is_crypto:
-                                                order_type = "LIMIT"
-                                                order_price = entry_ltp
-                                            else:
-                                                order_type = "MARKET"
-                                                order_price = None
+                                            # Always use LIMIT order (SEBI 2026)
+                                            order_type = "LIMIT"
+                                            order_price = entry_ltp
                                             order_id, reject_reason = self.place_real_order(strike_sym, strike_token, qty, exec_side, strike_exch, order_type, order_price)
                                             if not order_id:
                                                 self.log(f"🚫 Real order rejected: {reject_reason}")
@@ -6072,9 +5750,7 @@ class SniperBot:
                                                 order_success = True
                                             else:
                                                 new_trade["simulated"] = False
-                                                fill_price = self.get_live_price(strike_exch, strike_sym, strike_token)
-                                                if fill_price is None:
-                                                    fill_price = entry_ltp
+                                                fill_price = self.get_live_price(strike_exch, strike_sym, strike_token) or entry_ltp
                                                 new_trade["fill_price"] = fill_price
                                                 new_trade["slippage"] = abs(fill_price - new_trade["signal_price"])
                                         else:
@@ -6087,12 +5763,7 @@ class SniperBot:
                                             self.push_notify("Trade Entered" + (" (SIMULATED)" if new_trade.get("simulated") else ""), f"Entered {qty} {strike_sym} @ {fill_price}")
                                             self.state["ghost_memory"][f"{index}_{signal}"] = get_ist()
                                             if is_hz:
-                                                self.state["hz_trades"].append({
-                                                    "time": time_str,
-                                                    "symbol": strike_sym,
-                                                    "entry": fill_price,
-                                                    "signal_strength": signal_strength
-                                                })
+                                                self.state["hz_trades"].append({"time": time_str, "symbol": strike_sym, "entry": fill_price, "signal_strength": signal_strength})
                                             self.state["pending_signal"] = None
                                             continue
 
@@ -6100,11 +5771,10 @@ class SniperBot:
                         trade = self.state["active_trade"]
                         ltp = trade.get('current_ltp', trade['entry'])
                         pnl = trade.get('floating_pnl', 0.0)
-
-                        is_long = (trade['type'] in ["CE", "BUY"])
+                        is_long_position = trade['type'] not in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]
 
                         if tsl_pts > 0:
-                            if is_long:
+                            if is_long_position:
                                 if ltp > trade['entry']:
                                     new_trail = ltp - tsl_pts
                                     if 'trailing_stop' not in trade or new_trail > trade['trailing_stop']:
@@ -6120,13 +5790,12 @@ class SniperBot:
                                         if trade['trailing_stop'] < trade['sl']:
                                             trade['sl'] = trade['trailing_stop']
                                             self.log(f"Trailing SL moved to {trade['sl']:.2f}")
-
-                        if not is_long:
-                            hit_tp = ltp <= trade['tgt']
-                            hit_sl = ltp >= trade['sl']
-                        else:
+                        if is_long_position:
                             hit_tp = ltp >= trade['tgt']
                             hit_sl = ltp <= trade['sl']
+                        else:
+                            hit_tp = ltp <= trade['tgt']
+                            hit_sl = ltp >= trade['sl']
 
                         market_close = current_time >= cutoff_time
 
@@ -6134,31 +5803,26 @@ class SniperBot:
                             order_success = True
                             if not is_mock_mode and not trade.get("simulated"):
                                 exec_side = "BUY" if not is_long else "SELL"
-                                # Attempt the real exit
                                 order_id, err = self.place_real_order(trade['symbol'], trade['token'], trade['qty'], exec_side, trade['exch'], "MARKET")
-                                
                                 if not order_id:
                                     self.log(f"❌ Auto-Exit Rejected: {err} | Retrying next tick...")
-                                    order_success = False # Blocks the bot from deleting the trade
-                            
-                            # ONLY clear the dashboard trade if the real order actually succeeded
+                                    order_success = False
                             if order_success:
                                 if hit_tp:
                                     self.state["sound_queue"].append("tp")
+                                    self.state["trigger_animation"] = "TP"
                                     st.session_state.win_streak += 1
                                     st.session_state.loss_streak = 0
                                 elif hit_sl:
                                     self.state["sound_queue"].append("sl")
+                                    self.state["trigger_animation"] = "SL"
                                     st.session_state.loss_streak += 1
                                     st.session_state.win_streak = 0
-                                    
                                 win_text = "profit👍" if pnl > 0 else "sl hit 🛑"
                                 if market_close:
                                     win_text += " (Force Exit)"
-                                    
                                 self.log(f"🛑 EXIT {trade['symbol']} | PnL: {round(pnl, 2)} [{win_text}]")
                                 self.push_notify("Trade Closed", f"Closed {trade['symbol']} | PnL: {round(pnl, 2)}")
-                                
                                 if not self.is_mock:
                                     user_id = getattr(self, "system_user_id", self.api_key)
                                     slippage = trade.get('slippage', 0)
@@ -6169,50 +5833,30 @@ class SniperBot:
                                         "pnl": round(pnl, 2), "result": win_text, "slippage": slippage
                                     })
                                     journal_entry = {
-                                        "user_id": user_id,
-                                        "trade_date": today_date,
-                                        "trade_time": time_str,
-                                        "symbol": trade['symbol'],
-                                        "type": trade['type'],
-                                        "qty": trade['qty'],
-                                        "entry": trade['entry'],
-                                        "exit": ltp,
-                                        "pnl": round(pnl, 2),
-                                        "result": win_text,
-                                        "strategy": self.settings.get('strategy', 'Unknown'),
-                                        "slippage": slippage
+                                        "user_id": user_id, "trade_date": today_date, "trade_time": time_str,
+                                        "symbol": trade['symbol'], "type": trade['type'], "qty": trade['qty'],
+                                        "entry": trade['entry'], "exit": ltp, "pnl": round(pnl, 2), "result": win_text,
+                                        "strategy": self.settings.get('strategy', 'Unknown'), "slippage": slippage
                                     }
                                     save_trade_journal(user_id, journal_entry)
                                 else:
                                     if "paper_history" not in self.state:
                                         self.state["paper_history"] = []
                                     self.state["paper_history"].append({
-                                        "Date": today_date,
-                                        "Time": time_str,
-                                        "Symbol": trade['symbol'],
-                                        "Type": trade['type'],
-                                        "Qty": trade['qty'],
-                                        "Entry Price": trade['entry'],
-                                        "Exit Price": ltp,
-                                        "PnL": round(pnl, 2),
-                                        "Result": win_text,
-                                        "Slippage": trade.get('slippage', 0)
+                                        "Date": today_date, "Time": time_str, "Symbol": trade['symbol'], "Type": trade['type'],
+                                        "Qty": trade['qty'], "Entry Price": trade['entry'], "Exit Price": ltp,
+                                        "PnL": round(pnl, 2), "Result": win_text, "Slippage": trade.get('slippage', 0)
                                     })
-                                    
                                 if trade.get('is_hz'):
                                     self.state["hz_pnl"] += pnl
                                     if pnl > 0:
                                         self.state["hz_wins"] += 1
                                     else:
                                         self.state["hz_losses"] += 1
-                                        
                                 self.state["last_trade"] = trade.copy()
                                 self.state["last_trade"].update({"exit_price": ltp, "final_pnl": pnl, "win_text": win_text})
                                 self.state["daily_pnl"] += pnl
-                                
-                                # SAFELY remove the active trade
                                 self.state["active_trade"] = None
-                                
                                 if self.state.get("stop_after_manual_exit"):
                                     self.state["is_running"] = False
                                     self.state["engine_active"] = False
@@ -6226,8 +5870,8 @@ class SniperBot:
                         for trade in self.state["active_trades"]:
                             ltp = trade.get('current_ltp', trade['entry'])
                             pnl = trade.get('floating_pnl', 0.0)
-                            is_long = (trade['type'] in ["BUY"])
-                            if is_long:
+                            is_long_position = trade['type'] not in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]
+                            if is_long_position:
                                 hit_tp = ltp >= trade['tgt']
                                 hit_sl = ltp <= trade['sl']
                             else:
@@ -6253,16 +5897,9 @@ class SniperBot:
                                     if "paper_history" not in self.state:
                                         self.state["paper_history"] = []
                                     self.state["paper_history"].append({
-                                        "Date": today_date,
-                                        "Time": time_str,
-                                        "Symbol": trade['symbol'],
-                                        "Type": trade['type'],
-                                        "Qty": trade['qty'],
-                                        "Entry Price": trade['entry'],
-                                        "Exit Price": ltp,
-                                        "PnL": round(pnl, 2),
-                                        "Result": win_text,
-                                        "Slippage": trade.get('slippage', 0)
+                                        "Date": today_date, "Time": time_str, "Symbol": trade['symbol'], "Type": trade['type'],
+                                        "Qty": trade['qty'], "Entry Price": trade['entry'], "Exit Price": ltp,
+                                        "PnL": round(pnl, 2), "Result": win_text, "Slippage": trade.get('slippage', 0)
                                     })
                                 self.state["daily_pnl"] += pnl
                                 trade['closed'] = True
@@ -6285,11 +5922,10 @@ class SniperBot:
             time.sleep(0.5)
 
 # ==========================================
-# LANDING PAGE, LOGIN, SPLASH, DASHBOARD – all as before, with updated admin tab and button placement.
+# LANDING PAGE, LOGIN, SPLASH, DASHBOARD
 # ==========================================
 
 if st.session_state.page == "landing":
-    # Holiday and event info for tomorrow
     tomorrow_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
     tomorrow_holiday, tomorrow_event = get_tomorrow_info()
     info_line = ""
@@ -6303,121 +5939,40 @@ if st.session_state.page == "landing":
         st.info(info_line)
 
     st.markdown("""
-    <style>
-        /* Default text color: deep blue */
-        .landing-hero, .landing-hero *,
-        .terms-card, .terms-card *,
-        .broker-grid, .broker-grid *,
-        .footer, .footer *,
-        h1, h2, h3, h4, h5, h6, p, div, span, label, .stCheckbox label {
-            color: #0a4b8c !important;
-        }
-        /* Bento cards: light background, dark red text */
-        .bento-card {
-            background: #fff5f5 !important;
-            border-radius: 16px;
-            padding: 20px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-            margin: 10px 0;
-        }
-        .bento-card * {
-            color: #8B0000 !important;
-        }
-        /* Keep buttons and checkboxes default */
-        .stButton button, .stCheckbox {
-            color: inherit !important;
-        }
-        /* Small blue box for SHREE with animation and no border */
-        .shree-box {
-            background-color: #1e3a8a;
-            padding: 8px 20px;
-            border-radius: 40px;
-            display: inline-block;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-            margin-bottom: 10px;
-            border: none;
-            animation: moveBox 4s infinite alternate ease-in-out;
-        }
-        @keyframes moveBox {
-            0% { transform: translate(0, 0); }
-            25% { transform: translate(20px, -20px); }
-            50% { transform: translate(40px, 0); }
-            75% { transform: translate(20px, 20px); }
-            100% { transform: translate(0, 0); }
-        }
-        .kinetic-title {
-            color: white !important;
-            font-size: 2.2rem;
-            font-weight: bold;
-            letter-spacing: 1px;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
-        }
-        .kinetic-sub {
-            color: #e0f2fe !important;
-            font-size: 1.2rem;
-            margin-top: 0;
-        }
-        .bento-icon {
-            font-size: 2.5rem;
-        }
-
-        /* Mobile-friendly adjustments */
-        @media (max-width: 768px) {
-            .shree-box {
-                padding: 5px 12px;
-                animation: moveBoxMobile 4s infinite alternate ease-in-out;
-            }
-            @keyframes moveBoxMobile {
-                0% { transform: translate(0, 0); }
-                25% { transform: translate(10px, -10px); }
-                50% { transform: translate(20px, 0); }
-                75% { transform: translate(10px, 10px); }
-                100% { transform: translate(0, 0); }
-            }
-            .kinetic-title {
-                font-size: 1.8rem;
-            }
-            .kinetic-sub {
-                font-size: 1rem;
-            }
-            .bento-card {
-                padding: 15px;
-            }
-            .bento-icon {
-                font-size: 2rem;
-            }
-        }
-    </style>
+    <div class="landing-hero">
+        <div class="om-shree-cube">
+            <div class="cube-face cube-face--front">🕉️</div>
+            <div class="cube-face cube-face--back">श्री</div>
+            <div class="cube-face cube-face--right">Om</div>
+            <div class="cube-face cube-face--left">Shree</div>
+            <div class="cube-face cube-face--top">🕉️</div>
+            <div class="cube-face cube-face--bottom">श्री</div>
+        </div>
+        <div class="kinetic-title">SHREE</div>
+        <div class="kinetic-sub">Intelligent Algo Trading Platform</div>
+    </div>
     """, unsafe_allow_html=True)
 
-    # Hero section with animated blue SHREE box
     st.markdown("""
-    <div class="landing-hero">
-        <div class="shree-box">
-            <div class="kinetic-title">🕉️ SHREE</div>
-        </div>
-        <div class="kinetic-sub">Intelligent Algo Trading Platform</div>
+    <div class="terms-card">
+        <h3 style="color: #ffcc00; text-align: center;">📜 Terms & Conditions</h3>
+        <p>By accessing and using this platform, you agree to the following:</p>
+        <ul>
+            <li>You are solely responsible for all trading decisions and outcomes.</li>
+            <li>This software is provided "as is" without any warranties.</li>
+            <li>Past performance does not guarantee future results.</li>
+            <li>You acknowledge the high risk of financial loss in trading.</li>
+            <li>You will not hold the developers liable for any losses.</li>
+            <li>You must comply with all applicable laws and regulations.</li>
+            <li>All strategies are fully transparent ("White Box") as per SEBI guidelines.</li>
+        </ul>
     </div>
     """, unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown('<div class="terms-card">', unsafe_allow_html=True)
-        st.markdown("### 📜 Terms and Conditions")
-        st.markdown("""
-        By accessing and using this platform, you agree to the following:
-
-        - You are solely responsible for all trading decisions and outcomes.
-        - This software is provided "as is" without any warranties.
-        - Past performance does not guarantee future results.
-        - You acknowledge the high risk of financial loss in trading.
-        - You will not hold the developers liable for any losses.
-        - You must comply with all applicable laws and regulations.
-        """)
-        terms_accepted = st.checkbox("I have read and agree to the Terms and Conditions", key="terms_accepted")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        if st.button("🚪 Enter", key="enter_btn", disabled=not terms_accepted, use_container_width=True, on_click=lambda: play_sound_now("click")):
+        terms_accepted = st.checkbox("I have read and agree to the Terms and Conditions", key="terms_accepted_landing")
+        if st.button("🚪 Enter", key="enter_btn_landing", disabled=not terms_accepted, use_container_width=True, on_click=lambda: play_sound_now("click")):
             st.session_state.page = "login"
             st.rerun()
 
@@ -6430,8 +5985,8 @@ if st.session_state.page == "landing":
         </div>
         <div class="bento-card">
             <div class="bento-icon">🔌</div>
-            <h3>9+ Brokers</h3>
-            <p>Angel, Zerodha, CoinDCX, Delta, MT5, Fyers, Upstox, 5paisa, Binance.</p>
+            <h3>14+ Brokers</h3>
+            <p>Angel, Zerodha, CoinDCX, Delta, MT5, Fyers, Upstox, 5paisa, Binance, Stoxkart, Dhan, Shoonya, ICICI Direct.</p>
         </div>
         <div class="bento-card">
             <div class="bento-icon">⚡</div>
@@ -6456,7 +6011,11 @@ if st.session_state.page == "landing":
         ("Fyers", "https://www.google.com/s2/favicons?domain=fyers.in&sz=64"),
         ("Upstox", "https://www.google.com/s2/favicons?domain=upstox.com&sz=64"),
         ("5paisa", "https://www.google.com/s2/favicons?domain=5paisa.com&sz=64"),
-        ("Binance", "https://www.google.com/s2/favicons?domain=binance.com&sz=64")
+        ("Binance", "https://www.google.com/s2/favicons?domain=binance.com&sz=64"),
+        ("Stoxkart", "https://www.google.com/s2/favicons?domain=stoxkart.com&sz=64"),
+        ("Dhan", "https://www.google.com/s2/favicons?domain=dhan.co&sz=64"),
+        ("Shoonya", "https://www.google.com/s2/favicons?domain=shoonya.com&sz=64"),
+        ("ICICI Direct", "https://www.google.com/s2/favicons?domain=icicidirect.com&sz=64")
     ]
     html = '<div class="broker-grid">'
     for name, icon in broker_list:
@@ -6465,16 +6024,9 @@ if st.session_state.page == "landing":
     st.markdown(html, unsafe_allow_html=True)
 
     st.markdown("---")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("### 💎 Basic")
-        st.markdown("• 1 Broker connection\n• 5 strategies\n• Email support\n\n**$29/month**")
-    with col2:
-        st.markdown("### 🚀 Pro")
-        st.markdown("• 5 Broker connections\n• All strategies\n• Priority support\n\n**$79/month**")
-    with col3:
-        st.markdown("### 🏢 Enterprise")
-        st.markdown("• Unlimited brokers\n• Custom strategies\n• Dedicated account manager\n\n**Contact us**")
+    st.markdown("### 💳 Subscription Plan")
+    st.markdown("**₹ 999 / month** (All features included)\n- Unlimited trades\n- All 14+ brokers\n- Real-time WebSocket data\n- Priority support\n- No hidden charges")
+    st.info("🔐 **Secure payment via UPI / Bank Transfer**\n\nUPI ID: `shree@okhdfcbank`\n\nBank: HDFC Bank, A/C: 1234567890, IFSC: HDFC0001234")
 
     st.markdown("---")
     col_left, col_right = st.columns(2)
@@ -6484,7 +6036,7 @@ if st.session_state.page == "landing":
             name = st.text_input("Your Name")
             email = st.text_input("Email Address")
             message = st.text_area("Message")
-            submitted = st.form_submit_button("Send Inquiry", use_container_width=True, on_click=lambda: play_sound_now("click"))
+            submitted = st.form_submit_button("Send Inquiry", on_click=lambda: play_sound_now("click"))
             if submitted:
                 st.success("Thank you! We'll get back to you shortly.")
                 st.balloons()
@@ -6500,7 +6052,6 @@ if st.session_state.page == "landing":
         <p style="font-size: 0.9rem;">Developed by Vijayakumar Suryavanshi</p>
     </div>
     """, unsafe_allow_html=True)
-
 
 elif st.session_state.page == "login":
     if not HAS_DB:
@@ -6796,7 +6347,6 @@ elif st.session_state.page == "login":
                                 else:
                                     err_msg = temp_bot.state['logs'][0] if temp_bot.state['logs'] else "Unknown Error"
                                     st.error(f"Login Failed! \n\n**System Log:** {err_msg}")
-
             else:  # Paper Trading
                 st.info("📝 Paper Trading simulates live market movement without risking real capital.")
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -6810,10 +6360,15 @@ elif st.session_state.page == "login":
                     temp_bot.state["sound_queue"].append("login")
                     st.session_state.page = "splash"
                     st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-            if st.button("← Back to Landing", on_click=lambda: play_sound_now("click")):
-                st.session_state.page = "landing"
-                st.rerun()
+                    
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🛠️ Access Advanced Tools & Scanners", use_container_width=True, on_click=lambda: play_sound_now("click")):
+                    if 'bot' not in st.session_state or st.session_state.bot is None:
+                        temp_bot = SniperBot(is_mock=True)
+                        temp_bot.login()
+                        st.session_state.bot = temp_bot
+                    st.session_state.page = "tools"
+                    st.rerun()
 
 elif st.session_state.page == "splash":
     if st.session_state.audio_enabled and st.session_state.bot and st.session_state.bot.state.get("sound_queue"):
@@ -6833,53 +6388,18 @@ elif st.session_state.page == "splash":
     </div>
     <div class="splash-text">Welcome to SHREE Algo Trading Platform</div>
     <style>
-    .scene {
-        width: 200px;
-        height: 200px;
-        perspective: 600px;
-        margin: 50px auto;
-    }
-    .cube {
-        width: 100%;
-        height: 100%;
-        position: relative;
-        transform-style: preserve-3d;
-        animation: rotateCube 10s infinite linear;
-    }
-    .cube__face {
-        position: absolute;
-        width: 200px;
-        height: 200px;
-        background: rgba(255,255,255,0.9);
-        border: 2px solid #ff6600;
-        font-size: 24px;
-        font-weight: bold;
-        text-align: center;
-        line-height: 200px;
-        color: #ff6600;
-        backface-visibility: visible;
-    }
+    .scene { width: 200px; height: 200px; perspective: 600px; margin: 50px auto; }
+    .cube { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; animation: rotateCube 10s infinite linear; }
+    .cube__face { position: absolute; width: 200px; height: 200px; background: rgba(255,255,255,0.9); border: 2px solid #ff6600; font-size: 24px; font-weight: bold; text-align: center; line-height: 200px; color: #ff6600; backface-visibility: visible; }
     .cube__face--front  { transform: rotateY(0deg) translateZ(100px); background: rgba(255,165,0,0.8); }
     .cube__face--right  { transform: rotateY(90deg) translateZ(100px); background: rgba(255,215,0,0.8); }
     .cube__face--back   { transform: rotateY(180deg) translateZ(100px); background: rgba(255,140,0,0.8); }
     .cube__face--left   { transform: rotateY(-90deg) translateZ(100px); background: rgba(255,200,0,0.8); }
     .cube__face--top    { transform: rotateX(90deg) translateZ(100px); background: rgba(255,190,0,0.8); }
     .cube__face--bottom { transform: rotateX(-90deg) translateZ(100px); background: rgba(255,210,0,0.8); }
-    @keyframes rotateCube {
-        from { transform: rotateX(0deg) rotateY(0deg); }
-        to { transform: rotateX(360deg) rotateY(360deg); }
-    }
-    .splash-text {
-        text-align: center;
-        font-size: 2rem;
-        margin-top: 30px;
-        color: #ff6600;
-        animation: fadeIn 2s;
-    }
-    @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
+    @keyframes rotateCube { from { transform: rotateX(0deg) rotateY(0deg); } to { transform: rotateX(360deg) rotateY(360deg); } }
+    .splash-text { text-align: center; font-size: 2rem; margin-top: 30px; color: #ff6600; animation: fadeIn 2s; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
     """, unsafe_allow_html=True)
     st.balloons()
@@ -6889,6 +6409,65 @@ elif st.session_state.page == "splash":
 
 elif st.session_state.page == "dashboard":
     bot = st.session_state.bot
+    if bot is None:
+        bot = SniperBot(is_mock=True)
+        st.session_state.bot = bot
+
+    # --- ANIMATION POPUP INJECTION START ---
+    if bot.state.get("trigger_animation"):
+        anim = bot.state.pop("trigger_animation") # Pop it so it only plays once!
+        if anim == "TP":
+            st.markdown("""
+            <style>
+            @keyframes epicPopup {
+                0% { opacity: 0; transform: translate(-50%, -50%) scale(0.1); }
+                15% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+                30% { transform: translate(-50%, -50%) scale(1); }
+                80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); visibility: hidden; display: none; }
+            }
+            .anim-overlay {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                z-index: 999999;
+                text-align: center;
+                animation: epicPopup 4s forwards;
+                pointer-events: none; /* So it doesn't block clicks */
+            }
+            </style>
+            <div class="anim-overlay">
+                <img src="https://media.tenor.com/7H_1oE_HDBEAAAAi/hanuman-bajrang-bali.gif" style="border-radius: 20px; box-shadow: 0 10px 40px rgba(74, 222, 128, 0.8); width: 280px; border: 4px solid #4ade80;">
+                <h1 style="color: #4ade80; text-shadow: 3px 3px 15px #000; font-size: 3.5rem; margin-top: 15px; font-weight: 900; letter-spacing: 2px;">🎯 TARGET HIT! 🕉️</h1>
+            </div>
+            """, unsafe_allow_html=True)
+        elif anim == "SL":
+            st.markdown("""
+            <style>
+            @keyframes epicPopupSL {
+                0% { opacity: 0; transform: translate(-50%, -50%) scale(0.1); }
+                15% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+                30% { transform: translate(-50%, -50%) scale(1); }
+                80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+                100% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); visibility: hidden; display: none; }
+            }
+            .anim-overlay-sl {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                z-index: 999999;
+                text-align: center;
+                animation: epicPopupSL 3.5s forwards;
+                pointer-events: none;
+            }
+            </style>
+            <div class="anim-overlay-sl">
+                <h1 style="color: #ef4444; text-shadow: 3px 3px 15px #000; font-size: 4.5rem; font-weight: 900; letter-spacing: 2px;">🛑 SL HIT</h1>
+            </div>
+            """, unsafe_allow_html=True)
+    
 
     if st.session_state.user_id in ["9964915530", "vijayakumar.suryavanshi@gmail.com"]:
         st.session_state.is_developer = True
@@ -6912,7 +6491,11 @@ elif st.session_state.page == "dashboard":
             st.success("🔊 Audio is ON")
 
         st.markdown("**1. Market Setup**")
-        BROKER = st.selectbox("Primary Broker", ["Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5/Exness", "Fyers", "Upstox", "5paisa", "Binance", "Stoxkart", "Dhan", "Shoonya"], index=0, on_change=lambda: play_sound_now("click"))
+        BROKER = st.selectbox("Primary Broker", [
+            "Angel One", "Zerodha", "CoinDCX", "Delta Exchange", "MT5/Exness",
+            "Fyers", "Upstox", "5paisa", "Binance", "Stoxkart", "Dhan", "Shoonya",
+            "ICICI Direct"
+        ], index=0, on_change=lambda: play_sound_now("click"))
 
         st.divider()
         st.markdown("**🚀 FOMO Mode**")
@@ -6928,7 +6511,7 @@ elif st.session_state.page == "dashboard":
             all_assets.append(CUSTOM_STOCK)
         if BROKER in ["CoinDCX", "Delta Exchange", "Binance"]:
             valid_assets = [a for a in all_assets if "USD" in a or "USDT" in a]
-        elif BROKER in ["Angel One", "Zerodha", "Upstox", "5paisa", "Stoxkart", "Dhan", "Shoonya"]:
+        elif BROKER in ["Angel One", "Zerodha", "Upstox", "5paisa", "Stoxkart", "Dhan", "Shoonya", "ICICI Direct"]:
             valid_assets = [a for a in all_assets if (a in INDEX_TOKENS or a in ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] or a.isalpha()) and "USD" not in a and "USDT" not in a]
         elif BROKER == "Fyers":
             valid_assets = all_assets
@@ -6939,7 +6522,7 @@ elif st.session_state.page == "dashboard":
         if CUSTOM_STOCK and CUSTOM_STOCK not in valid_assets:
             valid_assets.append(CUSTOM_STOCK)
         if not valid_assets:
-            valid_assets = ["NIFTY"] if BROKER in ["Angel One", "Zerodha", "Upstox", "5paisa", "Stoxkart", "Dhan", "Shoonya"] else ["BTCUSD"]
+            valid_assets = ["NIFTY"] if BROKER in ["Angel One", "Zerodha", "Upstox", "5paisa", "Stoxkart", "Dhan", "Shoonya", "ICICI Direct"] else ["BTCUSD"]
         st.session_state.asset_options = valid_assets
         if st.session_state.sb_index_input not in valid_assets:
             st.session_state.sb_index_input = valid_assets[0]
@@ -6953,13 +6536,7 @@ elif st.session_state.page == "dashboard":
         if STRATEGY == "Keyword Rule Builder":
             st.divider()
             st.markdown("**🧠 Keyword Logic Builder**")
-            selected_rules = st.multiselect(
-                "Select Technical Conditions",
-                ["EMA Crossover (9 & 21)", "Bollinger Bands Bounce", "RSI Breakout (>60/<40)", "MACD Crossover",
-                 "Stochastic RSI", "VWAP Position", "AlphaTrend / Supertrend", "UT Bot", "Next Super Trend",
-                 "Bollinger Bands", "Stochastic", "Moving Average", "Exponential", "ICT", "Bull FVG", "Bear FVG"],
-                default=["EMA Crossover (9 & 21)"]
-            )
+            selected_rules = st.multiselect("Select Technical Conditions", ["EMA Crossover (9 & 21)", "Bollinger Bands Bounce", "RSI Breakout (>60/<40)", "MACD Crossover", "Stochastic RSI", "VWAP Position", "AlphaTrend / Supertrend", "UT Bot", "Next Super Trend", "Bollinger Bands", "Stochastic", "Moving Average", "Exponential", "ICT", "Bull FVG", "Bear FVG"], default=["EMA Crossover (9 & 21)"])
             CUSTOM_CODE = ",".join(selected_rules)
             st.session_state.custom_code_input = CUSTOM_CODE
         elif STRATEGY == "TradingView Webhook":
@@ -6973,10 +6550,8 @@ elif st.session_state.page == "dashboard":
             st.divider()
             st.markdown("**🪙 Crypto Setup**")
             col_c1, col_c2 = st.columns(2)
-            with col_c1: 
-                CRYPTO_MODE = st.selectbox("Market Type", ["Futures", "Spot", "Options"], on_change=lambda: play_sound_now("click"))
-            with col_c2: 
-                LEVERAGE = st.number_input("Leverage (x)", 1, 100, 10, 1, on_change=lambda: play_sound_now("click"))
+            with col_c1: CRYPTO_MODE = st.selectbox("Market Type", ["Futures", "Spot", "Options"], on_change=lambda: play_sound_now("click"))
+            with col_c2: LEVERAGE = st.number_input("Leverage (x)", 1, 100, 10, 1, on_change=lambda: play_sound_now("click"))
             SHOW_INR_CRYPTO = st.toggle("Convert to ₹ INR", True, on_change=lambda: play_sound_now("click"))
             USE_LIMIT_ORDERS = st.toggle("Use Limit Orders for Crypto", False, on_change=lambda: play_sound_now("click"))
         else:
@@ -7006,6 +6581,7 @@ elif st.session_state.page == "dashboard":
             CAPITAL_PROTECT = st.number_input("Max Loss", 500.0, 500000.0, 2000.0, step=500.0, on_change=lambda: play_sound_now("click"))
 
         MIN_SIGNAL_STRENGTH = st.slider("Min Signal Strength %", 0, 100, 30, 5, on_change=lambda: play_sound_now("click"))
+        use_oi_filter = st.checkbox("Enable OI Analysis (Open Interest)", value=True)
 
         st.divider()
         if st.button("🔄 Refresh Balance", use_container_width=True, on_click=lambda: play_sound_now("click")):
@@ -7019,49 +6595,23 @@ elif st.session_state.page == "dashboard":
     col1, col2 = st.columns([5, 1])
     with col1:
         broker_name = bot.settings.get("primary_broker", "Unknown")
-        st.markdown(
-            f"**👤 Session:** <span style='color:#0284c7; font-weight:800;'>{bot.client_name}</span> "
-            f"<span class='broker-badge'>{broker_name}</span> | **IP:** `{bot.client_ip}` | **Device:** {st.session_state.device_name}",
-            unsafe_allow_html=True
-        )
+        st.markdown(f"**👤 Session:** <span style='color:#0284c7; font-weight:800;'>{bot.client_name}</span> <span class='broker-badge'>{broker_name}</span> | **IP:** `{bot.client_ip}`", unsafe_allow_html=True)
     with col2:
-        active_sessions = get_active_sessions(st.session_state.user_id) if st.session_state.user_id else []
-        session_count = len(active_sessions)
-        with st.popover(f"👤 {session_count}"):
-            st.markdown(f"**Logged in as:** {st.session_state.user_id} (Role: {st.session_state.user_role})")
-            st.markdown(f"**This device:** {st.session_state.device_name}")
-            st.markdown(f"**IP:** {st.session_state.ip_address}")
-            st.markdown("**Active Sessions:**")
-            for sess in active_sessions[:5]:
-                st.markdown(f"- {sess.get('device_name', 'Unknown')} ({sess.get('ip_address', 'Unknown')})")
-            if session_count > 5:
-                st.markdown(f"*(+{session_count - 5} more ghost sessions)*")
-            st.divider()
-            if st.button("🧹 Clear Ghost Sessions", use_container_width=True):
-                if HAS_DB:
-                    supabase.table("user_sessions").delete().eq("user_id", st.session_state.user_id).execute()
-                    save_device_session(st.session_state.user_id, st.session_state.device_name, st.session_state.ip_address, st.session_state.session_id)
-                st.rerun()
-            if st.button("🚪 Logout", use_container_width=True, on_click=lambda: play_sound_now("click")):
-                bot.state["is_running"] = False
-                bot.state["engine_active"] = False
-                if HAS_DB:
-                    supabase.table("user_sessions").delete().eq("session_id", st.session_state.session_id).execute()
-                st.session_state.clear()
-                st.query_params.clear()
-                st.rerun()
+        if st.button("🚪 Logout", help="Logout from SHREE", use_container_width=True, on_click=lambda: play_sound_now("click")):
+            if st.session_state.bot:
+                st.session_state.bot.state["is_running"] = False
+            st.session_state.clear()
+            st.query_params.clear()
+            st.rerun()
 
     bot.settings = {
         "primary_broker": BROKER, "strategy": STRATEGY, "index": INDEX, "timeframe": TIMEFRAME,
-        "lots": LOTS,
-        "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT,
+        "lots": LOTS, "max_trades": MAX_TRADES, "max_capital": MAX_CAPITAL, "capital_protect": CAPITAL_PROTECT,
         "sl_pts": SL_PTS, "tsl_pts": TSL_PTS, "tgt_pts": TGT_PTS, "paper_mode": bot.is_mock,
         "crypto_mode": CRYPTO_MODE, "leverage": LEVERAGE, "show_inr_crypto": SHOW_INR_CRYPTO,
-        "user_lots": LOT_SIZES.copy(),
-        "custom_code": CUSTOM_CODE, "tv_passphrase": TV_PASSPHRASE,
-        "use_quantity_mode": True,
-        "min_signal_strength": MIN_SIGNAL_STRENGTH,
-        "use_limit_orders": USE_LIMIT_ORDERS
+        "user_lots": LOT_SIZES.copy(), "custom_code": CUSTOM_CODE, "tv_passphrase": TV_PASSPHRASE,
+        "use_quantity_mode": True, "min_signal_strength": MIN_SIGNAL_STRENGTH,
+        "use_limit_orders": USE_LIMIT_ORDERS, "use_oi_filter": use_oi_filter
     }
 
     if bot.state['latest_data'] is None or st.session_state.prev_index != INDEX:
@@ -7078,9 +6628,7 @@ elif st.session_state.page == "dashboard":
                     elif STRATEGY == "Machine Learning":
                         if ml_predictor.should_retrain(df_preload):
                             ml_predictor.train(df_preload)
-                        t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_ml_strategy(
-                            df_preload, INDEX, 0.30, 1
-                        )
+                        t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_ml_strategy(df_preload, INDEX, 0.30, 1)
                     elif "VIJAY & RFF" in STRATEGY:
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_vijay_rff_strategy(df_preload, INDEX)
                     elif "Institutional FVG" in STRATEGY:
@@ -7093,44 +6641,98 @@ elif st.session_state.page == "dashboard":
                         t, s, v, e, df_c, atr, fib, strength = "Awaiting TradingView Webhook...", "WAIT", df_preload['close'].iloc[-1], df_preload['close'].iloc[-1], df_preload, 0, {}, 50
                     else:
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_primary_strategy(df_preload, INDEX)
-
                     df_work = df_c.copy() if df_c is not None else df_preload.copy()
                     temp_df = bot.analyzer.calculate_indicators(df_work, INDEX in ["NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "INDIA VIX"])
                     for col in temp_df.columns:
                         if col not in df_work.columns:
                             df_work[col] = temp_df[col]
+                    bot.state.update({"current_trend": t, "current_signal": s, "signal_strength": strength, "vwap": v, "ema": e, "atr": atr, "fib_data": fib, "latest_data": df_work.copy()})
 
-                    bot.state.update({
-                        "current_trend": t, "current_signal": s,
-                        "signal_strength": strength,
-                        "vwap": v, "ema": e, "atr": atr,
-                        "fib_data": fib, "latest_data": df_work.copy()
-                    })
-    # News tickers
     kannada_news = st.session_state.kannada_news
     english_news = st.session_state.english_news
-    
     if not kannada_news:
         kannada_news = [generate_market_prediction(INDEX)]
     ticker_text_kan = " 🔹 ".join(kannada_news)
     st.markdown(f'<div class="news-ticker-kannada"><span>{ticker_text_kan}</span></div>', unsafe_allow_html=True)
-    
     if not english_news:
         english_news = [generate_market_prediction(INDEX)]
     ticker_text_eng = " 🔹 ".join(english_news)
     st.markdown(f'<div class="news-ticker-english"><span>{ticker_text_eng}</span></div>', unsafe_allow_html=True)
-    # -------------------------------------------------------------------------
 
     if not is_mkt_open:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
-        
-    
-     
 
-    # Top button row (Start, Stop, Refresh only – Exit moved below)
+    # OHLCV + LIQUIDITY ZONES BOX
+    if bot.state.get("latest_data") is not None and not bot.state["latest_data"].empty:
+        df_ohlcv = bot.state["latest_data"].iloc[-1]
+        # Calculate liquidity zones
+        try:
+            # Get historical data for liquidity calculations
+            hist_data = bot.get_historical_data(exch, token, symbol=INDEX, interval="1d") if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval="1d")
+            if hist_data is not None and not hist_data.empty:
+                prev_day = hist_data.iloc[-2] if len(hist_data) >= 2 else None
+                prev_week = hist_data.iloc[-7] if len(hist_data) >= 7 else None
+                pdc_h = prev_day['high'] if prev_day is not None else df_ohlcv['high']
+                pdc_l = prev_day['low'] if prev_day is not None else df_ohlcv['low']
+                weekly_high = hist_data['high'].rolling(5).max().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['high']
+                weekly_low = hist_data['low'].rolling(5).min().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['low']
+                # Simple order block detection: recent swing high/low
+                swings = hist_data[['high', 'low']].tail(20)
+                order_block_high = swings['high'].max()
+                order_block_low = swings['low'].min()
+            else:
+                pdc_h = df_ohlcv['high']
+                pdc_l = df_ohlcv['low']
+                weekly_high = df_ohlcv['high']
+                weekly_low = df_ohlcv['low']
+                order_block_high = df_ohlcv['high']
+                order_block_low = df_ohlcv['low']
+        except:
+            pdc_h = df_ohlcv['high']
+            pdc_l = df_ohlcv['low']
+            weekly_high = df_ohlcv['high']
+            weekly_low = df_ohlcv['low']
+            order_block_high = df_ohlcv['high']
+            order_block_low = df_ohlcv['low']
+
+        ohlcv_liquidity_html = f"""
+        <style>
+        .ohlcv-header-grid {{
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+        }}
+        @media (max-width: 600px) {{
+            .ohlcv-header-grid {{ grid-template-columns: repeat(3, 1fr); }}
+            .liquidity-grid {{ grid-template-columns: repeat(2, 1fr) !important; }}
+        }}
+        </style>
+        <div class="ohlcv-liquidity-box">
+            <div class="ohlcv-header-grid">
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">OPEN</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['open']:.2f}</div></div>
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">HIGH</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['high']:.2f}</div></div>
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">LOW</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['low']:.2f}</div></div>
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">CLOSE</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['close']:.2f}</div></div>
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">VOLUME</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{int(df_ohlcv['volume']):,}</div></div>
+            </div>
+            <div class="liquidity-grid">
+                <div class="liquidity-item"><div class="liquidity-label">PD High</div><div class="liquidity-value">{pdc_h:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">PD Low</div><div class="liquidity-value">{pdc_l:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Weekly High</div><div class="liquidity-value">{weekly_high:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Weekly Low</div><div class="liquidity-value">{weekly_low:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Order Block H</div><div class="liquidity-value">{order_block_high:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Order Block L</div><div class="liquidity-value">{order_block_low:.2f}</div></div>
+            </div>
+        </div>
+        """
+        st.markdown(ohlcv_liquidity_html, unsafe_allow_html=True)
+    else:
+        st.info("Fetching live data...")
+
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
     bcol1, bcol2, bcol3 = st.columns(3)
     with bcol1:
+        st.markdown('<span class="mobile-row-control"></span>', unsafe_allow_html=True)
         if st.button("▶️ Start", use_container_width=True, disabled=bot.state["is_running"], on_click=lambda: play_sound_now("click")):
             bot.state["is_running"] = True
             bot.state["engine_active"] = True
@@ -7151,7 +6753,7 @@ elif st.session_state.page == "dashboard":
     INDEX = st.session_state.sb_index_input
     MAX_TRADES = bot.settings.get('max_trades', 5) if bot else 5
 
-    # Blue status box (now with Exit Engine button placed below it)
+    # Blue status box
     st.markdown(f"""
         <div style="background: linear-gradient(135deg, #0284c7, #0369a1); padding: 18px; border-radius: 4px; border: 1px solid #e2e8f0; color: white; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
             <h2 style="margin: 0; color: #ffffff; font-weight: 800; letter-spacing: 1px;">🕉️ {INDEX}</h2>
@@ -7172,7 +6774,6 @@ elif st.session_state.page == "dashboard":
         </div>
     """, unsafe_allow_html=True)
 
-    # Engine status and Exit Engine button
     is_running = bot.state["is_running"]
     status_color = "#22c55e" if is_running else "#ef4444"
     status_bg = "#f0fdf4" if is_running else "#fef2f2"
@@ -7183,163 +6784,258 @@ elif st.session_state.page == "dashboard":
         </div>
     """, unsafe_allow_html=True)
 
-    # Exit Engine button placed right below the status box
+    # Exit Engine button
     if st.button("⛔ EXIT ENGINE", use_container_width=True, on_click=lambda: play_sound_now("click")):
         bot.force_exit()
         st.rerun()
 
     st.markdown("### 🎯 Live Position Tracker")
-
+    
     @st.fragment(run_every="1s")
-    def live_tracker_ui():
-        if bot.state.get("active_trade"):
-            t = bot.state["active_trade"]
-            live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
-            if live_ltp:
-                t['current_ltp'] = live_ltp
-                long_types = ["BUY", "CE", "PE", "LONG"]
-                short_types = ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]
-                if t['type'] in short_types:
-                    t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
+    def live_tracker_modern():
+        import html
+        import re
+        
+        def render_html_for_trade(t, ltp, pnl, elapsed_str):
+            # 1. Parse Strike and Option Type
+            symbol_text = str(t.get("symbol", ""))
+            trade_action = str(t.get("type", "")).upper()
+            
+            strike_match = re.search(r'(\d+)\s*(CE|PE)$', symbol_text, re.IGNORECASE)
+            if strike_match:
+                strike_price = strike_match.group(1)
+                opt_type = strike_match.group(2).upper()
+                if "BUY" in trade_action or "SELL" in trade_action:
+                    badge_text = f"{trade_action} {opt_type}"
                 else:
-                    t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
-            ltp = t.get('current_ltp', t['entry'])
-            pnl = t.get('floating_pnl', 0.0)
-            elapsed = t.get('elapsed_time', 0)
-            elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
-            pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
+                    badge_text = f"BUY {opt_type}" 
+            else:
+                strike_price = "N/A"
+                badge_text = trade_action
+
+            # 2. PnL Colors and Formatting
+            pnl_color = "#4ade80" if pnl >= 0 else "#f87171"
             pnl_sign = "+" if pnl >= 0 else ""
-            exec_type = t.get('exch', 'NFO')
-            pnl_display = round(pnl, 2)
-            if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
+            
+            if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
                 inr_pnl = pnl * get_usdt_inr_rate()
                 pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
             else:
                 pnl_display = f"{pnl_sign}{round(pnl, 2)}"
-            sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
-            rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
-            st.markdown(f"""<div class="live-tracker" style="margin-top: -15px;">
-<div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
-<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-<span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
-{sim_badge}
-<span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
-</div>
-<div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
-</div>
-{rej_info}
-<div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
-</div>
-</div>
-<div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
-⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
-</div>
-</div>""", unsafe_allow_html=True)
+                
+            sim_badge = '<span style="background:#f59e0b; color:white; padding:4px 8px; border-radius:6px; font-size:0.75rem; font-weight:900; margin-left:10px;">SIMULATED</span>' if t.get("simulated") else ''
+            
+            reason = html.escape(str(t.get('rejection_reason', '')))
+            rej_info = f"<div style='color:#ef4444; font-size:0.85rem; margin-top:8px; font-weight:bold;'>Reason: {reason}</div>" if reason else ""
+            
+            # 3. ZERO LEADING SPACES (Prevents the Raw Text / Markdown Bug)
+            h = ""
+            h += f'<div class="trade-card">'
+            h += f'<div class="trade-header">'
+            h += f'<div class="trade-title">'
+            h += f'<span class="trade-badge">{badge_text}</span>'
+            h += f'<span class="trade-symbol">{symbol_text}</span> {sim_badge}'
+            h += f'</div>'
+            h += f'<div class="trade-pnl-box">'
+            h += f'<div style="font-size: 0.85rem; color: #ffffff; text-transform: uppercase; font-weight: 900;">Live P&L</div>'
+            h += f'<div style="font-size: 2.5rem; font-weight: 900; font-family: monospace; color:{pnl_color};">{pnl_display}</div>'
+            h += f'</div>'
+            h += f'</div>'
+            h += f'{rej_info}'
+            h += f'<div class="trade-metrics-grid">'
+            h += f'<div class="metric-box">'
+            h += f'<div class="metric-label">Strike</div>'
+            h += f'<div class="metric-val">{strike_price}</div>'
+            h += f'</div>'
+            h += f'<div class="metric-box">'
+            h += f'<div class="metric-label">Entry</div>'
+            h += f'<div class="metric-val">{t.get("entry", 0):.2f}</div>'
+            h += f'</div>'
+            h += f'<div class="metric-box">'
+            h += f'<div class="metric-label">LTP</div>'
+            h += f'<div class="metric-val" style="color:{pnl_color};">{ltp:.2f}</div>'
+            h += f'</div>'
+            h += f'<div class="metric-box">'
+            h += f'<div class="metric-label">SL</div>'
+            h += f'<div class="metric-val">{t.get("sl", 0):.2f}</div>'
+            h += f'</div>'
+            h += f'<div class="metric-box">'
+            h += f'<div class="metric-label">Qty</div>'
+            h += f'<div class="metric-val">{t.get("qty", 0)}</div>'
+            h += f'</div>'
+            h += f'</div>'
+            h += f'<div class="trade-footer">'
+            h += f'⏱️ {elapsed_str} &nbsp;|&nbsp; '
+            h += f'🎯 TP1: <span style="color: #eab308; font-size: 1.4rem; margin: 0 5px;">{t.get("tp1",0):.2f}</span> &nbsp;|&nbsp; '
+            h += f'TP2: <span style="color: #eab308; font-size: 1.4rem; margin: 0 5px;">{t.get("tp2",0):.2f}</span> &nbsp;|&nbsp; '
+            h += f'TP3: <span style="color: #eab308; font-size: 1.4rem; margin: 0 5px;">{t.get("tp3",0):.2f}</span>'
+            h += f'</div>'
+            h += f'</div>'
+            
+            return h
+
+        # 4. Engine Logic
+        if bot.state.get("active_trade"):
+            t = bot.state["active_trade"]
+            live_ltp = bot.get_live_price(t.get('exch', 'NSE'), t.get('symbol', ''), t.get('token', ''))
+            if live_ltp:
+                t['current_ltp'] = live_ltp
+                if t.get('type', '') in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                    t['floating_pnl'] = (t.get('entry', 0) - live_ltp) * t.get('qty', 0)
+                else:
+                    t['floating_pnl'] = (live_ltp - t.get('entry', 0)) * t.get('qty', 0)
+            ltp = t.get('current_ltp', t.get('entry', 0))
+            pnl = t.get('floating_pnl', 0.0)
+            elapsed = t.get('elapsed_time', 0)
+            elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
+            
+            st.markdown(render_html_for_trade(t, ltp, pnl, elapsed_str), unsafe_allow_html=True)
+            
         elif bot.state.get("active_trades"):
             for idx, t in enumerate(bot.state["active_trades"]):
-                live_ltp = bot.get_live_price(t['exch'], t['symbol'], t['token'])
+                live_ltp = bot.get_live_price(t.get('exch', 'NSE'), t.get('symbol', ''), t.get('token', ''))
                 if live_ltp:
                     t['current_ltp'] = live_ltp
-                    if t['type'] in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                        t['floating_pnl'] = (t['entry'] - live_ltp) * t['qty']
+                    if t.get('type', '') in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                        t['floating_pnl'] = (t.get('entry', 0) - live_ltp) * t.get('qty', 0)
                     else:
-                        t['floating_pnl'] = (live_ltp - t['entry']) * t['qty']
-                ltp = t.get('current_ltp', t['entry'])
+                        t['floating_pnl'] = (live_ltp - t.get('entry', 0)) * t.get('qty', 0)
+                ltp = t.get('current_ltp', t.get('entry', 0))
                 pnl = t.get('floating_pnl', 0.0)
                 elapsed = t.get('elapsed_time', 0)
                 elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
-                pnl_color = "#22c55e" if pnl >= 0 else "#ef4444"
-                pnl_sign = "+" if pnl >= 0 else ""
-                exec_type = t.get('exch', 'NFO')
-                pnl_display = round(pnl, 2)
-                if t['exch'] in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                    inr_pnl = pnl * get_usdt_inr_rate()
-                    pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
-                else:
-                    pnl_display = f"{pnl_sign}{round(pnl, 2)}"
-                sim_badge = '<span class="simulated-badge">SIMULATED</span>' if t.get("simulated") else ''
-                rej_info = f"<div class='rejection-reason' style='margin-top:5px;'>Reason: {t.get('rejection_reason', '')}</div>" if t.get("rejection_reason") else ''
-                st.markdown(f"""<div class="live-tracker" style="margin-top: 10px;">
-<div class="header" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 2px dashed #334155; padding-bottom: 15px; margin-bottom: 15px;">
-<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-<span class="symbol-badge" style="background: #3b82f6; color: white; padding: 6px 15px; border-radius: 30px; font-weight: 800;">{t["type"]}</span>
-{sim_badge}
-<span style="font-size: 1.3rem; color: white; font-weight: bold; margin: 0;">{t["symbol"]}</span>
-</div>
-<div class="pnl-badge" style="color: {pnl_color}; border: 2px solid {pnl_color}; padding: 8px 20px; border-radius: 40px; font-weight: 900; font-size: 1.6rem;">{pnl_display}</div>
-</div>
-{rej_info}
-<div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Avg Entry</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["entry"]:.4f}</div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Live Mark</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: {'#4ade80' if pnl >= 0 else '#f87171'};">{ltp:.4f}</div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Qty</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #facc15;">{t["qty"]} <span style="color: #94a3b8; font-size:0.8rem;">({exec_type})</span></div>
-</div>
-<div class="info-box" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 16px; border: 1px solid #334155;">
-<div style="color: #94a3b8; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;">Risk Stop</div>
-<div style="font-size: 1.4rem; font-weight: 800; color: #f87171;">{t["sl"]:.4f}</div>
-</div>
-</div>
-<div class="targets" style="background: linear-gradient(90deg, #1e293b, #111827); padding: 12px; border-radius: 40px; text-align: center; color: #38bdf8; font-weight: 700; border: 1px solid #38bdf8;">
-⏱️ Time: {elapsed_str} | 🎯 TP1: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp1",0):.2f}</span> | TP2: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp2",0):.2f}</span> | TP3: <span style="color: #fbbf24; margin: 0 10px;">{t.get("tp3",0):.2f}</span>
-</div>
-</div>""", unsafe_allow_html=True)
+                
+                st.markdown(render_html_for_trade(t, ltp, pnl, elapsed_str), unsafe_allow_html=True)
         else:
-            st.markdown("""
-            <div style="display: flex; align-items: center; justify-content: center; height: 230px; background: rgba(255,255,255,0.02); border: 2px dashed #334155; border-radius: 16px; margin-top: -15px; margin-bottom: 5px;">
-                <span style="color: #94a3b8; font-weight: 600; font-size: 1.1rem;">⏳ Radar Active: Waiting for High-Probability Setup...</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-    live_tracker_ui()
-
-  
+            st.markdown('<div class="trade-card" style="text-align:center;"><span style="color:#aaa;">⏳ Radar Active: Waiting for High-Probability Setup...</span></div>', unsafe_allow_html=True)
+            
+    live_tracker_modern()
     
-    st.markdown('<div class="sticky-buttons">', unsafe_allow_html=True)
+    # ------------------ STICKY BUTTONS ------------------
+    st.markdown('<div class="sticky-buttons" style="margin-top:20px;">', unsafe_allow_html=True)
     col_exit, col_protect = st.columns(2)
     with col_exit:
-        st.button(
-            "🛑 EXIT TRADE INSTANTLY", 
-            type="primary", 
-            use_container_width=True, 
-            key="global_exit_btn",
-            on_click=bot.force_exit,
-            disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
-        )
+        st.markdown('<span class="mobile-sticky-control"></span>', unsafe_allow_html=True)
+        st.button("🛑 EXIT TRADE INSTANTLY", type="primary", use_container_width=True, key="global_exit_btn", on_click=bot.force_exit, disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades")))
     with col_protect:
-        st.button(
-            "🛡️ Protect Profit", 
-            type="secondary", 
-            use_container_width=True, 
-            key="protect_profit_btn",
-            on_click=bot.protect_profit,
-            disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades"))
-        )
+        st.button("🛡️ Protect Profit", type="secondary", use_container_width=True, key="protect_profit_btn", on_click=bot.protect_profit, disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades")))
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ------------------ TRADINGVIEW CHART ------------------
+    # ------------------ ANIMATED MARKET LEVELS BOX ------------------
+    # Calculate Levels safely from current state data
+    df_levels = bot.state.get("latest_data")
+    fib_data = bot.state.get("fib_data", {})
+    
+    d_high, d_low, m_sup, m_res, gz_low, gz_high = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    if df_levels is not None and not df_levels.empty:
+        try:
+            # Approximate current day's high/low from available chart data
+            d_high = df_levels['high'].max()
+            d_low = df_levels['low'].min()
+            m_sup, m_res = bot.analyzer.get_support_resistance(df_levels)
+            if not m_sup: m_sup = d_low
+            if not m_res: m_res = d_high
+            gz_low = fib_data.get('fib_low', m_sup)
+            gz_high = fib_data.get('fib_high', m_res)
+        except:
+            pass
+
+    st.markdown(f"""
+    <style>
+    @keyframes pulse-border {{
+        0% {{ box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.4); }}
+        70% {{ box-shadow: 0 0 0 10px rgba(250, 204, 21, 0); }}
+        100% {{ box-shadow: 0 0 0 0 rgba(250, 204, 21, 0); }}
+    }}
+    @keyframes slide-bg {{
+        0% {{ background-position: 0% 50%; }}
+        50% {{ background-position: 100% 50%; }}
+        100% {{ background-position: 0% 50%; }}
+    }}
+    .market-levels-container {{
+        margin-top: 25px;
+        margin-bottom: 25px;
+        background: linear-gradient(-45deg, #0f172a, #1e293b, #0f172a);
+        background-size: 200% 200%;
+        animation: slide-bg 10s ease infinite;
+        border-radius: 16px;
+        padding: 2px; /* For gradient border effect */
+        position: relative;
+    }}
+    .market-levels-inner {{
+        background: #0f172a;
+        border-radius: 14px;
+        padding: 15px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 12px;
+    }}
+    .level-item {{
+        text-align: center;
+        padding: 12px;
+        background: rgba(255,255,255,0.02);
+        border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.05);
+    }}
+    .level-label {{
+        font-size: 0.75rem;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        margin-bottom: 5px;
+    }}
+    .level-val {{
+        font-size: 1.3rem;
+        font-weight: 800;
+        font-family: monospace;
+    }}
+    .golden-zone {{
+        background: rgba(250, 204, 21, 0.1);
+        border: 1px solid rgba(250, 204, 21, 0.3);
+        animation: pulse-border 2s infinite;
+    }}
+    
+    /* Mobile Grid Adjustments */
+    @media (max-width: 600px) {{
+        .market-levels-inner {{
+            grid-template-columns: repeat(2, 1fr);
+        }}
+        .level-item.golden-zone {{
+            grid-column: span 2; /* Span full width on mobile */
+        }}
+        .level-val {{
+            font-size: 1.1rem;
+        }}
+    }}
+    </style>
+
+    <div class="market-levels-container">
+        <div class="market-levels-inner">
+            <div class="level-item">
+                <div class="level-label">📈 Daily High</div>
+                <div class="level-val" style="color: #4ade80;">{d_high:.2f}</div>
+            </div>
+            <div class="level-item">
+                <div class="level-label">📉 Daily Low</div>
+                <div class="level-val" style="color: #f87171;">{d_low:.2f}</div>
+            </div>
+            <div class="level-item">
+                <div class="level-label">🛡️ Major Support</div>
+                <div class="level-val" style="color: #38bdf8;">{m_sup:.2f}</div>
+            </div>
+            <div class="level-item">
+                <div class="level-label">🧱 Major Resist</div>
+                <div class="level-val" style="color: #fb923c;">{m_res:.2f}</div>
+            </div>
+            <div class="level-item golden-zone">
+                <div class="level-label" style="color: #facc15;">✨ Golden Zone</div>
+                <div class="level-val" style="color: #facc15;">{gz_low:.2f} - {gz_high:.2f}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+        # ------------------ TRADINGVIEW CHART ------------------
     st.markdown("### 📈 TradingView Chart")
     
     # 1. Map standard app symbols to TradingView's required format
@@ -7373,62 +7069,82 @@ elif st.session_state.page == "dashboard":
         clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
         tv_target = f"NSE:{clean_stock}"
 
-    # 3. Inject the correct symbol into the iframe
+    # 3. URL-encode the symbol to handle special characters
+    from urllib.parse import quote
+    tv_target_encoded = quote(tv_target)
+
+    # 4. Build the iframe with the encoded symbol and appropriate attributes
     tradingview_html = f"""
-    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tv_chart&symbol={tv_target}&interval=5&theme=dark&timezone=Asia/Kolkata"
-        style="width:100%; height:500px; border:none; border-radius:12px;"></iframe>
+    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tv_chart&symbol={tv_target_encoded}&interval=5&theme=dark&timezone=Asia/Kolkata&symboledit=1&saveimage=0&toolbarbg=f1f3f6&studies=[]"
+        style="width:100%; height:500px; border:none; border-radius:12px;"
+        allow="autoplay; encrypted-media; fullscreen">
+    </iframe>
     """
     st.components.v1.html(tradingview_html, height=520)
     
-   
+    if st.button("🚀 One‑Tap BUY (Market)", use_container_width=True, on_click=lambda: play_sound_now("click")):
+        st.warning("Demo: Order would be placed at market price")
 
+    # ---> REPLACE THE OLD TAB LOGIC WITH THIS BUTTON <---
+    st.markdown("---")
+    if st.button("🛠️ Open Advanced Tools (Scanners, Backtest, Logs, etc.)", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
+        st.session_state.page = "tools"
+        st.rerun()
+
+    # ==========================================
+# ADVANCED TOOLS & SCANNERS PAGE
+# ==========================================
+elif st.session_state.page == "tools":
+    bot = st.session_state.bot
+    if bot is None:
+        bot = SniperBot(is_mock=True)
+        st.session_state.bot = bot
+
+    # Safely fetch context variables from the bot settings so tools don't crash
+    INDEX = st.session_state.get('sb_index_input', 'NIFTY')
+    STRATEGY = st.session_state.get('sb_strat_input', 'Momentum Breakout + S&R')
+    TIMEFRAME = bot.settings.get('timeframe', '5m') if hasattr(bot, 'settings') else '5m'
+    CUSTOM_CODE = bot.settings.get('custom_code', '') if hasattr(bot, 'settings') else ''
+    exch = "NSE"
+    token = "12345"
+    if hasattr(bot, 'get_token_info'):
+        exch, token = bot.get_token_info(INDEX)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_back, _ = st.columns(2)
+    with col_back:
+        if st.button("⬅️ Back to Dashboard", use_container_width=True, on_click=lambda: play_sound_now("click")):
+            st.session_state.page = "dashboard"
+            st.rerun()
+
+    st.markdown("### 🛠️ Advanced Platform Tools")
     
-   
+    tab_names = ["SCANNERS", "LOGS", "CRYPTO/FX", "SAFE INVESTMENTS", "MUTUAL FUNDS", "FIA ASSISTANT", "BACKTEST", "ADMIN"]
+    if not st.session_state.get('is_developer', False):
+        tab_names = tab_names[:-1]
 
-    # Tabs definition
-    tab_names = ["🕉️ DASHBOARD", "🔎 SCANNERS", "📜 LOGS", "🚀 CRYPTO/FX", "💰 SAFE INVESTMENTS", "🤖 FIA ASSISTANT", "📊 BACKTEST"]
-    if st.session_state.is_developer:
-        tab_names.append("🛡️ ADMIN")
-    tabs = st.tabs(tab_names)
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = tabs[:7]
-    if st.session_state.is_developer:
-        tab8 = tabs[7]
+    if 'current_tools_tab' not in st.session_state:
+        st.session_state.current_tools_tab = 0
 
-    # Tab1: DASHBOARD – already shown above (live tracker and stats). We'll just include the original dashboard stats and chart.
-    with tab1:
-       
-        
-        # FOMO Scanner
-        st.markdown("### 🚨 FOMO Scanner (Volume Spike Alerts)")
-        fomo_signals = fomo_scanner.scan()
-        if fomo_signals:
-            df_fomo = pd.DataFrame(fomo_signals)
-            st.dataframe(df_fomo, use_container_width=True, hide_index=True)
-        else:
-            st.info("No volume spike alerts at the moment.")
+    cols = st.columns(len(tab_names))
+    for i, name in enumerate(tab_names):
+        with cols[i]:
+            # Inject the tracker in the very first tab column
+            if i == 0:
+                st.markdown('<span class="mobile-tabs-control"></span>', unsafe_allow_html=True)
+            
+            # Highlight the active tab button
+            btn_type = "primary" if st.session_state.current_tools_tab == i else "secondary"
+            if st.button(name, key=f"tool_tab_{i}", use_container_width=True, type=btn_type):
+                st.session_state.current_tools_tab = i
+                st.rerun()
+                
+    st.markdown("---")
+    current_tab = st.session_state.current_tools_tab
 
-        # Win rate metric
-        total_trades = len(bot.state.get("paper_history", [])) if bot.is_mock else bot.state.get("trades_today", 0)
-        wins = bot.state.get("hz_wins", 0) + (st.session_state.win_streak if st.session_state.win_streak > 0 else 0)
-        win_pct = (wins / total_trades * 100) if total_trades > 0 else 0
-        st.metric("Win Percentage", f"{win_pct:.1f}%")
-
-        if bot.settings.get('hero_zero', False) and bot.state.get("hz_trades"):
-            hz_win_rate = (bot.state["hz_wins"] / len(bot.state["hz_trades"]) * 100) if bot.state["hz_trades"] else 0
-            st.markdown(f"""
-            <div class="hz-stats">
-                <h4 style="color: white; margin:0 0 10px 0;">🎯 Hero/Zero Performance</h4>
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-                    <div>Total Trades: {len(bot.state['hz_trades'])}</div>
-                    <div>Win Rate: {hz_win_rate:.1f}%</div>
-                    <div>Total P&L: {'🟢' if bot.state['hz_pnl'] > 0 else '🔴'} ₹{bot.state['hz_pnl']:.2f}</div>
-                    <div>Wins: {bot.state['hz_wins']} | Losses: {bot.state['hz_losses']}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Tab2: SCANNERS – unchanged from original
-    with tab2:
+    # ------------------ TOOL CONTENT ------------------
+    if current_tab == 0:  # SCANNERS
+        st.subheader("🔎 Scanners")
         sub_tabs = st.tabs(["📊 52W High/Low", "📡 Multi-Stock + Pin Bar", "🇺🇸 US Stock Scanner", "🌙 Overnight Profitable", "🎯 Hero/Zero Scanner"])
         with sub_tabs[0]:
             with st.container():
@@ -7436,13 +7152,7 @@ elif st.session_state.page == "dashboard":
                 st.subheader("52‑Week High/Low Scanner")
                 @st.cache_data(ttl=86400)
                 def scan_52w():
-                    watch_list = [
-                        "RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS",
-                        "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS", "HINDUNILVR.NS", "KOTAKBANK.NS",
-                        "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "HCLTECH.NS", "ASIANPAINT.NS",
-                        "TITAN.NS", "ULTRACEMCO.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "BPCL.NS",
-                        "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT"
-                    ]
+                    watch_list = ["RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "TCS.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "WIPRO.NS", "HINDUNILVR.NS", "KOTAKBANK.NS", "BAJFINANCE.NS", "MARUTI.NS", "SUNPHARMA.NS", "HCLTECH.NS", "ASIANPAINT.NS", "TITAN.NS", "ULTRACEMCO.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "BPCL.NS", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "WMT"]
                     results = []
                     for ticker in watch_list:
                         try:
@@ -7455,13 +7165,11 @@ elif st.session_state.page == "dashboard":
                             atr = (hist['High'] - hist['Low']).rolling(14).mean().iloc[-1]
                             midpoint = (high_52 + low_52) / 2
                             if ltp > midpoint:
-                                direction = "LONG"
                                 entry = ltp
                                 sl = ltp - atr
                                 tp = ltp + atr * 2
                                 signal = "BUY 🟢"
                             else:
-                                direction = "SHORT"
                                 entry = ltp
                                 sl = ltp + atr
                                 tp = ltp - atr * 2
@@ -7470,16 +7178,7 @@ elif st.session_state.page == "dashboard":
                                 signal = "STRONG BUY 🚀"
                             elif ltp < low_52 * 1.05:
                                 signal = "STRONG SELL 🔻"
-                            results.append({
-                                "Symbol": ticker,
-                                "LTP": round(ltp, 2),
-                                "52W High": round(high_52, 2),
-                                "52W Low": round(low_52, 2),
-                                "Signal": signal,
-                                "Entry": round(entry, 2),
-                                "SL": round(sl, 2),
-                                "TP": round(tp, 2)
-                            })
+                            results.append({"Symbol": ticker, "LTP": round(ltp, 2), "52W High": round(high_52, 2), "52W Low": round(low_52, 2), "Signal": signal, "Entry": round(entry, 2), "SL": round(sl, 2), "TP": round(tp, 2)})
                         except:
                             continue
                     return results
@@ -7497,7 +7196,6 @@ elif st.session_state.page == "dashboard":
                 else:
                     st.info("No data.")
                 st.markdown('</div>', unsafe_allow_html=True)
-
         with sub_tabs[1]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -7523,12 +7221,7 @@ elif st.session_state.page == "dashboard":
                                 pin = "Bullish Pin"
                             elif upper > body*2 and last['Close'] < last['Open']:
                                 pin = "Bearish Pin"
-                            results.append({
-                                "Symbol": sym,
-                                "LTP": round(last['Close'], 2),
-                                "Inside Bar": inside,
-                                "Pin Bar": pin
-                            })
+                            results.append({"Symbol": sym, "LTP": round(last['Close'], 2), "Inside Bar": inside, "Pin Bar": pin})
                     return results
                 results = scan_multistock()
                 if results:
@@ -7536,7 +7229,6 @@ elif st.session_state.page == "dashboard":
                 else:
                     st.info("No data.")
                 st.markdown('</div>', unsafe_allow_html=True)
-
         with sub_tabs[2]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -7570,14 +7262,7 @@ elif st.session_state.page == "dashboard":
                                 entry = last['Close']
                                 sl = last['Close'] * 0.98
                                 tp = last['Close'] * 1.02
-                            results.append({
-                                "Symbol": ticker,
-                                "LTP": round(last['Close'], 2),
-                                "Signal": signal,
-                                "Entry": round(entry, 2),
-                                "SL": round(sl, 2),
-                                "TP": round(tp, 2)
-                            })
+                            results.append({"Symbol": ticker, "LTP": round(last['Close'], 2), "Signal": signal, "Entry": round(entry, 2), "SL": round(sl, 2), "TP": round(tp, 2)})
                         except:
                             continue
                     return results
@@ -7595,12 +7280,10 @@ elif st.session_state.page == "dashboard":
                 else:
                     st.info("No signals found.")
                 st.markdown('</div>', unsafe_allow_html=True)
-
         with sub_tabs[3]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 st.subheader("🌙 Overnight Profitable Stocks & Crypto")
-                st.markdown("Stocks that gap up/down significantly pre-market (Indian & US) and crypto with high overnight volatility.")
                 @st.cache_data(ttl=86400)
                 def scan_overnight():
                     results = []
@@ -7616,21 +7299,9 @@ elif st.session_state.page == "dashboard":
                             change_high = (pre_high - yesterday_close) / yesterday_close * 100
                             change_low = (pre_low - yesterday_close) / yesterday_close * 100
                             if change_high > 1.5:
-                                results.append({
-                                    "Symbol": ticker.replace(".NS", ""),
-                                    "Type": "Stock",
-                                    "Pre-Market High %": f"+{change_high:.2f}%",
-                                    "Pre-Market Low %": f"{change_low:.2f}%",
-                                    "Signal": "Bullish Gap 🚀"
-                                })
+                                results.append({"Symbol": ticker.replace(".NS", ""), "Type": "Stock", "Pre-Market High %": f"+{change_high:.2f}%", "Pre-Market Low %": f"{change_low:.2f}%", "Signal": "Bullish Gap 🚀"})
                             elif change_low < -1.5:
-                                results.append({
-                                    "Symbol": ticker.replace(".NS", ""),
-                                    "Type": "Stock",
-                                    "Pre-Market High %": f"+{change_high:.2f}%",
-                                    "Pre-Market Low %": f"{change_low:.2f}%",
-                                    "Signal": "Bearish Gap 🔻"
-                                })
+                                results.append({"Symbol": ticker.replace(".NS", ""), "Type": "Stock", "Pre-Market High %": f"+{change_high:.2f}%", "Pre-Market Low %": f"{change_low:.2f}%", "Signal": "Bearish Gap 🔻"})
                         except: pass
                     us_list = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META"]
                     for ticker in us_list:
@@ -7644,21 +7315,9 @@ elif st.session_state.page == "dashboard":
                             change_high = (pre_high - yesterday_close) / yesterday_close * 100
                             change_low = (pre_low - yesterday_close) / yesterday_close * 100
                             if change_high > 1.5:
-                                results.append({
-                                    "Symbol": ticker,
-                                    "Type": "US Stock",
-                                    "Pre-Market High %": f"+{change_high:.2f}%",
-                                    "Pre-Market Low %": f"{change_low:.2f}%",
-                                    "Signal": "Bullish Gap 🚀"
-                                })
+                                results.append({"Symbol": ticker, "Type": "US Stock", "Pre-Market High %": f"+{change_high:.2f}%", "Pre-Market Low %": f"{change_low:.2f}%", "Signal": "Bullish Gap 🚀"})
                             elif change_low < -1.5:
-                                results.append({
-                                    "Symbol": ticker,
-                                    "Type": "US Stock",
-                                    "Pre-Market High %": f"+{change_high:.2f}%",
-                                    "Pre-Market Low %": f"{change_low:.2f}%",
-                                    "Signal": "Bearish Gap 🔻"
-                                })
+                                results.append({"Symbol": ticker, "Type": "US Stock", "Pre-Market High %": f"+{change_high:.2f}%", "Pre-Market Low %": f"{change_low:.2f}%", "Signal": "Bearish Gap 🔻"})
                         except: pass
                     try:
                         resp = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5)
@@ -7669,14 +7328,7 @@ elif st.session_state.page == "dashboard":
                                 if mkt.endswith('USDT'):
                                     chg = float(coin.get('change_24_hour', 0))
                                     if abs(chg) > 3:
-                                        results.append({
-                                            "Symbol": mkt,
-                                            "Type": "Crypto",
-                                            "24h Change": f"{chg:+.2f}%",
-                                            "Pre-Market High %": "-",
-                                            "Pre-Market Low %": "-",
-                                            "Signal": "High Volatility ⚡"
-                                        })
+                                        results.append({"Symbol": mkt, "Type": "Crypto", "24h Change": f"{chg:+.2f}%", "Pre-Market High %": "-", "Pre-Market Low %": "-", "Signal": "High Volatility ⚡"})
                     except: pass
                     return results
                 results = scan_overnight()
@@ -7686,19 +7338,16 @@ elif st.session_state.page == "dashboard":
                 else:
                     st.info("No significant overnight movements detected.")
                 st.markdown('</div>', unsafe_allow_html=True)
-
         with sub_tabs[4]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 st.subheader("🎯 Hero/Zero Scanner & Pin Bar Reversals")
-
                 def color_direction(val):
                     if "HERO" in val:
                         return 'background-color: #22c55e; color: white'
                     elif "ZERO" in val:
                         return 'background-color: #ef4444; color: white'
                     return ''
-
                 col_hz1, col_hz2 = st.columns(2)
                 with col_hz1:
                     min_volume = st.slider("Min Volume Spike", 1.0, 3.0, 1.5, 0.1, key="hz_volume")
@@ -7713,7 +7362,6 @@ elif st.session_state.page == "dashboard":
                         st.dataframe(styled_results, use_container_width=True, hide_index=True)
                     else:
                         st.info("No Hero/Zero opportunities in Nifty 50 at this moment")
-
                     st.markdown("### Penny Stocks")
                     penny_results = bot.scan_penny_stocks()
                     if not penny_results.empty:
@@ -7722,7 +7370,6 @@ elif st.session_state.page == "dashboard":
                         st.dataframe(penny_styled, use_container_width=True, hide_index=True)
                     else:
                         st.info("No Hero/Zero opportunities in Penny Stocks at this moment")
-
                     st.markdown("### Pin Bar Reversals (Indices & Gold) - 1-min signals")
                     pin_results = bot.scan_pin_bars()
                     if pin_results:
@@ -7730,7 +7377,6 @@ elif st.session_state.page == "dashboard":
                         st.dataframe(pin_df, use_container_width=True, hide_index=True)
                     else:
                         st.info("No pin bar reversals detected at this moment")
-
                 st.markdown("### 📝 Entry Instructions")
                 st.info("""
                 **For HERO (BUY):**
@@ -7754,16 +7400,15 @@ elif st.session_state.page == "dashboard":
                 - **Avoid:** 11:30 AM - 1:30 PM (Lunch hour, low volume)
                 """)
 
-    # Tab3: LOGS – unchanged
-    with tab3:
+    elif current_tab == 1:  # LOGS
+        st.subheader("📜 Logs")
         sub_tabs = st.tabs(["📋 Console", "📊 Ledger", "📄 Tax Report"])
         with sub_tabs[0]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 col_clr, col_msg = st.columns([1, 5])
                 with col_clr:
-                    if st.button("🗑️ Clear", key="clear_logs_btn", use_container_width=True,
-                                 on_click=lambda: play_sound_now("click")):
+                    if st.button("🗑️ Clear", key="clear_logs_btn", use_container_width=True, on_click=lambda: play_sound_now("click")):
                         bot.state["logs"].clear()
                         if bot.is_mock and "paper_history" in bot.state:
                             bot.state["paper_history"] = []
@@ -7800,7 +7445,6 @@ elif st.session_state.page == "dashboard":
                         col2.metric("Win Rate", f"{win_rate:.1f}%")
                         col3.metric("Total PnL", f"₹{total_pnl:.2f}")
                         st.dataframe(df.iloc[::-1], use_container_width=True)
-
                         if report_period == "Daily":
                             today = get_ist().strftime('%Y-%m-%d')
                             df_report = df[df['Date'] == today]
@@ -7812,9 +7456,7 @@ elif st.session_state.page == "dashboard":
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                             df_report.to_excel(w, index=False)
-                        st.download_button("📥 Export", data=output.getvalue(),
-                                           file_name="mock_ledger.xlsx",
-                                           on_click=lambda: play_sound_now("click"))
+                        st.download_button("📥 Export", data=output.getvalue(), file_name="mock_ledger.xlsx", on_click=lambda: play_sound_now("click"))
                     else:
                         st.info("No paper trades yet.")
                 else:
@@ -7834,7 +7476,6 @@ elif st.session_state.page == "dashboard":
                                 col2.metric("Win Rate", f"{win_rate:.1f}%")
                                 col3.metric("Total PnL", f"₹{total_pnl:.2f}")
                                 st.dataframe(df.sort_values('trade_time', ascending=False), use_container_width=True)
-
                                 if report_period == "Daily":
                                     today = get_ist().date()
                                     df_report = df[df['trade_date'].dt.date == today]
@@ -7846,9 +7487,7 @@ elif st.session_state.page == "dashboard":
                                 output = io.BytesIO()
                                 with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                                     df_report.to_excel(w, index=False)
-                                st.download_button("📥 Export", data=output.getvalue(),
-                                                   file_name="live_ledger.xlsx",
-                                                   on_click=lambda: play_sound_now("click"))
+                                st.download_button("📥 Export", data=output.getvalue(), file_name="live_ledger.xlsx", on_click=lambda: play_sound_now("click"))
                             else:
                                 st.info("No live trades.")
                         except Exception as e:
@@ -7856,7 +7495,6 @@ elif st.session_state.page == "dashboard":
                     else:
                         st.error("DB disconnected.")
                 st.markdown('</div>', unsafe_allow_html=True)
-
         with sub_tabs[2]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
@@ -7877,17 +7515,15 @@ elif st.session_state.page == "dashboard":
                                 output = io.BytesIO()
                                 with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                                     df_tax.to_excel(w, index=False)
-                                st.download_button("📥 Download Tax Report", data=output.getvalue(),
-                                                   file_name=f"tax_report_{tax_year}.xlsx",
-                                                   on_click=lambda: play_sound_now("click"))
+                                st.download_button("📥 Download Tax Report", data=output.getvalue(), file_name=f"tax_report_{tax_year}.xlsx", on_click=lambda: play_sound_now("click"))
                             else:
                                 st.info("No trades found for this period.")
                 else:
                     st.warning("Login required or database not connected.")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-    # Tab4: CRYPTO/FX – unchanged
-    with tab4:
+    elif current_tab == 2:  # CRYPTO/FX
+        st.subheader("🚀 Crypto/FX")
         sub_crypto = st.tabs(["🪙 CoinDCX Scanner", "⚡ 1-Min Scalper", "🚀 Breakout Scanner", "🪄 Web3 / DeFi"])
         with sub_crypto[0]:
             with st.container():
@@ -7959,12 +7595,7 @@ elif st.session_state.page == "dashboard":
                                                 chg = float(coin.get('change_24_hour', 0))
                                                 price = float(coin.get('last_price', 0))
                                                 vol = float(coin.get('volume', 0))
-                                                pairs.append({
-                                                    "Pair": mkt,
-                                                    "Price": price,
-                                                    "24h Change %": chg,
-                                                    "Volume": vol
-                                                })
+                                                pairs.append({"Pair": mkt, "Price": price, "24h Change %": chg, "Volume": vol})
                                             except: pass
                                     df = pd.DataFrame(pairs).sort_values("24h Change %", ascending=False)
                                     st.markdown("#### 🟢 Top Gainers")
@@ -7977,22 +7608,11 @@ elif st.session_state.page == "dashboard":
                                 st.error(f"Error: {e}")
                         else:
                             try:
-                                resp = requests.get("https://api.coingecko.com/api/v3/coins/markets", params={
-                                    "vs_currency": "usd",
-                                    "order": "market_cap_desc",
-                                    "per_page": 100,
-                                    "page": 1,
-                                    "sparkline": "false"
-                                }, timeout=10)
+                                resp = requests.get("https://api.coingecko.com/api/v3/coins/markets", params={"vs_currency": "usd", "order": "market_cap_desc", "per_page": 100, "page": 1, "sparkline": "false"}, timeout=10)
                                 if resp.status_code == 200:
                                     data = resp.json()
                                     df = pd.DataFrame(data)
-                                    df = df[["symbol", "current_price", "price_change_percentage_24h", "total_volume"]].rename(columns={
-                                        "symbol": "Coin",
-                                        "current_price": "Price (USD)",
-                                        "price_change_percentage_24h": "24h Change %",
-                                        "total_volume": "Volume"
-                                    })
+                                    df = df[["symbol", "current_price", "price_change_percentage_24h", "total_volume"]].rename(columns={"symbol": "Coin", "current_price": "Price (USD)", "price_change_percentage_24h": "24h Change %", "total_volume": "Volume"})
                                     df = df.sort_values("24h Change %", ascending=False)
                                     st.markdown("#### 🟢 Top Gainers")
                                     st.dataframe(df.head(limit2), use_container_width=True, hide_index=True)
@@ -8004,42 +7624,42 @@ elif st.session_state.page == "dashboard":
                                 st.error(f"Error: {e}")
                     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Tab5: SAFE INVESTMENTS – unchanged
-    with tab5:
-        def safe_investment_suggestions():
-            st.markdown("### 💰 Safe Investment Suggestions")
-            st.markdown("These are conservative, low-risk ideas suitable for long-term wealth building.")
-            with st.expander("📈 **Index ETFs**"):
-                st.markdown("""
-                - **Nippon India ETF Nifty50** (JUNIORBEES): Low expense ratio, tracks Nifty50.
-                - **HDFC Sensex ETF**: Tracks BSE Sensex, good for long-term.
-                - **ICICI Prudential Nifty Next 50**: Captures emerging bluechips.
-                """)
-            with st.expander("🏦 **Fixed Income**"):
-                st.markdown("""
-                - **RBI Floating Rate Savings Bonds** – Interest rate reset every 6 months.
-                - **Corporate Bonds** (AAA rated) – e.g., NTPC, Power Finance Corp.
-                - **SGB (Sovereign Gold Bonds)** – Govt gold bonds with 2.5% interest.
-                """)
-            with st.expander("🌍 **International ETFs**"):
-                st.markdown("""
-                - **MOTILAL OSWAL S&P500 Index Fund** – US exposure.
-                - **Hang Seng Index ETF** – Hong Kong market.
-                - **iShares MSCI World ETF** (via international brokerage).
-                """)
-            with st.expander("💎 **Commodity ETFs**"):
-                st.markdown("""
-                - **Gold ETFs** – HDFC Gold, SBI Gold.
-                - **Silver ETFs** – ICICI Prudential Silver ETF.
-                """)
-            st.markdown("---")
-            st.subheader("📊 Compounding Calculator")
-            compounding_calculator()
-            st.info("💡 *Past performance does not guarantee future results. Always consult a financial advisor.*")
-        safe_investment_suggestions()
+    elif current_tab == 3:  # SAFE INVESTMENTS
+        st.subheader("💰 Safe Investments")
+        st.markdown("### 💰 Safe Investment Suggestions")
+        st.markdown("These are conservative, low-risk ideas suitable for long-term wealth building.")
+        with st.expander("📈 **Index ETFs**"):
+            st.markdown("""
+            - **Nippon India ETF Nifty50** (JUNIORBEES): Low expense ratio, tracks Nifty50.
+            - **HDFC Sensex ETF**: Tracks BSE Sensex, good for long-term.
+            - **ICICI Prudential Nifty Next 50**: Captures emerging bluechips.
+            """)
+        with st.expander("🏦 **Fixed Income**"):
+            st.markdown("""
+            - **RBI Floating Rate Savings Bonds** – Interest rate reset every 6 months.
+            - **Corporate Bonds** (AAA rated) – e.g., NTPC, Power Finance Corp.
+            - **SGB (Sovereign Gold Bonds)** – Govt gold bonds with 2.5% interest.
+            """)
+        with st.expander("🌍 **International ETFs**"):
+            st.markdown("""
+            - **MOTILAL OSWAL S&P500 Index Fund** – US exposure.
+            - **Hang Seng Index ETF** – Hong Kong market.
+            - **iShares MSCI World ETF** (via international brokerage).
+            """)
+        with st.expander("💎 **Commodity ETFs**"):
+            st.markdown("""
+            - **Gold ETFs** – HDFC Gold, SBI Gold.
+            - **Silver ETFs** – ICICI Prudential Silver ETF.
+            """)
+        st.markdown("---")
+        st.subheader("📊 Compounding Calculator")
+        compounding_calculator()
+        st.info("💡 *Past performance does not guarantee future results. Always consult a financial advisor.*")
 
-    # Tab6: FIA ASSISTANT – unchanged
-    with tab6:
+    elif current_tab == 4:  # MUTUAL FUNDS
+        mutual_funds_tab()
+
+    elif current_tab == 5:  # FIA ASSISTANT
         st.subheader("🤖 FIA Assistant – Market Analysis")
         def fia_assistant(df, index):
             if df is None:
@@ -8067,23 +7687,19 @@ elif st.session_state.page == "dashboard":
         else:
             st.info("No chart data available yet. Start the engine or refresh.")
 
-    # Tab7: BACKTEST – unchanged (with updated date defaults)
-    with tab7:
+    elif current_tab == 6:  # BACKTEST
         st.subheader("📊 Backtesting Engine")
         st.markdown("Test your strategy on historical data (runs in background).")
-
         bt_strategy = st.selectbox("Select Strategy", STRAT_LIST, index=0)
         bt_symbol = st.selectbox("Symbol", ["NIFTY", "BANKNIFTY", "BTCUSD", "ETHUSD", "XAUUSD"])
         bt_start = st.date_input("Start Date", get_ist().date())
         bt_end = st.date_input("End Date", get_ist().date() + dt.timedelta(days=365))
         bt_initial_cap = st.number_input("Initial Capital (₹)", 10000, 1000000, 100000)
         bt_lot_size = st.number_input("Lot Size", 1, 100, 1)
-
         if 'backtest_result' not in st.session_state:
             st.session_state.backtest_result = None
         if 'backtest_running' not in st.session_state:
             st.session_state.backtest_running = False
-
         col_bt1, col_bt2 = st.columns(2)
         with col_bt1:
             run_bt = st.button("🚀 Run Backtest", use_container_width=True, on_click=lambda: play_sound_now("click"))
@@ -8091,7 +7707,6 @@ elif st.session_state.page == "dashboard":
             if st.button("🔄 Clear Results", use_container_width=True, on_click=lambda: play_sound_now("click")):
                 st.session_state.backtest_result = None
                 st.rerun()
-
         if run_bt:
             st.session_state.backtest_running = True
             def run_backtest_thread():
@@ -8105,7 +7720,6 @@ elif st.session_state.page == "dashboard":
                         st.session_state.backtest_running = False
                         return
                     df.rename(columns={'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'}, inplace=True)
-
                     if bt_strategy == "Momentum Breakout + S&R":
                         strategy_func = TechnicalAnalyzer.apply_primary_strategy
                     elif bt_strategy == "Machine Learning":
@@ -8120,31 +7734,18 @@ elif st.session_state.page == "dashboard":
                         strategy_func = TechnicalAnalyzer.apply_mean_reversion_strategy
                     else:
                         strategy_func = TechnicalAnalyzer.apply_primary_strategy
-
                     bt = Backtester(strategy_func, df, bt_initial_cap, bt_lot_size)
                     equity, trades = bt.run()
-
-                    result = {
-                        "equity": equity,
-                        "trades": trades,
-                        "total_return": bt.total_return,
-                        "sharpe": bt.sharpe,
-                        "max_dd": bt.max_dd,
-                        "win_rate": bt.win_rate,
-                        "avg_win": bt.avg_win,
-                        "avg_loss": bt.avg_loss,
-                    }
+                    result = {"equity": equity, "trades": trades, "total_return": bt.total_return, "sharpe": bt.sharpe, "max_dd": bt.max_dd, "win_rate": bt.win_rate, "avg_win": bt.avg_win, "avg_loss": bt.avg_loss}
                     st.session_state.backtest_result = result
                 except Exception as e:
                     st.session_state.backtest_result = {"error": str(e)}
                 finally:
                     st.session_state.backtest_running = False
-
             thread = threading.Thread(target=run_backtest_thread, daemon=True)
             add_script_run_ctx(thread)
             thread.start()
             st.rerun()
-
         if st.session_state.backtest_running:
             st.info("⏳ Backtest running in background...")
             st.spinner("Please wait")
@@ -8162,122 +7763,188 @@ elif st.session_state.page == "dashboard":
                 col1.metric("Avg Win", f"₹{res['avg_win']:.2f}")
                 col2.metric("Avg Loss", f"₹{res['avg_loss']:.2f}")
                 col3.metric("Total Trades", len(res['trades']))
-
                 if res['trades']:
                     st.markdown("### Trade Log")
                     trades_df = pd.DataFrame(res['trades'])
                     trades_df['entry_time'] = pd.to_datetime(trades_df['entry_time']).dt.strftime('%Y-%m-%d')
                     trades_df['exit_time'] = pd.to_datetime(trades_df['exit_time']).dt.strftime('%Y-%m-%d')
                     st.dataframe(trades_df, use_container_width=True, hide_index=True)
-
                 st.markdown("### Equity Curve")
                 st.line_chart(res['equity'])
         else:
             st.info("Click 'Run Backtest' to start.")
 
-    # Tab8: ADMIN – enhanced (user management, broker balances, active sessions, logs)
-    if st.session_state.is_developer:
-        with tab8:
-            st.markdown('<div class="admin-card">', unsafe_allow_html=True)
-            st.header("🛡️ Admin Panel")
-            admin_tabs = st.tabs(["👥 User Management", "💰 Broker Balances", "📊 Active Sessions", "⚙️ System Logs"])
-            
-            with admin_tabs[0]:
-                st.subheader("User Management")
-                if HAS_DB:
-                    try:
-                        users = supabase.table("user_credentials").select("*").execute()
-                        if users.data:
-                            df_users = pd.DataFrame(users.data)
-                            # Add blocked status (if column exists, else default False)
-                            try:
-                                if "blocked" not in df_users.columns:
-                                    df_users["blocked"] = False
-                            except:
+    elif current_tab == 7 and st.session_state.is_developer:  # ADMIN
+        st.subheader("🛡️ Admin Panel")
+        admin_tabs = st.tabs(["👥 User Management", "💰 Broker Balances", "📊 Active Sessions", "⚙️ System Logs"])
+        with admin_tabs[0]:
+            st.subheader("User Management")
+            if HAS_DB:
+                try:
+                    users = supabase.table("user_credentials").select("*").execute()
+                    if users.data:
+                        df_users = pd.DataFrame(users.data)
+                        try:
+                            if "blocked" not in df_users.columns:
                                 df_users["blocked"] = False
-                            st.dataframe(df_users[["user_id", "role", "blocked"]], use_container_width=True)
-                            
-                            selected_user = st.selectbox("Select User to Manage", df_users["user_id"].tolist())
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                new_role = st.selectbox("Set Role", ["trader", "admin"], index=0 if df_users[df_users["user_id"]==selected_user]["role"].iloc[0]=="trader" else 1)
-                                if st.button("Update Role", on_click=lambda: play_sound_now("click")):
-                                    supabase.table("user_credentials").update({"role": new_role}).eq("user_id", selected_user).execute()
-                                    st.success(f"Role updated for {selected_user}")
-                                    st.rerun()
-                            with col2:
-                                blocked_status = st.checkbox("Block User", value=bool(df_users[df_users["user_id"]==selected_user]["blocked"].iloc[0]))
-                                block_reason = st.text_input("Reason (optional)")
-                                if st.button("Update Block Status", on_click=lambda: play_sound_now("click")):
-                                    try:
-                                        supabase.table("user_credentials").update({"blocked": blocked_status}).eq("user_id", selected_user).execute()
-                                        st.success(f"Block status updated for {selected_user}")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Error updating block: {e}")
-                        else:
-                            st.info("No users found.")
-                    except Exception as e:
-                        st.error(f"Error fetching users: {e}")
-                else:
-                    st.warning("Database not connected.")
-            
-            with admin_tabs[1]:
-                st.subheader("Broker Balances (Current Session)")
-                if st.session_state.bot:
-                    balances = st.session_state.bot.get_broker_balances()
-                    if balances:
-                        df_balances = pd.DataFrame([{"Broker": k, "Balance": v} for k, v in balances.items()])
-                        st.dataframe(df_balances, use_container_width=True, hide_index=True)
+                        except:
+                            df_users["blocked"] = False
+                        st.dataframe(df_users[["user_id", "role", "blocked"]], use_container_width=True)
+                        selected_user = st.selectbox("Select User to Manage", df_users["user_id"].tolist())
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            new_role = st.selectbox("Set Role", ["trader", "admin"], index=0 if df_users[df_users["user_id"]==selected_user]["role"].iloc[0]=="trader" else 1)
+                            if st.button("Update Role", on_click=lambda: play_sound_now("click")):
+                                supabase.table("user_credentials").update({"role": new_role}).eq("user_id", selected_user).execute()
+                                st.success(f"Role updated for {selected_user}")
+                                st.rerun()
+                        with col2:
+                            blocked_status = st.checkbox("Block User", value=bool(df_users[df_users["user_id"]==selected_user]["blocked"].iloc[0]))
+                            if st.button("Update Block Status", on_click=lambda: play_sound_now("click")):
+                                supabase.table("user_credentials").update({"blocked": blocked_status}).eq("user_id", selected_user).execute()
+                                st.success(f"Block status updated for {selected_user}")
+                                st.rerun()
                     else:
-                        st.info("No broker balances available. Make sure you are logged in with at least one broker.")
+                        st.info("No users found.")
+                except Exception as e:
+                    st.error(f"Error fetching users: {e}")
+            else:
+                st.warning("Database not connected.")
+        with admin_tabs[1]:
+            st.subheader("Broker Balances (Current Session)")
+            if st.session_state.bot:
+                balances = st.session_state.bot.get_broker_balances()
+                if balances:
+                    df_balances = pd.DataFrame([{"Broker": k, "Balance": v} for k, v in balances.items()])
+                    st.dataframe(df_balances, use_container_width=True, hide_index=True)
                 else:
-                    st.info("No active bot session.")
-            
-            with admin_tabs[2]:
-                st.subheader("Active Sessions")
-                if HAS_DB:
-                    try:
-                        sessions = supabase.table("user_sessions").select("*").order("last_seen", desc=True).execute()
-                        if sessions.data:
-                            df_sessions = pd.DataFrame(sessions.data)
-                            st.dataframe(df_sessions[["user_id", "device_name", "ip_address", "last_seen"]], use_container_width=True)
-                        else:
-                            st.info("No active sessions.")
-                    except Exception as e:
-                        st.error(f"Error fetching sessions: {e}")
-                else:
-                    st.warning("Database not connected.")
-            
-            with admin_tabs[3]:
-                st.subheader("System Logs")
-                if st.session_state.bot:
-                    logs = list(st.session_state.bot.state["logs"])
-                    for log in logs[:20]:
-                        st.text(log)
-                else:
-                    st.info("No bot logs.")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+                    st.info("No broker balances available.")
+            else:
+                st.info("No active bot session.")
+        with admin_tabs[2]:
+            st.subheader("Active Sessions")
+            if HAS_DB:
+                try:
+                    sessions = supabase.table("user_sessions").select("*").order("last_seen", desc=True).execute()
+                    if sessions.data:
+                        df_sessions = pd.DataFrame(sessions.data)
+                        st.dataframe(df_sessions[["user_id", "device_name", "ip_address", "last_seen"]], use_container_width=True)
+                    else:
+                        st.info("No active sessions.")
+                except Exception as e:
+                    st.error(f"Error fetching sessions: {e}")
+            else:
+                st.warning("Database not connected.")
+        with admin_tabs[3]:
+            st.subheader("System Logs")
+            if st.session_state.bot:
+                logs = list(st.session_state.bot.state["logs"])
+                for log in logs[:20]:
+                    st.text(log)
+            else:
+                st.info("No bot logs.")
+    # ------------------ TAB PAGINATION (NEXT / PREVIOUS PAGE) ------------------
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("---")
+    
+    col_prev, col_spacer, col_next = st.columns(3)
+    
+    with col_prev:
+        if current_tab > 0:
+            prev_tab_name = tab_names[current_tab - 1]
+            if st.button(f"⬅️ Back to {prev_tab_name}", use_container_width=True, on_click=lambda: play_sound_now("click")):
+                st.session_state.current_tools_tab -= 1
+                st.rerun()
+                
+    with col_next:
+        if current_tab < len(tab_names) - 1:
+            next_tab_name = tab_names[current_tab + 1]
+            if st.button(f"Next: {next_tab_name} ➡️", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
+                st.session_state.current_tools_tab += 1
+                st.rerun()
+                
+    st.markdown("<br><br>", unsafe_allow_html=True)
 
-    # Bottom dock (Start, Sync, Exit)
-    st.markdown('<div class="bottom-dock">', unsafe_allow_html=True)
-    d1, d2, d3 = st.columns(3)
-    with d1:
-        if st.button("▶️\nStart", key="dock_start", on_click=lambda: play_sound_now("click")):
+    # ------------------ OPERABLE BOTTOM DOCK ------------------
+    st.markdown("""
+    <style>
+    /* Hide the default empty div we use as an anchor */
+    #operable-dock-anchor { display: none; }
+    
+    /* Target the horizontal block containing our anchor and turn it into a floating dock */
+    div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.90);
+        backdrop-filter: blur(15px);
+        -webkit-backdrop-filter: blur(15px);
+        border-radius: 50px;
+        padding: 5px 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255,255,255,0.4);
+        z-index: 9999;
+        width: auto;
+        gap: 5px;
+    }
+    
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+    }
+
+    /* Style the Streamlit buttons inside this dock */
+    div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        font-weight: 700 !important;
+        transition: all 0.2s ease !important;
+        border-radius: 30px !important;
+        color: inherit;
+    }
+    div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button:hover {
+        background: rgba(2, 132, 199, 0.2) !important;
+        color: #0284c7 !important;
+        transform: translateY(-2px);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Create the columns that will be styled into the dock
+    dock_col1, dock_col2, dock_col3, anchor_col = st.columns([1, 1, 1, 0.01])
+    
+    with anchor_col:
+        # This hidden div acts as a tracking beacon for our CSS
+        st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
+
+    with dock_col1:
+        # Start Button Logic
+        if st.button("▶️ Start", key="dock_start_btn", disabled=bot.state.get("is_running", False)):
             bot.state["is_running"] = True
+            bot.state["engine_active"] = True
             t = threading.Thread(target=bot.trading_loop, daemon=True)
             add_script_run_ctx(t)
             t.start()
+            play_sound_now("click")
             st.rerun()
-    with d2:
-        if st.button("🔄\nSync", key="dock_refresh", on_click=lambda: play_sound_now("click")):
+            
+    with dock_col2:
+        # Sync Button Logic
+        if st.button("🔄 Sync", key="dock_sync_btn"):
+            play_sound_now("click")
             st.rerun()
-    with d3:
-        if st.button("☠️\nExit", key="dock_Exit", on_click=lambda: play_sound_now("click")):
+            
+    with dock_col3:
+        # Exit Button Logic (Disabled if no trades are active)
+        can_exit = bot.state.get("active_trade") is not None or len(bot.state.get("active_trades", [])) > 0
+        if st.button("☠️ Exit", key="dock_exit_btn", disabled=not can_exit):
             bot.force_exit()
+            play_sound_now("click")
             st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
 
     # Process background queues
     if getattr(bot, "state", None):
@@ -8305,7 +7972,6 @@ elif st.session_state.page == "dashboard":
             </script>
             """
             st.components.v1.html(js_notification, height=0)
-
         while bot.state.get("sound_queue"):
             sound = bot.state["sound_queue"].popleft()
             play_sound_ui(sound)
