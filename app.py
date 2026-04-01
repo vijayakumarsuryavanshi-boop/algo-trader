@@ -1607,7 +1607,7 @@ class CoinDCXBridge:
         try:
             ts = int(round(time.time() * 1000))
             if symbol == "XAUUSD":
-                base_coin = "XAUT" # Changed from GOLD
+                base_coin = "XAU" # Changed from GOLD
             else:
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
             
@@ -1759,7 +1759,7 @@ class CoinDCXBridge:
         try:
             pair = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
             if symbol == "XAUUSD":
-                pair = "XAUTUSD"
+                pair = "XAUUSD"
             res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "1D"}
             resolution = res_map.get(interval, "5")
             end = int(time.time())
@@ -4659,7 +4659,7 @@ class SniperBot:
                 try:
                     # FIX: Map XAUUSD to XAUTUSDT for CoinDCX Live Price
                     if symbol == "XAUUSD":
-                        market_symbol = "XAUTUSDT"
+                        market_symbol = "XAUUSDT"
                     else:
                         market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
                         
