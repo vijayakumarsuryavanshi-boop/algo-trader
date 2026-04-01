@@ -8174,6 +8174,41 @@ elif st.session_state.page == "tools":
                 
     st.markdown("<br><br>", unsafe_allow_html=True)
 
+    
+    # Process background queues
+    if getattr(bot, "state", None):
+        while bot.state.get("ui_popups"):
+            popup = bot.state["ui_popups"].popleft()
+            title = popup['title']
+            msg = popup['message']
+            st.toast(f"{title}: {msg}", icon="🔔")
+            js_notification = f"""
+            <script>
+            function notifyUser() {{
+                if (!("Notification" in window)) {{
+                    console.log("This browser does not support desktop notification");
+                }} else if (Notification.permission === "granted") {{
+                    new Notification("{title}", {{body: "{msg}", icon: "https://cdn-icons-png.flaticon.com/512/2950/2950133.png"}});
+                }} else if (Notification.permission !== "denied") {{
+                    Notification.requestPermission().then(function (permission) {{
+                        if (permission === "granted") {{
+                            new Notification("{title}", {{body: "{msg}", icon: "https://cdn-icons-png.flaticon.com/512/2950/2950133.png"}});
+                        }}
+                    }});
+                }}
+            }}
+            notifyUser();
+            </script>
+            """
+            st.components.v1.html(js_notification, height=0)
+        while bot.state.get("sound_queue"):
+            sound = bot.state["sound_queue"].popleft()
+            play_sound_ui(sound)
+
+# ==========================================
+# GLOBAL UI ELEMENTS (Visible on Dashboard & Tools)
+# ==========================================
+if st.session_state.page in ["dashboard", "tools"]:
     # ------------------ OPERABLE BOTTOM DOCK ------------------
     st.markdown("""
     <style>
@@ -8255,39 +8290,40 @@ elif st.session_state.page == "tools":
             play_sound_now("click")
             st.rerun()
 
-    # Process background queues
-    if getattr(bot, "state", None):
-        while bot.state.get("ui_popups"):
-            popup = bot.state["ui_popups"].popleft()
-            title = popup['title']
-            msg = popup['message']
-            st.toast(f"{title}: {msg}", icon="🔔")
-            js_notification = f"""
-            <script>
-            function notifyUser() {{
-                if (!("Notification" in window)) {{
-                    console.log("This browser does not support desktop notification");
-                }} else if (Notification.permission === "granted") {{
-                    new Notification("{title}", {{body: "{msg}", icon: "https://cdn-icons-png.flaticon.com/512/2950/2950133.png"}});
-                }} else if (Notification.permission !== "denied") {{
-                    Notification.requestPermission().then(function (permission) {{
-                        if (permission === "granted") {{
-                            new Notification("{title}", {{body: "{msg}", icon: "https://cdn-icons-png.flaticon.com/512/2950/2950133.png"}});
-                        }}
-                    }});
-                }}
+# ==========================================
+# BACKGROUND QUEUES & AUDIO
+# ==========================================
+if getattr(bot, "state", None):
+    while bot.state.get("ui_popups"):
+        popup = bot.state["ui_popups"].popleft()
+        title = popup['title']
+        msg = popup['message']
+        st.toast(f"{title}: {msg}", icon="🔔")
+        js_notification = f"""
+        <script>
+        function notifyUser() {{
+            if (!("Notification" in window)) {{
+                console.log("This browser does not support desktop notification");
+            }} else if (Notification.permission === "granted") {{
+                new Notification("{title}", {{body: "{msg}", icon: "https://cdn-icons-png.flaticon.com/512/2950/2950133.png"}});
+            }} else if (Notification.permission !== "denied") {{
+                Notification.requestPermission().then(function (permission) {{
+                    if (permission === "granted") {{
+                        new Notification("{title}", {{body: "{msg}", icon: "https://cdn-icons-png.flaticon.com/512/2950/2950133.png"}});
+                    }}
+                }});
             }}
-            notifyUser();
-            </script>
-            """
-            st.components.v1.html(js_notification, height=0)
-        while bot.state.get("sound_queue"):
-            sound = bot.state["sound_queue"].popleft()
-            play_sound_ui(sound)
+        }}
+        notifyUser();
+        </script>
+        """
+        st.components.v1.html(js_notification, height=0)
+        
+    while bot.state.get("sound_queue"):
+        sound = bot.state["sound_queue"].popleft()
+        play_sound_ui(sound)
 
-# ==========================================
 # PROCESS SOUND QUEUES – PLAY ALL SOUNDS
-# ==========================================
 while st.session_state.sound_queue:
     latest_sound = st.session_state.sound_queue.popleft()
     play_sound_ui(latest_sound)
