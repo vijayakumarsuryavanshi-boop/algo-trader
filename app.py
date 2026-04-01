@@ -4651,7 +4651,10 @@ class SniperBot:
                 pass
         if self.api:
             try:
-                res = self.api.ltpData(exchange, INDEX_SYMBOLS.get(symbol, symbol), str(token))
+                mapped_exchange = exchange
+                 if exchange == "NCO":
+                    mapped_exchange = "MCX"
+                res = self.api.ltpData(mapped_exchange, INDEX_SYMBOLS.get(symbol, symbol), str(token))
                 if res and res.get('status'):
                     return float(res['data']['ltp'])
             except:
@@ -5166,7 +5169,7 @@ class SniperBot:
                 return None, f"Zerodha error: {str(e)}"
         if self.api:
             try:
-                p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
+                p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX", "NCO"] else "INTRADAY"
                 order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
                 
                 # 🛡️ THE FIX: Round the price to the exact NSE Tick Size (0.05)
