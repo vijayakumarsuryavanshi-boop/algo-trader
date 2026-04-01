@@ -1759,7 +1759,7 @@ class CoinDCXBridge:
         try:
             pair = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
             if symbol == "XAUUSD":
-                pair = "XAUUSD"
+                pair = "XAUUSDT"
             res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "1D"}
             resolution = res_map.get(interval, "5")
             end = int(time.time())
@@ -4630,6 +4630,7 @@ class SniperBot:
             return INDEX_TOKENS[index_name]
 
         return "NSE", "12345"
+        
     def get_live_price(self, exchange, symbol, token):
         # Use WebSocket if available for Angel One
         if exchange in ["NSE", "NFO", "BSE", "BFO", "MCX"] and self.ws_angel_connected and token in self.live_prices_angel:
@@ -4657,7 +4658,6 @@ class SniperBot:
                 price = self.mt5_bridge.get_live_price(symbol)
             elif exchange == "COINDCX" and self.coindcx_api:
                 try:
-                    # FIX: Map XAUUSD to XAUTUSDT for CoinDCX Live Price
                     if symbol == "XAUUSD":
                         market_symbol = "XAUUSDT"
                     else:
