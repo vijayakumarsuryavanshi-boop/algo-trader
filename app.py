@@ -6858,120 +6858,303 @@ elif st.session_state.page == "dashboard":
     def live_tracker_modern():
         import html
         import re
+        import random
+        import time
+
+        st.markdown("""
+        <style>
+        /* 🏵️ ROYAL MAROON & GOLD BASE 🏵️ */
+        .wedding-card-wrapper {
+            background: linear-gradient(145deg, #4a0404, #7f1d1d); /* Rich Velvet Maroon */
+            border: 2px solid #d4af37; /* Royal Gold */
+            border-radius: 16px;
+            padding: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.6), 0 0 20px rgba(212, 175, 55, 0.2);
+        }
         
-        def render_html_for_trade(t, ltp, pnl, elapsed_str):
-            # 1. Parse Strike and Option Type
-            symbol_text = str(t.get("symbol", ""))
-            trade_action = str(t.get("type", "")).upper()
+        .wedding-card-inner {
+            border: 1px dashed rgba(212, 175, 55, 0.5); /* Gold Dashed Border */
+            border-radius: 12px;
+            padding: 20px;
+            background: rgba(0,0,0,0.3);
+        }
+
+        /* 👑 TOP ROW: SYMBOL (LEFT) & PNL (RIGHT) */
+        .trade-top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(212, 175, 55, 0.3);
+            padding-bottom: 15px;
+            margin-bottom: 15px;
+        }
+
+        .trade-left {
+            text-align: left;
+            flex: 1;
+        }
+
+        .wedding-symbol {
+            font-size: 1.6rem;
+            font-weight: 900;
+            color: #ffffff;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+            word-break: break-all;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            font-family: 'Georgia', serif;
+        }
+        
+        .wedding-details-pill {
+            display: inline-block;
+            background: linear-gradient(90deg, rgba(212,175,55,0.1), rgba(212,175,55,0.3));
+            border: 1px solid #d4af37;
+            color: #fde047; /* Bright Gold */
+            padding: 4px 16px;
+            border-radius: 30px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .trade-right {
+            text-align: right;
+            min-width: 160px;
+            border-radius: 12px;
+            padding: 12px 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .pnl-label {
+            font-size: 0.85rem; 
+            color: #fde047; 
+            text-transform: uppercase; 
+            font-weight: 800; 
+            letter-spacing: 2px; 
+            margin-bottom: 4px;
+        }
+
+        .pnl-val {
+            font-size: 2.6rem; 
+            font-weight: 900; 
+            font-family: monospace;
+            color: #ffffff !important; /* 🚨 PURE WHITE TEXT FOR VISIBILITY */
+            text-shadow: 0 3px 8px rgba(0,0,0,0.7);
+        }
+
+        /* 📊 MIDDLE ROW: ENTRY, LTP, SL */
+        .middle-metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        
+        .metric-box {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(212, 175, 55, 0.4);
+            border-radius: 10px;
+            padding: 12px 5px;
+            text-align: center;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        }
+        
+        .metric-label {
+            font-size: 0.7rem; 
+            color: #e2e8f0; 
+            text-transform: uppercase; 
+            font-weight: 800; 
+            margin-bottom: 4px;
+            letter-spacing: 1px;
+        }
+        
+        .metric-val {
+            font-size: 1.3rem; 
+            font-weight: 900; 
+            font-family: monospace;
+        }
+        
+        .text-white { color: #ffffff; }
+        .text-yellow { color: #facc15; text-shadow: 0 1px 3px rgba(0,0,0,0.4); }
+
+        /* 🎯 BOTTOM ROW: COMBINED TP & TIME (DARK TEXT) */
+        .bottom-combined-box {
+            background: linear-gradient(90deg, #fde047, #d4af37); /* Solid Gold/Yellow */
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+            font-size: 0.95rem;
+            font-weight: 900;
+            color: #1e293b !important; /* Visible Dark Slate/Black Text */
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        /* 📱 MOBILE VIEW PERFECT SNAPPING */
+        @media (max-width: 600px) {
+            .trade-top-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            .trade-right {
+                text-align: left;
+                width: 100%;
+            }
+            .pnl-val { font-size: 2.2rem; }
+            .wedding-symbol { font-size: 1.4rem; }
             
-            strike_match = re.search(r'(\d+)\s*(CE|PE)$', symbol_text, re.IGNORECASE)
+            .middle-metrics-grid {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 6px;
+            }
+            .metric-box { padding: 10px 2px; }
+            .metric-val { font-size: 1.1rem; }
+            
+            .bottom-combined-box {
+                font-size: 0.85rem;
+                line-height: 1.5;
+            }
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        def render_html_for_trade(t, ltp, pnl, elapsed_str):
+            full_symbol = str(t.get("symbol", "UNKNOWN"))
+            raw_type = str(t.get("type", "")).upper()
+            
+            # 🧠 SMART EXTRACTOR: Pulls Strike and CE/PE
+            strike_match = re.search(r'(\d+)\s*(CE|PE)$', full_symbol, re.IGNORECASE)
+            is_option = bool(strike_match)
+            
             if strike_match:
                 strike_price = strike_match.group(1)
                 opt_type = strike_match.group(2).upper()
-                if "BUY" in trade_action or "SELL" in trade_action:
-                    badge_text = f"{trade_action} {opt_type}"
-                else:
-                    badge_text = f"BUY {opt_type}" 
+                details_text = f"STRIKE: {strike_price} {opt_type}"
             else:
-                strike_price = "N/A"
-                badge_text = trade_action
+                details_text = "FUTURES / SPOT"
 
-            # 2. PnL Colors and Formatting
-            pnl_color = "#4ade80" if pnl >= 0 else "#f87171"
+            # 🚨 UI FIX: If it's a PE Option, the user Bought it. Do not show "SELL" on the badge!
+            trade_action = "BUY" if (is_option and raw_type == "SELL") else raw_type
+
+            # PnL dynamic background tint to keep text white but show profit/loss context
             pnl_sign = "+" if pnl >= 0 else ""
+            pnl_bg_color = "rgba(74, 222, 128, 0.2)" if pnl >= 0 else "rgba(248, 113, 113, 0.2)" 
+            pnl_border_color = "#4ade80" if pnl >= 0 else "#f87171"
+            pnl_display = f"{pnl_sign}{round(pnl, 2)}"
             
-            if t.get('exch') in ["DELTA", "COINDCX", "BINANCE"] and bot.settings.get('show_inr_crypto', True):
-                inr_pnl = pnl * get_usdt_inr_rate()
-                pnl_display = f"{pnl_sign}{round(pnl, 2)} (₹ {round(inr_pnl, 2)})"
-            else:
-                pnl_display = f"{pnl_sign}{round(pnl, 2)}"
-                
-            sim_badge = '<span style="background:#f59e0b; color:white; padding:4px 8px; border-radius:6px; font-size:0.75rem; font-weight:900; margin-left:10px;">SIMULATED</span>' if t.get("simulated") else ''
-            
+            sim_badge = ' <span style="background:#1e293b; color:#fde047; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:900; vertical-align: middle; margin-left:8px; border: 1px solid #fde047;">SIM</span>' if t.get("simulated") else ''
             reason = html.escape(str(t.get('rejection_reason', '')))
-            rej_info = f"<div style='color:#ef4444; font-size:0.85rem; margin-top:8px; font-weight:bold;'>Reason: {reason}</div>" if reason else ""
+            rej_info = f"<div style='color:#ff8787; font-size:0.85rem; margin-top:8px; font-weight:bold;'>Notice: {reason}</div>" if reason else ""
             
-            # 3. ZERO LEADING SPACES (Prevents the Raw Text / Markdown Bug)
-            h = ""
-            h += f'<div class="trade-card">'
-            h += f'<div class="trade-header">'
-            h += f'<div class="trade-title">'
-            h += f'<span class="trade-badge">{badge_text}</span>'
-            h += f'<span class="trade-symbol">{symbol_text}</span> {sim_badge}'
-            h += f'</div>'
-            h += f'<div class="trade-pnl-box">'
-            h += f'<div style="font-size: 0.85rem; color: #ffffff; text-transform: uppercase; font-weight: 900;">Live P&L</div>'
-            h += f'<div style="font-size: 2.5rem; font-weight: 900; font-family: monospace; color:{pnl_color};">{pnl_display}</div>'
-            h += f'</div>'
-            h += f'</div>'
+            tp1 = t.get("tp1", t.get("tgt", 0))
+            tp2 = t.get("tp2", 0)
+            tp3 = t.get("tp3", 0)
+            
+            # HTML Construction
+            h = f'<div class="wedding-card-wrapper">'
+            h += f'<div class="wedding-card-inner">'
+            
+            # 👑 TOP ROW: SYMBOL (LEFT) & PNL (RIGHT)
+            h += f'<div class="trade-top-row">'
+            h += f'<div class="trade-left">'
+            h += f'<div class="wedding-symbol">{full_symbol}{sim_badge}</div>'
+            h += f'<div class="wedding-details-pill">{trade_action} | {details_text}</div>'
             h += f'{rej_info}'
-            h += f'<div class="trade-metrics-grid">'
-            h += f'<div class="metric-box">'
-            h += f'<div class="metric-label">Strike</div>'
-            h += f'<div class="metric-val">{strike_price}</div>'
             h += f'</div>'
-            h += f'<div class="metric-box">'
-            h += f'<div class="metric-label">Entry</div>'
-            h += f'<div class="metric-val">{t.get("entry", 0):.2f}</div>'
-            h += f'</div>'
-            h += f'<div class="metric-box">'
-            h += f'<div class="metric-label">LTP</div>'
-            h += f'<div class="metric-val" style="color:{pnl_color};">{ltp:.2f}</div>'
-            h += f'</div>'
-            h += f'<div class="metric-box">'
-            h += f'<div class="metric-label">SL</div>'
-            h += f'<div class="metric-val">{t.get("sl", 0):.2f}</div>'
-            h += f'</div>'
-            h += f'<div class="metric-box">'
-            h += f'<div class="metric-label">Qty</div>'
-            h += f'<div class="metric-val">{t.get("qty", 0)}</div>'
+            h += f'<div class="trade-right" style="background: {pnl_bg_color}; border: 1px dashed {pnl_border_color};">'
+            h += f'<div class="pnl-label">✨ Live P&L ✨</div>'
+            h += f'<div class="pnl-val">{pnl_display}</div>'
             h += f'</div>'
             h += f'</div>'
-            h += f'<div class="trade-footer">'
-            h += f'⏱️ {elapsed_str} &nbsp;|&nbsp; '
-            h += f'🎯 TP1: <span style="color: #eab308; font-size: 1.4rem; margin: 0 5px;">{t.get("tp1",0):.2f}</span> &nbsp;|&nbsp; '
-            h += f'TP2: <span style="color: #eab308; font-size: 1.4rem; margin: 0 5px;">{t.get("tp2",0):.2f}</span> &nbsp;|&nbsp; '
-            h += f'TP3: <span style="color: #eab308; font-size: 1.4rem; margin: 0 5px;">{t.get("tp3",0):.2f}</span>'
+            
+            # 📊 MIDDLE ROW: ENTRY, LTP, SL
+            h += f'<div class="middle-metrics-grid">'
+            h += f'<div class="metric-box"><div class="metric-label">Entry Price</div><div class="metric-val text-white">{t.get("entry", 0):.2f}</div></div>'
+            h += f'<div class="metric-box"><div class="metric-label">Current LTP</div><div class="metric-val text-white">{ltp:.2f}</div></div>'
+            h += f'<div class="metric-box"><div class="metric-label">Stop Loss</div><div class="metric-val text-yellow">{t.get("sl", 0):.2f}</div></div>'
             h += f'</div>'
+            
+            # 🎯 BOTTOM ROW: COMBINED TP & TIME
+            h += f'<div class="bottom-combined-box">'
+            h += f'🎯 TP1: {tp1:.2f} &nbsp;|&nbsp; TP2: {tp2:.2f} &nbsp;|&nbsp; TP3: {tp3:.2f} <br> ⏱️ Time: {elapsed_str} &nbsp;|&nbsp; 📦 Qty: {t.get("qty", 0)}'
             h += f'</div>'
+            
+            h += f'</div>' 
+            h += f'</div>' 
             
             return h
 
-        # 4. Engine Logic
+        # --- Engine Logic ---
+        trades_to_render = []
         if bot.state.get("active_trade"):
-            t = bot.state["active_trade"]
-            live_ltp = bot.get_live_price(t.get('exch', 'NSE'), t.get('symbol', ''), t.get('token', ''))
-            if live_ltp:
-                t['current_ltp'] = live_ltp
-                if t.get('type', '') in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
-                    t['floating_pnl'] = (t.get('entry', 0) - live_ltp) * t.get('qty', 0)
-                else:
-                    t['floating_pnl'] = (live_ltp - t.get('entry', 0)) * t.get('qty', 0)
-            ltp = t.get('current_ltp', t.get('entry', 0))
-            pnl = t.get('floating_pnl', 0.0)
-            elapsed = t.get('elapsed_time', 0)
-            elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
-            
-            st.markdown(render_html_for_trade(t, ltp, pnl, elapsed_str), unsafe_allow_html=True)
-            
+            trades_to_render.append(bot.state["active_trade"])
         elif bot.state.get("active_trades"):
-            for idx, t in enumerate(bot.state["active_trades"]):
+            trades_to_render.extend(bot.state["active_trades"])
+
+        if not trades_to_render:
+            # 🪔 THE LIVE PRICE EMPTY STATE
+            asset_name = bot.settings.get("index", "Asset")
+            spot = bot.state.get("spot", 0.0)
+            formatted_spot = f"₹{spot:,.2f}" if "USD" not in asset_name else f"${spot:,.2f}"
+            
+            empty_state_html = f"""
+            <div class="wedding-card-wrapper">
+                <div class="wedding-card-inner" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                    <div style="text-align: left;">
+                        <div style="color: #fde047; font-size: 0.85rem; letter-spacing: 2px; text-transform: uppercase;">Radar Active</div>
+                        <div style="color: #ffffff; font-size: 1.4rem; font-weight: 900; margin-top: 4px; font-family: 'Georgia', serif;">{asset_name}</div>
+                    </div>
+                    <div style="text-align: right; background: rgba(0,0,0,0.4); padding: 10px 20px; border-radius: 8px; border: 1px solid rgba(212,175,55,0.4);">
+                        <div style="color: #e2e8f0; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 2px;">Live Price</div>
+                        <div style="color: #ffffff; font-size: 1.8rem; font-weight: 900; font-family: monospace;">{formatted_spot}</div>
+                    </div>
+                </div>
+            </div>
+            """
+            st.markdown(empty_state_html, unsafe_allow_html=True)
+            
+        else:
+            for t in trades_to_render:
                 live_ltp = bot.get_live_price(t.get('exch', 'NSE'), t.get('symbol', ''), t.get('token', ''))
+                
+                # Mock Option Ticker Simulator for Paper Trading
+                if not live_ltp and bot.is_mock:
+                    random.seed(int(time.time() / 2) + hash(t.get('symbol', ''))) 
+                    volatility = t.get('entry', 100) * 0.0015 
+                    mock_tick = random.uniform(-volatility, volatility)
+                    live_ltp = t.get('current_ltp', t.get('entry', 0)) + mock_tick
+
                 if live_ltp:
                     t['current_ltp'] = live_ltp
-                    if t.get('type', '') in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]:
+                    
+                    # 🚨 FIX: BULLETPROOF OPTIONS PNL MATH
+                    full_sym = str(t.get("symbol", ""))
+                    raw_type = t.get('type', '')
+                    is_opt = bool(re.search(r'(CE|PE)$', full_sym, re.IGNORECASE))
+                    
+                    # If it's a CE or PE option, the user bought the premium (Long). PnL = LTP - Entry.
+                    # If it's a Future/Spot and type is SELL, it's a Short. PnL = Entry - LTP.
+                    if is_opt and raw_type == "SELL":
+                        is_short = False 
+                    else:
+                        is_short = raw_type in ["SELL", "SELL_CALL", "SELL_PUT", "SHORT"]
+                        
+                    if is_short:
                         t['floating_pnl'] = (t.get('entry', 0) - live_ltp) * t.get('qty', 0)
                     else:
                         t['floating_pnl'] = (live_ltp - t.get('entry', 0)) * t.get('qty', 0)
+                
                 ltp = t.get('current_ltp', t.get('entry', 0))
                 pnl = t.get('floating_pnl', 0.0)
                 elapsed = t.get('elapsed_time', 0)
                 elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
                 
                 st.markdown(render_html_for_trade(t, ltp, pnl, elapsed_str), unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="trade-card" style="text-align:center;"><span style="color:#aaa;">⏳ Radar Active: Waiting for High-Probability Setup...</span></div>', unsafe_allow_html=True)
-            
+
     live_tracker_modern()
     
     # ------------------ STICKY BUTTONS ------------------
