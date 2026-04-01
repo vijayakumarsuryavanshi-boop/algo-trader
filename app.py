@@ -8196,55 +8196,11 @@ elif st.session_state.page == "tools":
 
 # ==========================================
 # GLOBAL UI ELEMENTS (Visible on Dashboard & Tools)
-# PUT THIS AT THE VERY END OF YOUR SCRIPT
 # ==========================================
 if st.session_state.page in ["dashboard", "tools"]:
     
-    # We wrap this in a container to safely isolate it from your Tools tabs
     with st.container():
-        st.markdown("""
-        <style>
-        #operable-dock-anchor { display: none; }
-        
-        /* Strictly target ONLY the block containing this specific anchor */
-        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(255, 255, 255, 0.90);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
-            border-radius: 50px;
-            padding: 5px 15px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255,255,255,0.4);
-            z-index: 99999;
-            width: max-content;
-            gap: 10px;
-        }
-        
-        @media (prefers-color-scheme: dark) {
-            div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
-                background: rgba(15, 23, 42, 0.85);
-                border: 1px solid rgba(255,255,255,0.1);
-            }
-        }
-        
-        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            font-weight: 700 !important;
-            transition: all 0.2s ease !important;
-            border-radius: 30px !important;
-        }
-        
-        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button:hover {
-            background: rgba(2, 132, 199, 0.2) !important;
-            color: #0284c7 !important;
-            transform: translateY(-2px);
-        }
-        # Ensure st.markdown with triple quotes wraps the CSS
+        # 1. CSS SECTION: Wrapped in triple quotes so Python treats it as a string
         st.markdown("""
         <style>
         #operable-dock-anchor { display: none; }
@@ -8254,50 +8210,48 @@ if st.session_state.page in ["dashboard", "tools"]:
             bottom: 15px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(15, 23, 42, 0.9);
+            background: rgba(15, 23, 42, 0.95);
             backdrop-filter: blur(10px);
             border-radius: 50px;
-            padding: 5px 10px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            padding: 5px 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
             z-index: 999999;
             width: 90% !important;
-            max-width: 320px;
+            max-width: 350px;
             display: flex !important;
             flex-direction: row !important;
-            justify-content: center !important;
+            justify-content: space-around !important;
             align-items: center !important;
             border: 1px solid rgba(255,255,255,0.1);
         }
         
+        /* Force side-by-side on mobile */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) > div {
             flex-direction: row !important;
             display: flex !important;
             flex: 1 1 auto !important;
-            min-width: 0 !important;
         }
 
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
-            width: 100% !important;
-            height: 45px !important;
-            padding: 0 !important;
-            border-radius: 40px !important;
-            font-size: 14px !important;
-            border: none !important;
             background: transparent !important;
+            border: none !important;
             color: white !important;
-            transition: all 0.2s;
+            font-weight: 700 !important;
+            font-size: 13px !important;
+            height: 45px !important;
+            width: 100% !important;
         }
         </style>
         """, unsafe_allow_html=True)
 
-        # NOW follow with your button code
+        # 2. BUTTON SECTION: 3 Columns
         dock_col1, dock_col2, dock_col3 = st.columns()
+        
+        # This anchor must be inside the container to trigger the CSS above
         st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
 
         with dock_col1:
-            if st.button("▶️\nStart", key="mob_start", use_container_width=True):
-                # ... your start logic ...
-                pass
+            if st.button("▶️\nStart", key="dock_start", disabled=bot.state.get("is_running", False), use_container_width=True):
                 bot.state["is_running"] = True
                 bot.state["engine_active"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
@@ -8308,14 +8262,13 @@ if st.session_state.page in ["dashboard", "tools"]:
                 st.rerun()
                 
         with dock_col2:
-            if st.button("🔄\nSync", key="mob_sync", use_container_width=True):
+            if st.button("🔄\nSync", key="dock_sync", use_container_width=True):
                 play_sound_now("click")
                 st.rerun()
                 
         with dock_col3:
-            # Logic to check if there is anything to exit
             can_exit = bot.state.get("active_trade") is not None or len(bot.state.get("active_trades", [])) > 0
-            if st.button("☠️\nExit", key="mob_exit", disabled=not can_exit, use_container_width=True):
+            if st.button("☠️\nExit", key="dock_exit", disabled=not can_exit, use_container_width=True):
                 bot.force_exit()
                 play_sound_now("click")
                 st.rerun()
