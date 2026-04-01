@@ -6093,11 +6093,8 @@ if st.session_state.page == "landing":
         <p>By accessing and using this platform, you agree to the following:</p>
         <ul>
             <li>You are solely responsible for all trading decisions and outcomes.</li>
-            <li>This software is provided "as is" without any warranties.</li>
             <li>Past performance does not guarantee future results.</li>
             <li>You acknowledge the high risk of financial loss in trading.</li>
-            <li>You will not hold the developers liable for any losses.</li>
-            <li>You must comply with all applicable laws and regulations.</li>
             <li>All strategies are fully transparent ("White Box") as per SEBI guidelines.</li>
         </ul>
     </div>
