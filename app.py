@@ -7372,16 +7372,47 @@ elif st.session_state.page == "tools":
     if 'current_tools_tab' not in st.session_state:
         st.session_state.current_tools_tab = 0
 
+    # 🚀 THE FIX: CSS TO FORCE HORIZONTAL SCROLL ON MOBILE
+    st.markdown("""
+    <div id="tools-tabs-marker"></div>
+    <style>
+    /* Target the exact column block immediately following our marker */
+    div.element-container:has(#tools-tabs-marker) + div[data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        -webkit-overflow-scrolling: touch; /* Smooth swipe on iOS */
+        padding-bottom: 10px; /* Prevents button shadow from being clipped */
+        scrollbar-width: none; /* Hide scrollbar Firefox */
+    }
+    
+    /* Hide scrollbar for Chrome/Safari/Edge */
+    div.element-container:has(#tools-tabs-marker) + div[data-testid="stHorizontalBlock"]::-webkit-scrollbar {
+        display: none; 
+    }
+    
+    /* Force the buttons to stay side-by-side and maintain their width */
+    div.element-container:has(#tools-tabs-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        min-width: 140px !important; /* Keep buttons wide enough to read text */
+        width: auto !important;
+        flex: 0 0 auto !important;
+    }
+    
+    @media (max-width: 600px) {
+        div.element-container:has(#tools-tabs-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            min-width: 120px !important; /* Slightly narrower on phones to hint at scrolling */
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     cols = st.columns(len(tab_names))
     for i, name in enumerate(tab_names):
         with cols[i]:
-            # Inject the tracker in the very first tab column
-            if i == 0:
-                st.markdown('<span class="mobile-tabs-control"></span>', unsafe_allow_html=True)
-            
             # Highlight the active tab button
             btn_type = "primary" if st.session_state.current_tools_tab == i else "secondary"
             if st.button(name, key=f"tool_tab_{i}", use_container_width=True, type=btn_type):
+                # We do not use the play_sound_now("click") lambda here because it messes with state updating sometimes
                 st.session_state.current_tools_tab = i
                 st.rerun()
                 
