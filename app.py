@@ -8093,11 +8093,15 @@ elif st.session_state.page == "tools":
                     users = supabase.table("user_credentials").select("*").execute()
                     if users.data:
                         df_users = pd.DataFrame(users.data)
-                        try:
-                            if "blocked" not in df_users.columns:
-                                df_users["blocked"] = False
-                        except:
+                        
+                        # 1. Safely inject 'role' if missing from DB
+                        if "role" not in df_users.columns:
+                            df_users["role"] = "trader"
+                            
+                        # 2. Safely inject 'blocked' if missing from DB
+                        if "blocked" not in df_users.columns:
                             df_users["blocked"] = False
+                            
                         st.dataframe(df_users[["user_id", "role", "blocked"]], use_container_width=True)
                         selected_user = st.selectbox("Select User to Manage", df_users["user_id"].tolist())
                         col1, col2 = st.columns(2)
