@@ -4586,15 +4586,23 @@ class SniperBot:
     def get_token_info(self, index_name):
         broker = self.settings.get("primary_broker", "")
 
-        # 1. Crypto Brokers (Highest Priority for XAUUSD and Crypto)
-        if broker == "CoinDCX":
-            return "COINDCX", index_name
-        if broker == "Delta Exchange":
-            return "DELTA", index_name
-        if broker == "Binance":
-            return "BINANCE", index_name
+        # 1. SMART ROUTING: Crypto & XAUUSD 
+        # (Auto-routes to CoinDCX/Delta/Binance even if Angel One is set as Primary in the UI)
+        crypto_assets = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "BNBUSD", "LTCUSD", "DOTUSD", "XAUUSD"]
+        if index_name in crypto_assets or "USD" in index_name:
+            if broker == "CoinDCX": return "COINDCX", index_name
+            if broker == "Delta Exchange": return "DELTA", index_name
+            if broker == "Binance": return "BINANCE", index_name
+            
+            # If Primary Broker is Angel/Zerodha, but asset is Crypto -> Auto Route
+            if self.is_coindcx_connected: return "COINDCX", index_name
+            if self.is_delta_connected: return "DELTA", index_name
+            if self.is_binance_connected: return "BINANCE", index_name
+            
+            # Fallback to MT5/FX if absolutely no crypto broker is connected
+            return "MT5" if self.is_mt5_connected else "FX", index_name
 
-        # 2. MCX Commodities (Dynamic Token Fetch)
+        # 2. MCX Commodities (Dynamic Token Fetch - STRICTLY OPTIONS/FUTURES)
         if index_name in COMMODITIES:
             if self.api:
                 df = self.get_master()
@@ -4607,26 +4615,21 @@ class SniperBot:
                         return "MCX", str(closest['token'])
             return "MCX", "21181" # Fallback if master fails
             
-        # 3. Forex & Global Spot (MT5 Fallback if NOT using Crypto Broker)
-        if index_name in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"]:
+        # 3. Forex & Global Spot (EURUSD, GBPUSD)
+        if index_name in ["EURUSD", "GBPUSD", "USDJPY"]:
             return "MT5" if self.is_mt5_connected else "FX", index_name
             
         # 4. Other Equity Brokers
-        if broker == "Stoxkart":
-            return "STOXKART", index_name
-        if broker == "Shoonya":
-            return "SHOONYA", index_name
-        if broker == "Dhan":
-            return "DHAN", index_name
-        if broker == "ICICI Direct":
-            return "ICICI", index_name
+        if broker == "Stoxkart": return "STOXKART", index_name
+        if broker == "Shoonya": return "SHOONYA", index_name
+        if broker == "Dhan": return "DHAN", index_name
+        if broker == "ICICI Direct": return "ICICI", index_name
 
         # 5. Default Angel/Zerodha Index Tokens
         if index_name in INDEX_TOKENS:
             return INDEX_TOKENS[index_name]
 
         return "NSE", "12345"
-
     def get_live_price(self, exchange, symbol, token):
         cache_key = f"{exchange}_{token}"
         if self.ws_manager:
@@ -7383,54 +7386,42 @@ elif st.session_state.page == "dashboard":
         clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
         tv_target = f"NSE:{clean_stock}"
 
-    # 3. Flawless HTML wrapper for Streamlit (Forces 100% height)
+    # 3. Streamlit-Safe HTML (Explicit Dimensions instead of Autosize)
     tradingview_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <style>
-        body, html {{
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #0f172a;
-        }}
-        #tv_container {{
-            width: 100vw;
-            height: 100vh;
-        }}
-    </style>
-    </head>
-    <body>
-        <div id="tv_container"></div>
-        <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
-        <script type="text/javascript">
-            new TradingView.widget({{
-                "autosize": true,
-                "symbol": "{tv_target}",
-                "interval": "5",
-                "timezone": "Asia/Kolkata",
-                "theme": "dark",
-                "style": "1",
-                "locale": "en",
-                "enable_publishing": false,
-                "backgroundColor": "#0f172a",
-                "gridColor": "rgba(255, 255, 255, 0.06)",
-                "allow_symbol_change": true,
-                "save_image": false,
-                "details": true,
-                "hotlist": true,
-                "container_id": "tv_container"
-            }});
-        </script>
-    </body>
-    </html>
+    <div class="tradingview-widget-container" style="height: 500px; width: 100%;">
+      <div id="tv_chart_container" style="height: 500px; width: 100%;"></div>
+      <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      if (typeof TradingView !== 'undefined') {{
+          new TradingView.widget({{
+            "width": "100%",
+            "height": 500,
+            "symbol": "{tv_target}",
+            "interval": "5",
+            "timezone": "Asia/Kolkata",
+            "theme": "dark",
+            "style": "1",
+            "locale": "en",
+            "enable_publishing": false,
+            "backgroundColor": "#0f172a",
+            "gridColor": "rgba(255, 255, 255, 0.06)",
+            "allow_symbol_change": true,
+            "save_image": false,
+            "details": true,
+            "hotlist": true,
+            "hide_side_toolbar": false,
+            "show_popup_button": true,
+            "popup_width": "1000",
+            "popup_height": "650",
+            "container_id": "tv_chart_container"
+          }});
+      }}
+      </script>
+    </div>
     """
     
-    # 4. Render with explicit Streamlit height
-    st.components.v1.html(tradingview_html, height=550)
+    # 4. Render with exact matching height
+    st.components.v1.html(tradingview_html, height=520)
     
     if st.button("🚀 One‑Tap BUY (Market)", use_container_width=True, on_click=lambda: play_sound_now("click")):
         st.warning("Demo: Order would be placed at market price")
