@@ -1584,7 +1584,7 @@ class CoinDCXBridge:
     def get_live_price(self, symbol):
         now = time.time()
         if symbol == "XAUUSD":
-            market_symbol = "GOLDUSDT"
+            market_symbol = "XAUUSDT" # Changed from GOLDUSDT
         else:
             market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
         
@@ -1607,7 +1607,7 @@ class CoinDCXBridge:
         try:
             ts = int(round(time.time() * 1000))
             if symbol == "XAUUSD":
-                base_coin = "GOLD"
+                base_coin = "XAU" # Changed from GOLD
             else:
                 base_coin = symbol.replace("USDT", "").replace("USD", "").replace("INR", "")
             
@@ -5172,47 +5172,50 @@ class SniperBot:
                 p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX", "NCO"] else "INTRADAY"
                 order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
                 
-                # 🛡️ THE FIX: Exact Tick Size Matching for MCX, NSE, and Currency
+                # 🛡️ THE FIX: Exact Tick Size Matching & 2-Decimal String Formatting
                 if order_type_final == "LIMIT" and price:
                     if exchange == "MCX":
                         if "CRUDEOIL" in symbol or "GOLD" in symbol or "SILVER" in symbol:
                             exec_price = float(round(float(price)))  # Tick size 1
                         elif "NATURALGAS" in symbol:
-                            exec_price = round(round(float(price) / 0.10) * 0.10, 1)  # Tick size 0.10
+                            exec_price = round(round(float(price) / 0.10) * 0.10, 2)  # Tick size 0.10
                         else:
                             exec_price = round(round(float(price) / 0.05) * 0.05, 2)
                     elif exchange in ["CDS", "BCD", "NCO"]:
-                        exec_price = round(round(float(price) / 0.0025) * 0.0025, 4) # Currency tick size
+                        exec_price = round(round(float(price) / 0.0025) * 0.0025, 4)
                     else:
-                        exec_price = round(round(float(price) / 0.05) * 0.05, 2) # Standard equity/index tick size
+                        exec_price = round(round(float(price) / 0.05) * 0.05, 2)
+                    
+                    # Angel One STRICTLY requires 2 decimal places to avoid payload rejection!
+                    if exchange in ["CDS", "BCD", "NCO"]:
+                        price_str = f"{exec_price:.4f}"
+                    else:
+                        price_str = f"{exec_price:.2f}"
                 else:
-                    exec_price = 0.0
+                    price_str = "0"
                 
-                # 🛡️ THE FIX: Strict string casting and removal of invalid 0.0 parameters
                 order_params = {
                     "variety": "NORMAL", 
-                    "tradingsymbol": str(symbol), 
-                    "symboltoken": str(token), 
-                    "transactiontype": str(side.upper()), 
-                    "exchange": str(exchange.upper()), 
-                    "ordertype": str(order_type_final), 
-                    "producttype": str(p_type), 
+                    "tradingsymbol": str(symbol).strip(), 
+                    "symboltoken": str(token).strip(), 
+                    "transactiontype": str(side).upper().strip(), 
+                    "exchange": str(exchange).upper().strip(), 
+                    "ordertype": str(order_type_final).upper().strip(), 
+                    "producttype": str(p_type).upper().strip(), 
                     "duration": "DAY", 
-                    "price": str(exec_price),  # Angel strictly prefers strings for prices
-                    "quantity": str(int(float(qty))) # Angel strictly prefers strings for qty
+                    "price": price_str, 
+                    "quantity": str(int(float(qty))) 
                 }
                 
                 self.log(f"📤 Sending Angel Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
                 
                 if res and isinstance(res, dict) and res.get('status'):
-                    o_id = res.get('data', {}).get('orderid', 'UNKNOWN_ID')
-                    return o_id, None
+                    return res.get('data', {}).get('orderid', 'UNKNOWN_ID'), None
                 elif isinstance(res, str):
                     return res, None
                 else:
-                    # If it returns None again, we will actually see the payload in the logs to debug!
-                    return None, f"API Rejected payload or session expired. Sent: {exec_price}"
+                    return None, f"API Rejected payload. Sent Price: {price_str}"
             except Exception as e:
                 return None, f"Angel exception: {str(e)}"
         
@@ -5732,7 +5735,8 @@ class SniperBot:
                                     else:
                                         qty = actual_qty
 
-                                    # 1. Handle Crypto Assets (Including XAUUSD on CoinDCX)
+                                    # --- STRIKE SELECTION LOGIC ---
+                                    # 1. Handle Crypto Assets
                                     if is_crypto:
                                         strike_sym = index
                                         if crypto_mode == "Futures":
@@ -5751,18 +5755,18 @@ class SniperBot:
                                             strike_token, strike_exch = token, exch
                                             entry_ltp = spot
 
-                                    # 2. Handle MCX Commodities (Strictly Options, No Futures Fallback)
-                                    elif index in COMMODITIES:
-                                        strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
-                                        if not strike_sym:
-                                            self.log(f"⚠️ No option strike found for {index}. Aborting trade to prevent Futures execution.")
-                                            continue # Skip this trade entirely to prevent unwanted futures execution
-
-                                    # 3. Handle MT5/Forex
+                                    # 2. Handle MT5/Forex
                                     elif is_mt5_asset or index in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"] or exch == "FX":
                                         strike_sym = index
                                         strike_token, strike_exch = token, exch
                                         entry_ltp = spot
+                                        
+                                    # 3. Handle MCX Commodities (Strictly Options, NO Futures Fallback)
+                                    elif index in COMMODITIES:
+                                        strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
+                                        if not strike_sym:
+                                            self.log(f"⚠️ No option strike found for {index}. Aborting trade to prevent Futures execution.")
+                                            continue # ABSOLUTE STOP: Do not fall back to futures
 
                                     # 4. Handle standard Equity/Index Brokers
                                     elif is_fyers or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA", "ICICI"]:
@@ -5772,7 +5776,6 @@ class SniperBot:
                                         else:
                                             strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
                                         
-                                        # If options fail for equities, then fallback to Spot/Futures
                                         if not strike_sym:
                                             strike_sym = index
                                             strike_token, strike_exch = token, exch
@@ -5785,6 +5788,7 @@ class SniperBot:
                                             strike_sym = index
                                             strike_token, strike_exch = token, exch
                                             entry_ltp = spot
+                                  
                                     if strike_sym and entry_ltp:
                                         if is_mock_mode:
                                             entry_ltp = self.apply_slippage(entry_ltp, signal)
