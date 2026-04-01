@@ -5160,6 +5160,13 @@ class SniperBot:
             return self.shoonya_bridge.place_order(symbol, qty, side, order_type, price)
         if exchange == "ICICI" and self.is_icici_connected and self.icici_bridge:
             return self.icici_bridge.place_order(symbol, qty, side, order_type, price)
+            
+        # 🛡️ THE FIX: Prevent Forex/Crypto from falling back to Indian Equity Brokers
+        if exchange in ["FX", "MT5"]:
+            return None, "MetaTrader 5 (MT5) not connected. Cannot execute Forex/XAUUSD orders."
+        if exchange in ["COINDCX", "DELTA", "BINANCE"]:
+            return None, f"Crypto broker ({exchange}) not connected. Cannot execute crypto orders."
+
         if broker == "Zerodha" and self.kite:
             try:
                 z_side = self.kite.TRANSACTION_TYPE_BUY if side == "BUY" else self.kite.TRANSACTION_TYPE_SELL
@@ -6774,72 +6781,7 @@ elif st.session_state.page == "dashboard":
     if not is_mkt_open:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
 
-    # OHLCV + LIQUIDITY ZONES BOX
-    if bot.state.get("latest_data") is not None and not bot.state["latest_data"].empty:
-        df_ohlcv = bot.state["latest_data"].iloc[-1]
-        # Calculate liquidity zones
-        try:
-            # Get historical data for liquidity calculations
-            hist_data = bot.get_historical_data(exch, token, symbol=INDEX, interval="1d") if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval="1d")
-            if hist_data is not None and not hist_data.empty:
-                prev_day = hist_data.iloc[-2] if len(hist_data) >= 2 else None
-                prev_week = hist_data.iloc[-7] if len(hist_data) >= 7 else None
-                pdc_h = prev_day['high'] if prev_day is not None else df_ohlcv['high']
-                pdc_l = prev_day['low'] if prev_day is not None else df_ohlcv['low']
-                weekly_high = hist_data['high'].rolling(5).max().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['high']
-                weekly_low = hist_data['low'].rolling(5).min().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['low']
-                # Simple order block detection: recent swing high/low
-                swings = hist_data[['high', 'low']].tail(20)
-                order_block_high = swings['high'].max()
-                order_block_low = swings['low'].min()
-            else:
-                pdc_h = df_ohlcv['high']
-                pdc_l = df_ohlcv['low']
-                weekly_high = df_ohlcv['high']
-                weekly_low = df_ohlcv['low']
-                order_block_high = df_ohlcv['high']
-                order_block_low = df_ohlcv['low']
-        except:
-            pdc_h = df_ohlcv['high']
-            pdc_l = df_ohlcv['low']
-            weekly_high = df_ohlcv['high']
-            weekly_low = df_ohlcv['low']
-            order_block_high = df_ohlcv['high']
-            order_block_low = df_ohlcv['low']
-
-        ohlcv_liquidity_html = f"""
-        <style>
-        .ohlcv-header-grid {{
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 10px;
-        }}
-        @media (max-width: 600px) {{
-            .ohlcv-header-grid {{ grid-template-columns: repeat(3, 1fr); }}
-            .liquidity-grid {{ grid-template-columns: repeat(2, 1fr) !important; }}
-        }}
-        </style>
-        <div class="ohlcv-liquidity-box">
-            <div class="ohlcv-header-grid">
-                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">OPEN</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['open']:.2f}</div></div>
-                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">HIGH</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['high']:.2f}</div></div>
-                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">LOW</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['low']:.2f}</div></div>
-                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">CLOSE</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['close']:.2f}</div></div>
-                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">VOLUME</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{int(df_ohlcv['volume']):,}</div></div>
-            </div>
-            <div class="liquidity-grid">
-                <div class="liquidity-item"><div class="liquidity-label">PD High</div><div class="liquidity-value">{pdc_h:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">PD Low</div><div class="liquidity-value">{pdc_l:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">Weekly High</div><div class="liquidity-value">{weekly_high:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">Weekly Low</div><div class="liquidity-value">{weekly_low:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">Order Block H</div><div class="liquidity-value">{order_block_high:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">Order Block L</div><div class="liquidity-value">{order_block_low:.2f}</div></div>
-            </div>
-        </div>
-        """
-        st.markdown(ohlcv_liquidity_html, unsafe_allow_html=True)
-    else:
-        st.info("Fetching live data...")
+    
 
     st.markdown('<div class="button-row">', unsafe_allow_html=True)
     bcol1, bcol2, bcol3 = st.columns(3)
@@ -7216,6 +7158,73 @@ elif st.session_state.page == "dashboard":
         st.button("🛡️ Protect Profit", type="secondary", use_container_width=True, key="protect_profit_btn", on_click=bot.protect_profit, disabled=(bot.state.get("active_trade") is None and not bot.state.get("active_trades")))
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # ------------------ OHLCV + LIQUIDITY ZONES BOX (MOVED HERE) ------------------
+    if bot.state.get("latest_data") is not None and not bot.state["latest_data"].empty:
+        df_ohlcv = bot.state["latest_data"].iloc[-1]
+        exch, token = bot.get_token_info(INDEX) # Ensure we have the exchange and token
+        
+        # Calculate liquidity zones
+        try:
+            # Get historical data for liquidity calculations
+            hist_data = bot.get_historical_data(exch, token, symbol=INDEX, interval="1d") if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval="1d")
+            if hist_data is not None and not hist_data.empty:
+                prev_day = hist_data.iloc[-2] if len(hist_data) >= 2 else None
+                prev_week = hist_data.iloc[-7] if len(hist_data) >= 7 else None
+                pdc_h = prev_day['high'] if prev_day is not None else df_ohlcv['high']
+                pdc_l = prev_day['low'] if prev_day is not None else df_ohlcv['low']
+                weekly_high = hist_data['high'].rolling(5).max().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['high']
+                weekly_low = hist_data['low'].rolling(5).min().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['low']
+                # Simple order block detection: recent swing high/low
+                swings = hist_data[['high', 'low']].tail(20)
+                order_block_high = swings['high'].max()
+                order_block_low = swings['low'].min()
+            else:
+                pdc_h = df_ohlcv['high']
+                pdc_l = df_ohlcv['low']
+                weekly_high = df_ohlcv['high']
+                weekly_low = df_ohlcv['low']
+                order_block_high = df_ohlcv['high']
+                order_block_low = df_ohlcv['low']
+        except:
+            pdc_h = df_ohlcv['high']
+            pdc_l = df_ohlcv['low']
+            weekly_high = df_ohlcv['high']
+            weekly_low = df_ohlcv['low']
+            order_block_high = df_ohlcv['high']
+            order_block_low = df_ohlcv['low']
+
+        ohlcv_liquidity_html = f"""
+        <style>
+        .ohlcv-header-grid {{
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+        }}
+        @media (max-width: 600px) {{
+            .ohlcv-header-grid {{ grid-template-columns: repeat(3, 1fr); }}
+            .liquidity-grid {{ grid-template-columns: repeat(2, 1fr) !important; }}
+        }}
+        </style>
+        <div class="ohlcv-liquidity-box">
+            <div class="ohlcv-header-grid">
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">OPEN</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['open']:.2f}</div></div>
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">HIGH</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['high']:.2f}</div></div>
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">LOW</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['low']:.2f}</div></div>
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">CLOSE</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['close']:.2f}</div></div>
+                <div style="text-align: center;"><div style="font-size: 0.7rem; color: #94a3b8;">VOLUME</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{int(df_ohlcv['volume']):,}</div></div>
+            </div>
+            <div class="liquidity-grid">
+                <div class="liquidity-item"><div class="liquidity-label">PD High</div><div class="liquidity-value">{pdc_h:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">PD Low</div><div class="liquidity-value">{pdc_l:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Weekly High</div><div class="liquidity-value">{weekly_high:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Weekly Low</div><div class="liquidity-value">{weekly_low:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Order Block H</div><div class="liquidity-value">{order_block_high:.2f}</div></div>
+                <div class="liquidity-item"><div class="liquidity-label">Order Block L</div><div class="liquidity-value">{order_block_low:.2f}</div></div>
+            </div>
+        </div>
+        """
+        st.markdown(ohlcv_liquidity_html, unsafe_allow_html=True)
+
     # ------------------ ANIMATED MARKET LEVELS BOX ------------------
     # Calculate Levels safely from current state data
     df_levels = bot.state.get("latest_data")
@@ -7335,7 +7344,7 @@ elif st.session_state.page == "dashboard":
     
     # 1. Map standard app symbols to TradingView's required format
     TV_SYMBOLS = {
-        "NIFTY": "NSEIX:NIFTY1!",
+        "NIFTY": "NSE:NIFTY",
         "BANKNIFTY": "NSE:BANKNIFTY",
         "SENSEX": "BSE:SENSEX",
         "FINNIFTY": "NSE:FINNIFTY",
@@ -7356,50 +7365,40 @@ elif st.session_state.page == "dashboard":
     if tv_target in TV_SYMBOLS:
         tv_target = TV_SYMBOLS[tv_target]
     elif "USD" in tv_target or "USDT" in tv_target:
-        # Format unknown crypto dynamically for Binance
         base = tv_target.replace('USDT', '').replace('USD', '')
         tv_target = f"BINANCE:{base}USDT"
     elif tv_target not in ["NIFTY", "BANKNIFTY", "SENSEX"] and ":" not in tv_target:
-        # Assume it's a standard Indian Equity (e.g., RELIANCE -> NSE:RELIANCE)
         clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
         tv_target = f"NSE:{clean_stock}"
 
-    # 3. URL-encode the symbol but safely KEEP the colon for TradingView
-    from urllib.parse import quote
-    tv_target_encoded = quote(tv_target, safe=':')
-
-    # 4. Build the Advanced TradingView Widget with Search & Login capabilities
+    # 3. Modern Asynchronous TradingView Widget (Streamlit Safe)
     tradingview_html = f"""
-    <div class="tradingview-widget-container" style="height:100%; width:100%;">
-      <div id="tv_chart_container" style="height:500px; width:100%;"></div>
-      <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      new TradingView.widget(
+    <div class="tradingview-widget-container" style="height:500px; width:100%;">
+      <div class="tradingview-widget-container__widget" style="height:100%; width:100%;"></div>
+      <script type="text/javascript" src="https://s.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
       {{
-        "autosize": true,
-        "symbol": "{tv_target}",
-        "interval": "5",
-        "timezone": "Asia/Kolkata",
-        "theme": "dark",
-        "style": "1",
-        "locale": "en",
-        "enable_publishing": false,
-        "backgroundColor": "rgba(15, 23, 42, 1)",
-        "gridColor": "rgba(255, 255, 255, 0.06)",
-        "allow_symbol_change": true,
-        "save_image": false,
-        "details": true,
-        "hotlist": true,
-        "hide_side_toolbar": false,
-        "show_popup_button": true,
-        "popup_width": "1000",
-        "popup_height": "650",
-        "container_id": "tv_chart_container"
+      "autosize": true,
+      "symbol": "{tv_target}",
+      "interval": "5",
+      "timezone": "Asia/Kolkata",
+      "theme": "dark",
+      "style": "1",
+      "locale": "en",
+      "enable_publishing": false,
+      "backgroundColor": "#0f172a",
+      "gridColor": "rgba(255, 255, 255, 0.06)",
+      "hide_top_toolbar": false,
+      "hide_legend": false,
+      "save_image": false,
+      "allow_symbol_change": true,
+      "calendar": false,
+      "support_host": "https://www.tradingview.com"
       }}
-      );
       </script>
     </div>
     """
+    
+    # 4. Render with slightly larger height to prevent scrollbars
     st.components.v1.html(tradingview_html, height=520)
     
     if st.button("🚀 One‑Tap BUY (Market)", use_container_width=True, on_click=lambda: play_sound_now("click")):
