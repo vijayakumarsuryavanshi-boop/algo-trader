@@ -5172,9 +5172,19 @@ class SniperBot:
                 p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX", "NCO"] else "INTRADAY"
                 order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
                 
-                # 🛡️ THE FIX: Round the price to the exact NSE Tick Size (0.05)
+                # 🛡️ THE FIX: Exact Tick Size Matching for MCX, NSE, and Currency
                 if order_type_final == "LIMIT" and price:
-                    exec_price = round(round(float(price) / 0.05) * 0.05, 2)
+                    if exchange == "MCX":
+                        if "CRUDEOIL" in symbol or "GOLD" in symbol or "SILVER" in symbol:
+                            exec_price = float(round(float(price)))  # Tick size 1
+                        elif "NATURALGAS" in symbol:
+                            exec_price = round(round(float(price) / 0.10) * 0.10, 1)  # Tick size 0.10
+                        else:
+                            exec_price = round(round(float(price) / 0.05) * 0.05, 2)
+                    elif exchange in ["CDS", "BCD", "NCO"]:
+                        exec_price = round(round(float(price) / 0.0025) * 0.0025, 4) # Currency tick size
+                    else:
+                        exec_price = round(round(float(price) / 0.05) * 0.05, 2) # Standard equity/index tick size
                 else:
                     exec_price = 0.0
                 
@@ -5722,34 +5732,59 @@ class SniperBot:
                                     else:
                                         qty = actual_qty
 
-                                    if index in COMMODITIES:
-                                        strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
-                                        if not strike_sym:
-                                            self.log(f"⚠️ No option strike found for {index}, falling back to futures")
-                                            strike_sym = index
-                                            strike_token, strike_exch = token, exch
-                                            entry_ltp = spot
-                                            
-                                    # 🚨 FIX: Force XAUUSD & Forex to trade as Spot/Futures directly, bypassing options chain
-                                    elif is_mt5_asset or index in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"] or exch == "FX":
+                                    # 1. Handle Crypto Assets (Including XAUUSD on CoinDCX)
+                                    if is_crypto:
                                         strike_sym = index
-                                        strike_token, strike_exch = token, exch
-                                        entry_ltp = spot
-                                        
-                                    # Handle Crypto Futures/Spot and other Equity Brokers
-                                    elif (is_crypto and crypto_mode != "Options") or is_fyers or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA", "ICICI"]:
-                                        strike_sym = index
-                                        if is_crypto and crypto_mode == "Futures":
+                                        if crypto_mode == "Futures":
                                             if exch == "DELTA" and not strike_sym.endswith("USD"):
                                                 strike_sym = f"{strike_sym}USD"
                                             strike_token, strike_exch = strike_sym, exch
                                             entry_ltp = spot
-                                        else:
-                                            if is_hz:
-                                                strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal, otm_gamma_blast=True, premium_threshold=10000)
-                                            else:
-                                                strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
+                                        elif crypto_mode == "Options":
+                                            strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
+                                            if not strike_sym:
+                                                self.log(f"⚠️ Crypto Option not found, using Futures.")
+                                                strike_sym = index
+                                                strike_token, strike_exch = token, exch
+                                                entry_ltp = spot
+                                        else: # Spot
+                                            strike_token, strike_exch = token, exch
+                                            entry_ltp = spot
 
+                                    # 2. Handle MCX Commodities (Strictly Options, No Futures Fallback)
+                                    elif index in COMMODITIES:
+                                        strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
+                                        if not strike_sym:
+                                            self.log(f"⚠️ No option strike found for {index}. Aborting trade to prevent Futures execution.")
+                                            continue # Skip this trade entirely to prevent unwanted futures execution
+
+                                    # 3. Handle MT5/Forex
+                                    elif is_mt5_asset or index in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"] or exch == "FX":
+                                        strike_sym = index
+                                        strike_token, strike_exch = token, exch
+                                        entry_ltp = spot
+
+                                    # 4. Handle standard Equity/Index Brokers
+                                    elif is_fyers or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA", "ICICI"]:
+                                        strike_sym = index
+                                        if is_hz:
+                                            strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal, otm_gamma_blast=True, premium_threshold=10000)
+                                        else:
+                                            strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
+                                        
+                                        # If options fail for equities, then fallback to Spot/Futures
+                                        if not strike_sym:
+                                            strike_sym = index
+                                            strike_token, strike_exch = token, exch
+                                            entry_ltp = spot
+                                            
+                                    # 5. Default ATM Strike for NIFTY/BANKNIFTY on Angel/Zerodha
+                                    else:
+                                        strike_sym, strike_token, strike_exch, entry_ltp = self.get_atm_strike(index, spot, signal)
+                                        if not strike_sym:
+                                            strike_sym = index
+                                            strike_token, strike_exch = token, exch
+                                            entry_ltp = spot
                                     if strike_sym and entry_ltp:
                                         if is_mock_mode:
                                             entry_ltp = self.apply_slippage(entry_ltp, signal)
