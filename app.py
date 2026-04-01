@@ -1759,7 +1759,7 @@ class CoinDCXBridge:
         try:
             pair = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
             if symbol == "XAUUSD":
-                pair = "GOLDUSDT"
+                pair = "XAUUSDT"
             res_map = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "4h": "240", "1d": "1D"}
             resolution = res_map.get(interval, "5")
             end = int(time.time())
