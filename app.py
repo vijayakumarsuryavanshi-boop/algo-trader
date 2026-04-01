@@ -5793,14 +5793,20 @@ class SniperBot:
                                         if is_mock_mode:
                                             entry_ltp = self.apply_slippage(entry_ltp, signal)
 
-                                        is_long = (signal == "BUY_CE")
-                                        if is_mt5_asset or (is_crypto and crypto_mode != "Options") or is_fyers or index in COMMODITIES or exch in ["UPSTOX", "5PAISA", "STOXKART", "DHAN", "SHOONYA", "ICICI"]:
-                                            trade_type = "BUY" if signal == "BUY_CE" else "SELL"
+                                        # 🛡️ THE FIX: Smart Option vs Spot/Futures Detection
+                                        is_long_signal = (signal == "BUY_CE")
+                                        is_actually_option = str(strike_sym).upper().endswith("CE") or str(strike_sym).upper().endswith("PE")
+                                        
+                                        if not is_actually_option:
+                                            # For XAUUSD, Crypto Spot, Futures, etc.
+                                            trade_type = "BUY" if is_long_signal else "SELL"
                                             is_long_position = (trade_type == "BUY")
+                                            calc_exec_side = "BUY" if is_long_signal else "SELL"
                                         else:
-                                            trade_type = "CE" if signal == "BUY_CE" else "PE"
-                                            is_long_position = True
-
+                                            # For exact NIFTY/BANKNIFTY Options
+                                            trade_type = "CE" if is_long_signal else "PE"
+                                            is_long_position = True  # We are BUYING the option premium
+                                            calc_exec_side = "BUY"   # Entry for options is always BUY
                                         # SYMMETRICAL SL/TP FOR CE AND PE
                                         if three_five_seven and current_atr > 0:
                                             if is_long_position:
@@ -5843,7 +5849,8 @@ class SniperBot:
                                         reject_reason = None
                                         fill_price = entry_ltp
                                         if not is_mock_mode:
-                                            exec_side = "SELL" if not is_long else "BUY"
+                                            # 🛡️ THE FIX: Use the smartly calculated execution side
+                                            exec_side = calc_exec_side
                                             # Always use LIMIT order (SEBI 2026)
                                             order_type = "LIMIT"
                                             order_price = entry_ltp
@@ -7328,7 +7335,7 @@ elif st.session_state.page == "dashboard":
     
     # 1. Map standard app symbols to TradingView's required format
     TV_SYMBOLS = {
-        "NIFTY": "NSEIX:NIFTY1!",
+        "NIFTY": "NSE:NIFTY",
         "BANKNIFTY": "NSE:BANKNIFTY",
         "SENSEX": "BSE:SENSEX",
         "FINNIFTY": "NSE:FINNIFTY",
@@ -7355,22 +7362,23 @@ elif st.session_state.page == "dashboard":
         clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
         tv_target = f"NSE:{clean_stock}"
 
-    # 3. Robust HTML wrapper for Streamlit iframe
+    # 3. Crash-proof HTML wrapper
     tradingview_html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body, html {{ margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: #0f172a; }}
+            #tv_chart_container {{ width: 100%; height: 500px; }}
+        </style>
     </head>
-    <body style="margin:0; padding:0; background-color: rgba(15, 23, 42, 1); overflow: hidden;">
-        <div class="tradingview-widget-container" style="height:500px; width:100%;">
-          <div id="tv_chart_container" style="height:100%; width:100%;"></div>
-          <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-          new TradingView.widget(
-          {{
-            "width": "100%",
-            "height": 500,
+    <body>
+        <div id="tv_chart_container"></div>
+        <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+          new TradingView.widget({{
+            "autosize": true,
             "symbol": "{tv_target}",
             "interval": "5",
             "timezone": "Asia/Kolkata",
@@ -7378,7 +7386,7 @@ elif st.session_state.page == "dashboard":
             "style": "1",
             "locale": "en",
             "enable_publishing": false,
-            "backgroundColor": "rgba(15, 23, 42, 1)",
+            "backgroundColor": "#0f172a",
             "gridColor": "rgba(255, 255, 255, 0.06)",
             "allow_symbol_change": true,
             "save_image": false,
@@ -7389,20 +7397,16 @@ elif st.session_state.page == "dashboard":
             "popup_width": "1000",
             "popup_height": "650",
             "container_id": "tv_chart_container"
-          }}
-          );
-          </script>
-        </div>
+          }});
+        </script>
     </body>
     </html>
     """
     
-    # 4. Render with exact height to prevent clipping
     st.components.v1.html(tradingview_html, height=500)
     
     if st.button("🚀 One‑Tap BUY (Market)", use_container_width=True, on_click=lambda: play_sound_now("click")):
         st.warning("Demo: Order would be placed at market price")
-
     # ---> REPLACE THE OLD TAB LOGIC WITH THIS BUTTON <---
     st.markdown("---")
     if st.button("🛠️ Open Advanced Tools (Scanners, Backtest, Logs, etc.)", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
