@@ -8293,9 +8293,12 @@ if st.session_state.page in ["dashboard", "tools"]:
 # ==========================================
 # BACKGROUND QUEUES & AUDIO
 # ==========================================
-if getattr(bot, "state", None):
-    while bot.state.get("ui_popups"):
-        popup = bot.state["ui_popups"].popleft()
+# Safely fetch the bot from session state for global execution
+active_bot = st.session_state.get("bot")
+
+if active_bot and getattr(active_bot, "state", None):
+    while active_bot.state.get("ui_popups"):
+        popup = active_bot.state["ui_popups"].popleft()
         title = popup['title']
         msg = popup['message']
         st.toast(f"{title}: {msg}", icon="🔔")
@@ -8319,16 +8322,14 @@ if getattr(bot, "state", None):
         """
         st.components.v1.html(js_notification, height=0)
         
-    while bot.state.get("sound_queue"):
-        sound = bot.state["sound_queue"].popleft()
+    while active_bot.state.get("sound_queue"):
+        sound = active_bot.state["sound_queue"].popleft()
         play_sound_ui(sound)
 
-# PROCESS SOUND QUEUES – PLAY ALL SOUNDS
-while st.session_state.sound_queue:
-    latest_sound = st.session_state.sound_queue.popleft()
-    play_sound_ui(latest_sound)
-
-if getattr(st.session_state, "bot", None) and st.session_state.bot.state.get("sound_queue"):
-    while st.session_state.bot.state["sound_queue"]:
-        latest_sound = st.session_state.bot.state["sound_queue"].popleft()
+# ==========================================
+# PROCESS GLOBAL SOUND QUEUES
+# ==========================================
+if st.session_state.get("sound_queue"):
+    while st.session_state.sound_queue:
+        latest_sound = st.session_state.sound_queue.popleft()
         play_sound_ui(latest_sound)
