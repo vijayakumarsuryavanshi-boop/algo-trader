@@ -8244,17 +8244,77 @@ if st.session_state.page in ["dashboard", "tools"]:
             color: #0284c7 !important;
             transform: translateY(-2px);
         }
+        st.markdown("""
+        <style>
+        #operable-dock-anchor { display: none; }
+        
+        /* THE DOCK CONTAINER */
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
+            position: fixed;
+            bottom: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(10px);
+            border-radius: 50px;
+            padding: 5px 10px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            z-index: 999999;
+            width: 90% !important; /* Forces width on mobile */
+            max-width: 320px;
+            display: flex !important;
+            flex-direction: row !important; /* Prevents stacking */
+            justify-content: center !important;
+            align-items: center !important;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        /* FORCE COLUMNS TO STAY SIDE-BY-SIDE */
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) > div {
+            flex-direction: row !important;
+            display: flex !important;
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+        }
+
+        /* BUTTON STYLING - Circular and Small */
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
+            width: 100% !important;
+            height: 45px !important;
+            padding: 0 !important;
+            border-radius: 40px !important;
+            font-size: 14px !important;
+            border: none !important;
+            background: transparent !important;
+            color: white !important;
+            transition: all 0.2s;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button:hover {
+            background: rgba(255,255,255,0.1) !important;
+            transform: scale(1.1);
+        }
+
+        /* Small text labels under icons for clarity if needed */
+        .dock-label {
+            font-size: 10px;
+            display: block;
+            margin-top: -5px;
+        }
         </style>
         """, unsafe_allow_html=True)
 
-        # 4 columns: 3 for buttons, 1 tiny one for the CSS anchor
-        dock_col1, dock_col2, dock_col3, anchor_col = st.columns([1, 1, 1, 0.01])
+        # We use 3 equal columns. The CSS anchor is now moved inside the container 
+        # to ensure the whole block is targeted for the floating horizontal dock.
+        dock_col1, dock_col2, dock_col3 = st.columns()
         
-        with anchor_col:
-            st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
+        # We place the anchor here so the CSSTargets this specific horizontal block
+        st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
 
         with dock_col1:
-            if st.button("▶️ Start", key="dock_start_btn", disabled=bot.state.get("is_running", False)):
+            is_running = bot.state.get("is_running", False)
+            # Using small text + icon for a 'compact app' feel
+            if st.button("▶️\nStart", key="mob_start", disabled=is_running, use_container_width=True):
                 bot.state["is_running"] = True
                 bot.state["engine_active"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
@@ -8265,13 +8325,14 @@ if st.session_state.page in ["dashboard", "tools"]:
                 st.rerun()
                 
         with dock_col2:
-            if st.button("🔄 Sync", key="dock_sync_btn"):
+            if st.button("🔄\nSync", key="mob_sync", use_container_width=True):
                 play_sound_now("click")
                 st.rerun()
                 
         with dock_col3:
+            # Logic to check if there is anything to exit
             can_exit = bot.state.get("active_trade") is not None or len(bot.state.get("active_trades", [])) > 0
-            if st.button("☠️ Exit", key="dock_exit_btn", disabled=not can_exit):
+            if st.button("☠️\nExit", key="mob_exit", disabled=not can_exit, use_container_width=True):
                 bot.force_exit()
                 play_sound_now("click")
                 st.rerun()
