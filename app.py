@@ -4584,8 +4584,18 @@ class SniperBot:
         return self.token_map
 
     def get_token_info(self, index_name):
+        broker = self.settings.get("primary_broker", "")
+
+        # 1. Crypto Brokers (Highest Priority for XAUUSD and Crypto)
+        if broker == "CoinDCX":
+            return "COINDCX", index_name
+        if broker == "Delta Exchange":
+            return "DELTA", index_name
+        if broker == "Binance":
+            return "BINANCE", index_name
+
+        # 2. MCX Commodities (Dynamic Token Fetch)
         if index_name in COMMODITIES:
-            # 🚨 FIX: Dynamically fetch the current active MCX Futures contract token!
             if self.api:
                 df = self.get_master()
                 if df is not None and not df.empty:
@@ -4597,22 +4607,24 @@ class SniperBot:
                         return "MCX", str(closest['token'])
             return "MCX", "21181" # Fallback if master fails
             
-        # 🚨 FIX: Ensure Forex pairs are routed correctly even without MT5
+        # 3. Forex & Global Spot (MT5 Fallback if NOT using Crypto Broker)
         if index_name in ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"]:
             return "MT5" if self.is_mt5_connected else "FX", index_name
             
-        if self.settings.get("primary_broker") == "CoinDCX":
-            return "COINDCX", index_name
-        if self.settings.get("primary_broker") == "Stoxkart":
+        # 4. Other Equity Brokers
+        if broker == "Stoxkart":
             return "STOXKART", index_name
-        if self.settings.get("primary_broker") == "Shoonya":
+        if broker == "Shoonya":
             return "SHOONYA", index_name
-        if self.settings.get("primary_broker") == "Dhan":
+        if broker == "Dhan":
             return "DHAN", index_name
-        if self.settings.get("primary_broker") == "ICICI Direct":
+        if broker == "ICICI Direct":
             return "ICICI", index_name
+
+        # 5. Default Angel/Zerodha Index Tokens
         if index_name in INDEX_TOKENS:
             return INDEX_TOKENS[index_name]
+
         return "NSE", "12345"
 
     def get_live_price(self, exchange, symbol, token):
