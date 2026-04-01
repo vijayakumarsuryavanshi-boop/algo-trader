@@ -7324,7 +7324,7 @@ elif st.session_state.page == "dashboard":
     
     # 1. Map standard app symbols to TradingView's required format
     TV_SYMBOLS = {
-        "NIFTY": "NSE:NIFTY",
+        "NIFTY": "NSEIX:NIFTY1!",
         "BANKNIFTY": "NSE:BANKNIFTY",
         "SENSEX": "BSE:SENSEX",
         "FINNIFTY": "NSE:FINNIFTY",
@@ -7353,14 +7353,14 @@ elif st.session_state.page == "dashboard":
         clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
         tv_target = f"NSE:{clean_stock}"
 
-    # 3. URL-encode the symbol to handle special characters
+    # 3. URL-encode the symbol but safely KEEP the colon for TradingView
     from urllib.parse import quote
-    tv_target_encoded = quote(tv_target)
+    tv_target_encoded = quote(tv_target, safe=':')
 
-   # 4. Build the Advanced TradingView Widget with Search & Login capabilities
+    # 4. Build the Advanced TradingView Widget with Search & Login capabilities
     tradingview_html = f"""
     <div class="tradingview-widget-container" style="height:100%; width:100%;">
-      <div id="tradingview_{tv_target_encoded}" style="height:500px; width:100%;"></div>
+      <div id="tv_chart_container" style="height:500px; width:100%;"></div>
       <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
       <script type="text/javascript">
       new TradingView.widget(
@@ -7375,10 +7375,15 @@ elif st.session_state.page == "dashboard":
         "enable_publishing": false,
         "backgroundColor": "rgba(15, 23, 42, 1)",
         "gridColor": "rgba(255, 255, 255, 0.06)",
-        "allow_symbol_change": true,     "save_image": false,
-        "details": true,                 "hotlist": true,                 "hide_side_toolbar": false,      "show_popup_button": true,       "popup_width": "1000",
+        "allow_symbol_change": true,
+        "save_image": false,
+        "details": true,
+        "hotlist": true,
+        "hide_side_toolbar": false,
+        "show_popup_button": true,
+        "popup_width": "1000",
         "popup_height": "650",
-        "container_id": "tradingview_{tv_target_encoded}"
+        "container_id": "tv_chart_container"
       }}
       );
       </script>
