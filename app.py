@@ -7124,61 +7124,7 @@ elif st.session_state.page == "dashboard":
     if not is_mkt_open:
         st.error(f"🛑 {mkt_status_msg} - Engine will standby until market opens.")
         
-    # OHLCV + LIQUIDITY ZONES BOX
-    if bot.state.get("latest_data") is not None and not bot.state["latest_data"].empty:
-        df_ohlcv = bot.state["latest_data"].iloc[-1]
-        # Calculate liquidity zones
-        try:
-            # Get historical data for liquidity calculations
-            hist_data = bot.get_historical_data(exch, token, symbol=INDEX, interval="1d") if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval="1d")
-            if hist_data is not None and not hist_data.empty:
-                prev_day = hist_data.iloc[-2] if len(hist_data) >= 2 else None
-                prev_week = hist_data.iloc[-7] if len(hist_data) >= 7 else None
-                pdc_h = prev_day['high'] if prev_day is not None else df_ohlcv['high']
-                pdc_l = prev_day['low'] if prev_day is not None else df_ohlcv['low']
-                weekly_high = hist_data['high'].rolling(5).max().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['high']
-                weekly_low = hist_data['low'].rolling(5).min().iloc[-1] if len(hist_data) >= 5 else df_ohlcv['low']
-                # Simple order block detection: recent swing high/low
-                swings = hist_data[['high', 'low']].tail(20)
-                order_block_high = swings['high'].max()
-                order_block_low = swings['low'].min()
-            else:
-                pdc_h = df_ohlcv['high']
-                pdc_l = df_ohlcv['low']
-                weekly_high = df_ohlcv['high']
-                weekly_low = df_ohlcv['low']
-                order_block_high = df_ohlcv['high']
-                order_block_low = df_ohlcv['low']
-        except:
-            pdc_h = df_ohlcv['high']
-            pdc_l = df_ohlcv['low']
-            weekly_high = df_ohlcv['high']
-            weekly_low = df_ohlcv['low']
-            order_block_high = df_ohlcv['high']
-            order_block_low = df_ohlcv['low']
-
-        ohlcv_liquidity_html = f"""
-        <div class="ohlcv-liquidity-box">
-            <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">OPEN</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['open']:.2f}</div></div>
-                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">HIGH</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['high']:.2f}</div></div>
-                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">LOW</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['low']:.2f}</div></div>
-                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">CLOSE</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{df_ohlcv['close']:.2f}</div></div>
-                <div style="text-align: center; flex: 1; min-width: 70px;"><div style="font-size: 0.7rem; color: #94a3b8;">VOLUME</div><div style="font-size: 1.1rem; font-weight: bold; color: #facc15;">{int(df_ohlcv['volume']):,}</div></div>
-            </div>
-            <div class="liquidity-grid">
-                <div class="liquidity-item"><div class="liquidity-label">PD High</div><div class="liquidity-value">{pdc_h:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">PD Low</div><div class="liquidity-value">{pdc_l:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">Weekly High</div><div class="liquidity-value">{weekly_high:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">Weekly Low</div><div class="liquidity-value">{weekly_low:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">Order Block H</div><div class="liquidity-value">{order_block_high:.2f}</div></div>
-                <div class="liquidity-item"><div class="liquidity-label">Order Block L</div><div class="liquidity-value">{order_block_low:.2f}</div></div>
-            </div>
-        </div>
-        """
-        st.markdown(ohlcv_liquidity_html, unsafe_allow_html=True)
-    else:
-        st.info("Fetching live data...")
+    
      
 
     # Top button row (Start, Stop, Refresh only – Exit moved below)
