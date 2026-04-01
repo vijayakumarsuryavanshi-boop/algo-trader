@@ -4652,7 +4652,7 @@ class SniperBot:
         if self.api:
             try:
                 mapped_exchange = exchange
-                 if exchange == "NCO":
+                if exchange == "NCO":
                     mapped_exchange = "MCX"
                 res = self.api.ltpData(mapped_exchange, INDEX_SYMBOLS.get(symbol, symbol), str(token))
                 if res and res.get('status'):
