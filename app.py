@@ -7359,7 +7359,7 @@ elif st.session_state.page == "dashboard":
     
     # 1. Map standard app symbols to TradingView's required format
     TV_SYMBOLS = {
-        "Nifty 50 Index": "NSE:NIFTY",
+        "GIFT NIFTY 50 INDEX FUTURES": "NSEIX:NIFTY1!",
         "BANKNIFTY": "NSE:BANKNIFTY",
         "SENSEX": "BSE:SENSEX",
         "FINNIFTY": "NSE:FINNIFTY",
