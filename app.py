@@ -7380,52 +7380,23 @@ elif st.session_state.page == "dashboard":
     if tv_target in TV_SYMBOLS:
         tv_target = TV_SYMBOLS[tv_target]
     elif "USD" in tv_target or "USDT" in tv_target:
+        # Format unknown crypto dynamically for Binance
         base = tv_target.replace('USDT', '').replace('USD', '')
         tv_target = f"BINANCE:{base}USDT"
     elif tv_target not in ["NIFTY", "BANKNIFTY", "SENSEX"] and ":" not in tv_target:
+        # Assume it's a standard Indian Equity (e.g., RELIANCE -> NSE:RELIANCE)
         clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
         tv_target = f"NSE:{clean_stock}"
 
-    # 3. Streamlit-Safe HTML (Explicit Dimensions instead of Autosize)
+    # 3. Inject the correct symbol into the iframe
     tradingview_html = f"""
-    <div class="tradingview-widget-container" style="height: 500px; width: 100%;">
-      <div id="tv_chart_container" style="height: 500px; width: 100%;"></div>
-      <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      if (typeof TradingView !== 'undefined') {{
-          new TradingView.widget({{
-            "width": "100%",
-            "height": 500,
-            "symbol": "{tv_target}",
-            "interval": "5",
-            "timezone": "Asia/Kolkata",
-            "theme": "dark",
-            "style": "1",
-            "locale": "en",
-            "enable_publishing": false,
-            "backgroundColor": "#0f172a",
-            "gridColor": "rgba(255, 255, 255, 0.06)",
-            "allow_symbol_change": true,
-            "save_image": false,
-            "details": true,
-            "hotlist": true,
-            "hide_side_toolbar": false,
-            "show_popup_button": true,
-            "popup_width": "1000",
-            "popup_height": "650",
-            "container_id": "tv_chart_container"
-          }});
-      }}
-      </script>
-    </div>
+    <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tv_chart&symbol={tv_target}&interval=5&theme=dark&timezone=Asia/Kolkata"
+        style="width:100%; height:500px; border:none; border-radius:12px;"></iframe>
     """
-    
-    # 4. Render with exact matching height
     st.components.v1.html(tradingview_html, height=520)
     
     if st.button("🚀 One‑Tap BUY (Market)", use_container_width=True, on_click=lambda: play_sound_now("click")):
         st.warning("Demo: Order would be placed at market price")
-
     # ---> REPLACE THE OLD TAB LOGIC WITH THIS BUTTON <---
     st.markdown("---")
     if st.button("🛠️ Open Advanced Tools (Scanners, Backtest, Logs, etc.)", type="primary", use_container_width=True, on_click=lambda: play_sound_now("click")):
