@@ -7371,35 +7371,54 @@ elif st.session_state.page == "dashboard":
         clean_stock = tv_target.replace(".NS", "").replace(".BO", "")
         tv_target = f"NSE:{clean_stock}"
 
-    # 3. Modern Asynchronous TradingView Widget (Streamlit Safe)
+    # 3. Flawless HTML wrapper for Streamlit (Forces 100% height)
     tradingview_html = f"""
-    <div class="tradingview-widget-container" style="height:500px; width:100%;">
-      <div class="tradingview-widget-container__widget" style="height:100%; width:100%;"></div>
-      <script type="text/javascript" src="https://s.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
-      {{
-      "autosize": true,
-      "symbol": "{tv_target}",
-      "interval": "5",
-      "timezone": "Asia/Kolkata",
-      "theme": "dark",
-      "style": "1",
-      "locale": "en",
-      "enable_publishing": false,
-      "backgroundColor": "#0f172a",
-      "gridColor": "rgba(255, 255, 255, 0.06)",
-      "hide_top_toolbar": false,
-      "hide_legend": false,
-      "save_image": false,
-      "allow_symbol_change": true,
-      "calendar": false,
-      "support_host": "https://www.tradingview.com"
-      }}
-      </script>
-    </div>
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <style>
+        body, html {{
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0f172a;
+        }}
+        #tv_container {{
+            width: 100vw;
+            height: 100vh;
+        }}
+    </style>
+    </head>
+    <body>
+        <div id="tv_container"></div>
+        <script type="text/javascript" src="https://s.tradingview.com/tv.js"></script>
+        <script type="text/javascript">
+            new TradingView.widget({{
+                "autosize": true,
+                "symbol": "{tv_target}",
+                "interval": "5",
+                "timezone": "Asia/Kolkata",
+                "theme": "dark",
+                "style": "1",
+                "locale": "en",
+                "enable_publishing": false,
+                "backgroundColor": "#0f172a",
+                "gridColor": "rgba(255, 255, 255, 0.06)",
+                "allow_symbol_change": true,
+                "save_image": false,
+                "details": true,
+                "hotlist": true,
+                "container_id": "tv_container"
+            }});
+        </script>
+    </body>
+    </html>
     """
     
-    # 4. Render with slightly larger height to prevent scrollbars
-    st.components.v1.html(tradingview_html, height=520)
+    # 4. Render with explicit Streamlit height
+    st.components.v1.html(tradingview_html, height=550)
     
     if st.button("🚀 One‑Tap BUY (Market)", use_container_width=True, on_click=lambda: play_sound_now("click")):
         st.warning("Demo: Order would be placed at market price")
