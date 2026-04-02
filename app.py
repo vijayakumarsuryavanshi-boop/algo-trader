@@ -4911,7 +4911,11 @@ class SniperBot:
                 
         # Ultimate Mock Data Fallback so the app never crashes
         periods = 500 if interval == "1m" else 200
-        times = pd.date_range(end=get_ist(), periods=periods, freq=interval)
+        
+        # FIX: Convert yfinance 'm' to Pandas 'min' to prevent frequency crash
+        pd_freq = interval.replace('m', 'min').replace('h', 'h').replace('d', 'D')
+        
+        times = pd.date_range(end=get_ist(), periods=periods, freq=pd_freq)
         trend = np.linspace(0, 1, periods) * 200
         noise = np.random.normal(0, 10, periods).cumsum()
         close_prices = 22000 + trend + noise
@@ -4925,7 +4929,6 @@ class SniperBot:
         })
         df.index = df['timestamp']
         return df
-
     def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
         if not is_hero_zero or df is None or len(df) < 20:
             return True, ""
