@@ -4721,98 +4721,102 @@ class SniperBot:
         return "NSE", "12345"
         
     def get_live_price(self, exchange, symbol, token):
-        # Use WebSocket if available for Angel One
+        # 1. Angel One WebSocket
         if exchange in ["NSE", "NFO", "BSE", "BFO", "MCX"] and self.ws_angel_connected and token in self.live_prices_angel:
             return self.live_prices_angel[token]
 
+        # 2. Paper Trading Generator (prevents getting stuck on Nifty)
         if self.is_mock and token == "12345":
             if "CE" in symbol or "PE" in symbol:
                 if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
                     base_price = self.state["active_trade"]["entry"]
-                    change = np.random.normal(0, base_price * 0.005)
-                    return base_price + change
+                    return base_price + np.random.normal(0, base_price * 0.005)
                 return np.random.uniform(150, 300)
             else:
-                if self.state.get('mock_price') is None:
-                    base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2350.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
-                    base = base_prices.get(symbol, 500)
-                    self.state['mock_price'] = float(base)
-                change = np.random.normal(0, self.state['mock_price'] * 0.0005)
-                self.state['mock_price'] += change
-                return float(self.state['mock_price'])
+                if 'mock_prices' not in self.state:
+                    self.state['mock_prices'] = {}
+                if symbol not in self.state['mock_prices']:
+                    base = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, "XAUUSD": 2350.0, "GOLD": 62000.0, "BTCUSD": 65000.0}
+                    self.state['mock_prices'][symbol] = float(base.get(symbol, 500))
+                self.state['mock_prices'][symbol] += np.random.normal(0, self.state['mock_prices'][symbol] * 0.0005)
+                return float(self.state['mock_prices'][symbol])
 
         price = None
         try:
+            # 3. MT5 / Forex
             if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
                 price = self.mt5_bridge.get_live_price(symbol)
-            # FIX: Removed `and self.coindcx_api` so it fetches public prices instantly
+                
+            # 4. CoinDCX (Crypto only, NO GOLD)
             elif exchange == "COINDCX": 
-                try:
-                    if symbol == "XAUUSD" or symbol == "GOLD":
-                        market_symbol = "XAUUSDT"
-                    else:
+                if symbol not in ["XAUUSD", "GOLD"]: # Skip CoinDCX if it's Gold
+                    try:
                         market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-                        
-                    res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
-                    for coin in res:
-                        mkt = coin.get('market', '')
-                        if mkt == market_symbol or mkt.upper() == market_symbol.upper() or mkt.replace('_', '').upper() == market_symbol.upper():
-                            price = float(coin['last_price'])
-                            break
-                except:
-                    pass
+                        res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=3).json()
+                        for coin in res:
+                            if coin.get('market', '').upper() in [market_symbol.upper(), market_symbol.replace('_', '').upper()]:
+                                price = float(coin['last_price'])
+                                break
+                    except: pass
+            
             elif exchange == "DELTA" and self.delta_api:
                 try:
                     target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
                     res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={target}").json()
-                    if res.get('success'):
-                        price = float(res['result']['close'])
-                except:
-                    pass
+                    if res.get('success'): price = float(res['result']['close'])
+                except: pass
+            
             elif self.kite and self.settings.get("primary_broker") == "Zerodha":
                 try:
                     tsym = f"{exchange}:{symbol}"
                     res = self.kite.quote([tsym])
                     price = float(res[tsym]['last_price'])
-                except:
-                    pass
+                except: pass
+                
             elif self.api:
                 try:
                     trading_symbol = INDEX_SYMBOLS.get(symbol, symbol)
                     res = self.api.ltpData(exchange, trading_symbol, str(token))
-                    if res and res.get('status'):
-                        price = float(res['data']['ltp'])
-                except:
-                    pass
-            elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
-                price = self.fyers_bridge.get_live_price(symbol)
-            elif exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge:
-                price = self.upstox_bridge.get_live_price(symbol)
-            elif exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge:
-                price = self.fivepaisa_bridge.get_live_price(symbol)
-            elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
-                price = self.binance_bridge.get_live_price(symbol)
-            elif exchange == "ICICI" and self.is_icici_connected and self.icici_bridge:
-                price = self.icici_bridge.get_live_price(symbol)
-            elif exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge:
-                price = self.stoxkart_bridge.get_live_price(symbol)
-            elif exchange == "DHAN" and self.is_dhan_connected and self.dhan_bridge:
-                price = self.dhan_bridge.get_live_price(symbol)
-            elif exchange == "SHOONYA" and self.is_shoonya_connected and self.shoonya_bridge:
-                price = self.shoonya_bridge.get_live_price(symbol)
+                    if res and res.get('status'): price = float(res['data']['ltp'])
+                except: pass
+
+            elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge: price = self.fyers_bridge.get_live_price(symbol)
+            elif exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge: price = self.upstox_bridge.get_live_price(symbol)
+            elif exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge: price = self.fivepaisa_bridge.get_live_price(symbol)
+            elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge: price = self.binance_bridge.get_live_price(symbol)
+            elif exchange == "ICICI" and self.is_icici_connected and self.icici_bridge: price = self.icici_bridge.get_live_price(symbol)
+            elif exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge: price = self.stoxkart_bridge.get_live_price(symbol)
+            elif exchange == "DHAN" and self.is_dhan_connected and self.dhan_bridge: price = self.dhan_bridge.get_live_price(symbol)
+            elif exchange == "SHOONYA" and self.is_shoonya_connected and self.shoonya_bridge: price = self.shoonya_bridge.get_live_price(symbol)
         except Exception as e:
             self.log(f"⚠️ Error in get_live_price: {e}")
 
-        if price is None and symbol in YF_TICKERS:
+        # 5. THE FIX: YFINANCE CACHE (Stops the IP Ban Freeze)
+        if price is None and (symbol in YF_TICKERS or "USD" in symbol or "GOLD" in symbol):
+            now = time.time()
+            cache_key = f"yf_live_{symbol}"
+            
+            # If we checked yfinance in the last 3 seconds, return the cached price to avoid getting blocked!
+            if hasattr(self, '_yf_cache') and cache_key in self._yf_cache:
+                last_time, last_price = self._yf_cache[cache_key]
+                if now - last_time < 3:
+                    return last_price
+
             try:
-                yf_ticker = YF_TICKERS[symbol]
-                time.sleep(0.2)
+                yf_ticker = "XAUUSD=X" if symbol in ["XAUUSD", "GOLD"] else YF_TICKERS.get(symbol, symbol)
+                if "USD" in symbol and yf_ticker == symbol:
+                    yf_ticker = f"{symbol.replace('USDT', '').replace('USD', '')}-USD"
+                    
                 df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
                 if not df.empty:
                     price = float(df['Close'].iloc[-1])
-                    self.log(f"⚠️ Using yfinance fallback for {symbol} live price: {price}")
+                    
+                    # Save to cache
+                    if not hasattr(self, '_yf_cache'): self._yf_cache = {}
+                    self._yf_cache[cache_key] = (now, price)
             except:
                 pass
+                
         return price
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
