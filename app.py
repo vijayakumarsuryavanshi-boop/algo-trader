@@ -5174,54 +5174,37 @@ class SniperBot:
                 return order_id, None
             except Exception as e:
                 return None, f"Zerodha error: {str(e)}"
-        # --- 🛡️ FIXED ANGEL ONE: FORCED MARKET + UPDATED SEBI LOT SIZES ---
+        # --- 🛡️ FIXED ANGEL ONE: BULLETPROOF PAYLOAD + AUTO-RETRY ---
         if self.api:
             try:
                 # 1. Product Type Logic
-                if exchange in ["NFO", "BFO", "MCX"]:
-                    p_type = "CARRYFORWARD"
+                p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
+
+                # 2. Strict Tick Size Rounding (Allows LIMIT orders to work safely!)
+                if order_type.upper() == "LIMIT" and price and float(price) > 0:
+                    clean_num = round(round(float(price) / 0.05) * 0.05, 2)
+                    exec_price = "{:.2f}".format(clean_num) # Forces exactly 2 decimal places as a string
+                    order_type_final = "LIMIT"
                 else:
-                    p_type = "INTRADAY"
+                    exec_price = "0"
+                    order_type_final = "MARKET"
 
-                # 2. Force MARKET to bypass price rejections
-                order_type_final = "MARKET"
-                exec_price = "0"
-
-                # 3. 🚨 THE FIX: Updated SEBI/Exchange Revised Lot Sizes
+                # 3. Lot Size Snapper
                 LOT_SIZES = {
-                    "FINNIFTY": 65,
-                    "MIDCPNIFTY": 120,
-                    "BANKNIFTY": 30,
-                    "BANKEX": 30,
-                    "SENSEX": 20,
-                    "NIFTY": 65,        # 🚨 Updated to your parameters!
-                    "CRUDEOILM": 10,    # Crude Mini
-                    "CRUDEOIL": 100,    # Crude Main
-                    "NATURALGAS": 1250,
-                    "GOLD": 100, 
-                    "SILVER": 30
+                    "FINNIFTY": 65, "MIDCPNIFTY": 120, "BANKNIFTY": 30, "BANKEX": 30,
+                    "SENSEX": 20, "NIFTY": 65, "CRUDEOILM": 10, "CRUDEOIL": 100, 
+                    "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30
                 }
                 
-                # Detect which asset we are trading from the symbol string
-                # We sort by length so "FINNIFTY" is checked before "NIFTY"
-                base_asset = None
-                for asset in sorted(LOT_SIZES.keys(), key=len, reverse=True):
-                    if str(symbol).startswith(asset):
-                        base_asset = asset
-                        break
-                
+                base_asset = next((asset for asset in sorted(LOT_SIZES.keys(), key=len, reverse=True) if str(symbol).startswith(asset)), None)
                 lot_size = LOT_SIZES.get(base_asset, 1)
                 raw_qty = int(float(qty))
                 
-                # Snap to the nearest valid lot multiple (e.g., forces exact multiples of 65)
-                if lot_size > 1:
-                    valid_qty = max(lot_size, (raw_qty // lot_size) * lot_size)
-                else:
-                    valid_qty = raw_qty
-                    
+                # Snap to valid lot multiple
+                valid_qty = max(lot_size, (raw_qty // lot_size) * lot_size) if lot_size > 1 else raw_qty
                 qty_str = str(valid_qty)
 
-                # 4. THE BULLETPROOF PAYLOAD
+                # 4. THE 100% OFFICIAL PAYLOAD STRUCTURE
                 order_params = {
                     "variety": "NORMAL",
                     "tradingsymbol": str(symbol),
@@ -5229,18 +5212,25 @@ class SniperBot:
                     "transactiontype": str(side.upper()),
                     "exchange": str(exchange.upper()),
                     "ordertype": order_type_final,
-                    "producttype": str(p_type),
+                    "producttype": p_type,
                     "duration": "DAY",
-                    "price": exec_price,     
-                    "quantity": qty_str      # Now perfectly formatted and scaled
+                    "price": exec_price,
+                    "squareoff": "0",       # 🚨 ADDED BACK: Prevents the API from crashing to 'None'
+                    "stoploss": "0",        # 🚨 ADDED BACK: Prevents the API from crashing to 'None'
+                    "quantity": qty_str
                 }
 
-                self.log(f"📤 Sending Market Payload: {order_params}")
+                self.log(f"📤 Sending Angel Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
                 
-                # The API will sometimes return None if the payload isn't readable or network drops
+                # 5. 🚨 HANDLE SILENT "NONE" FAILURES INSTANTLY
                 if res is None:
-                    return None, "Angel returned None – No response from server"
+                    self.log("🚨 Angel API returned None (Silent Drop/Network Error). Forcing Re-Login...")
+                    if self.login():
+                        self.log("🔄 Re-login successful. Retrying order...")
+                        res = self.api.placeOrder(order_params)
+                        if res is None:
+                            return None, "Angel returned None twice. The Exchange server is dropping requests."
 
                 if isinstance(res, dict) and res.get('status'):
                     return res.get('data', {}).get('orderid'), None
@@ -5251,7 +5241,11 @@ class SniperBot:
                     if "session expired" in raw_error.lower() or "invalid token" in raw_error.lower():
                         self.log("🔑 Session Expired. Re-logging...")
                         if self.login():
-                            return self.place_real_order(symbol, token, qty, side, exchange, order_type, price)
+                            # One final retry after token refresh
+                            res_retry = self.api.placeOrder(order_params)
+                            if isinstance(res_retry, dict) and res_retry.get('status'):
+                                return res_retry.get('data', {}).get('orderid'), None
+                            return None, f"Rejected after retry: {res_retry}"
                     return None, f"Rejected: {raw_error}"
 
             except Exception as e:
