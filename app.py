@@ -4745,9 +4745,10 @@ class SniperBot:
         try:
             if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
                 price = self.mt5_bridge.get_live_price(symbol)
-            elif exchange == "COINDCX" and self.coindcx_api:
+            # FIX: Removed `and self.coindcx_api` so it fetches public prices instantly
+            elif exchange == "COINDCX": 
                 try:
-                    if symbol == "XAUUSD":
+                    if symbol == "XAUUSD" or symbol == "GOLD":
                         market_symbol = "XAUUSDT"
                     else:
                         market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
@@ -4911,14 +4912,24 @@ class SniperBot:
         pd_freq = interval.replace('m', 'min').replace('h', 'h').replace('d', 'D')
         
         times = pd.date_range(end=get_ist(), periods=periods, freq=pd_freq)
-        trend = np.linspace(0, 1, periods) * 200
-        noise = np.random.normal(0, 10, periods).cumsum()
-        close_prices = 22000 + trend + noise
+        trend = np.linspace(0, 1, periods) * (200 if "USD" not in symbol else 10)
+        noise = np.random.normal(0, (10 if "USD" not in symbol else 2), periods).cumsum()
+        
+        # FIX: Use correct base price instead of hardcoding 22000!
+        base_prices = {
+            "NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, 
+            "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, 
+            "XAUUSD": 2350.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0
+        }
+        base_val = base_prices.get(symbol, 500.0)
+        
+        close_prices = base_val + trend + noise
+        
         df = pd.DataFrame({
             'timestamp': times,
-            'open': close_prices - 2,
-            'high': close_prices + 5,
-            'low': close_prices - 5,
+            'open': close_prices - (2 if base_val > 1000 else 0.5),
+            'high': close_prices + (5 if base_val > 1000 else 1.0),
+            'low': close_prices - (5 if base_val > 1000 else 1.0),
             'close': close_prices,
             'volume': np.random.randint(1000, 50000, periods)
         })
@@ -6849,8 +6860,15 @@ elif st.session_state.page == "dashboard":
             with st.spinner(f"Fetching Live Market Data for {INDEX}..."):
                 exch, token = bot.get_token_info(INDEX)
                 df_preload = bot.get_historical_data(exch, token, symbol=INDEX, interval=TIMEFRAME) if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval=TIMEFRAME)
-                if df_preload is not None and not df_preload.empty:
+                
+                # FIX: Prioritize real live spot price over chart close price!
+                live_spot = bot.get_live_price(exch, INDEX, token)
+                if live_spot:
+                    bot.state["spot"] = live_spot
+                elif df_preload is not None and not df_preload.empty:
                     bot.state["spot"] = df_preload['close'].iloc[-1]
+                    
+                if df_preload is not None and not df_preload.empty:
                     bot.state["latest_candle"] = df_preload.iloc[-1].to_dict()
                     if STRATEGY == "Keyword Rule Builder":
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_keyword_strategy(df_preload, CUSTOM_CODE, INDEX)
