@@ -1328,7 +1328,7 @@ LOT_SIZES = {
 YF_TICKERS = {
     "NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "FINNIFTY": "^FINNIFTY",
     "CRUDEOIL": "CL=F", 
-    "NATURALGAS": "NG=F", "GOLD": "GC=F", "SILVER": "SI=F", "XAUUSD": "GC=F", "EURUSD": "EURUSD=X", 
+    "NATURALGAS": "NG=F", "GOLD": "GC=F", "SILVER": "SI=F", "XAUUSD": "XAUUSD=X", "EURUSD": "EURUSD=X", 
     "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD", "SOLUSD": "SOL-USD",
     "XRPUSD": "XRP-USD", "ADAUSD": "ADA-USD", "DOGEUSD": "DOGE-USD", "BNBUSD": "BNB-USD",
     "LTCUSD": "LTC-USD", "DOTUSD": "DOT-USD", "MATICUSD": "MATIC-USD", "SHIBUSD": "SHIB-USD",
@@ -1885,14 +1885,34 @@ class MT5WebBridge:
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                if not mt5.symbol_info(symbol):
-                    alt_symbol = symbol + "m" if symbol in ["XAUUSD", "BTCUSD", "ETHUSD"] else symbol
-                    if mt5.symbol_info(alt_symbol):
-                        symbol = alt_symbol
-                tick = mt5.symbol_info_tick(symbol)
-                if tick: return float((tick.bid + tick.ask) / 2)
+                original_symbol = symbol
+                sym_info = mt5.symbol_info(symbol)
+                
+                # 1. Check suffixes if exact match not found
+                if not sym_info:
+                    for suffix in ["m", "micro", "c", ".r", "._a"]:
+                        if mt5.symbol_info(symbol + suffix):
+                            symbol = symbol + suffix
+                            sym_info = mt5.symbol_info(symbol)
+                            break
+                            
+                # 2. Check if broker uses 'GOLD' instead of 'XAUUSD'
+                if not sym_info and "XAUUSD" in original_symbol:
+                    for alt in ["GOLD", "GOLDm", "GOLDmicro", "GOLDc", "GOLD.r"]:
+                        if mt5.symbol_info(alt):
+                            symbol = alt
+                            sym_info = mt5.symbol_info(symbol)
+                            break
+
+                if sym_info:
+                    if not sym_info.visible:
+                        mt5.symbol_select(symbol, True)
+                    tick = mt5.symbol_info_tick(symbol)
+                    if tick: return float((tick.bid + tick.ask) / 2)
             except Exception: pass
-        yf_map = {"XAUUSD":"GC=F","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD","ETHUSD":"ETH-USD","SOLUSD":"SOL-USD"}
+            
+        # Fallback to yfinance if MT5 fetch fails
+        yf_map = {"XAUUSD":"XAUUSD=X","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD","ETHUSD":"ETH-USD","SOLUSD":"SOL-USD"}
         try:
             df = yf.Ticker(yf_map.get(symbol, symbol)).history(period="1d", interval="1m")
             if not df.empty: return float(df["Close"].iloc[-1])
@@ -1905,9 +1925,10 @@ class MT5WebBridge:
             try:
                 import MetaTrader5 as mt5
                 
-                # BTCDana, XM, Exness often have suffixes like "m", "micro", "c", ".r"
                 original_symbol = symbol
                 sym_info = mt5.symbol_info(symbol)
+                
+                # 1. Check suffixes
                 if not sym_info:
                     for suffix in ["m", "micro", "c", ".r", "._a"]:
                         if mt5.symbol_info(symbol + suffix):
@@ -1915,10 +1936,17 @@ class MT5WebBridge:
                             sym_info = mt5.symbol_info(symbol)
                             break
                             
+                # 2. Check GOLD alias for XAUUSD
+                if not sym_info and "XAUUSD" in original_symbol:
+                    for alt in ["GOLD", "GOLDm", "GOLDmicro", "GOLDc", "GOLD.r"]:
+                        if mt5.symbol_info(alt):
+                            symbol = alt
+                            sym_info = mt5.symbol_info(symbol)
+                            break
+                            
                 if not sym_info:
                     return None, f"Symbol {original_symbol} not found in MT5 Market Watch."
                     
-                # IMPORTANT: MT5 requires symbol to be visible in Market Watch!
                 if not sym_info.visible:
                     mt5.symbol_select(symbol, True)
                     
@@ -1927,11 +1955,9 @@ class MT5WebBridge:
                     return None, f"Tick data for {symbol} not found. Market closed?"
                     
                 action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
-                
-                # FIX: Exact price, don't multiply by 1.005 for MT5 (causes invalid price errors)
                 price = tick.ask if action == mt5.ORDER_TYPE_BUY else tick.bid
                 
-                # FIX: Filling mode depends on the broker (XM/Exness usually reject IOC if not allowed)
+                # Dynamic filling mode
                 filling_type = mt5.ORDER_FILLING_IOC
                 if (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK):
                     filling_type = mt5.ORDER_FILLING_FOK
@@ -1957,8 +1983,7 @@ class MT5WebBridge:
                 if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                     return str(result.order), None
                     
-                # Return exact MT5 retcode for easier debugging
-                return None, f"MT5 retcode: {result.retcode if result else 'Request Failed'}, Price: {price}, Qty: {qty}"
+                return None, f"MT5 retcode: {result.retcode if result else 'Request Failed'}, Price: {price}"
             except Exception as e:
                 return None, str(e)
         return f"MT5_SIM_{int(time.time())}", None
@@ -4259,7 +4284,8 @@ class SniperBot:
             try:
                 acc = self.mt5_bridge.get_account_info()
                 if acc:
-                    balances["MT5"] = f"${acc.get('balance',0):,.2f}"
+                    live_eq = acc.get('equity', acc.get('balance', 0))
+                    balances["MT5"] = f"${live_eq:,.2f}"
             except: pass
         if self.fyers_bridge and self.is_fyers_connected:
             try:
@@ -4478,17 +4504,14 @@ class SniperBot:
         if self.mt5_acc and self.mt5_server:
             if self.connect_mt5():
                 if self.is_mt5_connected and self.mt5_bridge:
-                    acc_info = self.mt5_bridge.get_account_info()
-                    if acc_info:
-                        name = acc_info.get('name', acc_info.get('login', 'User'))
-                        if not self._primary_client_set:
-                            self.client_name = f"MT5 ({name})"
-                            self._primary_client_set = True
-                    else:
-                        if not self._primary_client_set:
-                            self.client_name = "MT5 User"
-                            self._primary_client_set = True
-                success = True
+            try:
+                acc_info = self.mt5_bridge.get_account_info()
+                if acc_info:
+                    # Use Equity for accurate live tracking (includes open PnL)
+                    live_eq = acc_info.get('equity', acc_info.get('balance', 0))
+                    balance_strs.append(f"MT5: $ {live_eq:,.2f}")
+            except:
+                pass
 
         if self.connect_coindcx():
             if self.is_coindcx_connected and self.coindcx_bridge:
@@ -7791,15 +7814,24 @@ elif st.session_state.page == "tools":
                 if bot.is_mock:
                     if bot.state.get("paper_history"):
                         df = pd.DataFrame(bot.state["paper_history"])
+                        
+                        # FIX: Sort by Date & Time (Newest First) and add Serial Numbers
+                        df = df.sort_values(by=['Date', 'Time'], ascending=[False, False]).reset_index(drop=True)
+                        df.insert(0, 'Sr. No.', range(1, len(df) + 1))
+                        
                         total_pnl = df['PnL'].sum()
                         wins = len(df[df['PnL'] > 0])
                         losses = len(df[df['PnL'] <= 0])
                         win_rate = (wins / len(df) * 100) if len(df) > 0 else 0
+                        
                         col1, col2, col3 = st.columns(3)
                         col1.metric("Total Trades", len(df))
                         col2.metric("Win Rate", f"{win_rate:.1f}%")
                         col3.metric("Total PnL", f"₹{total_pnl:.2f}")
-                        st.dataframe(df.iloc[::-1], use_container_width=True)
+                        
+                        # FIX: Display with hide_index=True to remove the default pandas index
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                        
                         if report_period == "Daily":
                             today = get_ist().strftime('%Y-%m-%d')
                             df_report = df[df['Date'] == today]
@@ -7808,6 +7840,7 @@ elif st.session_state.page == "tools":
                             df_report = df[df['Date'] >= week_ago]
                         else:
                             df_report = df
+                            
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                             df_report.to_excel(w, index=False)
@@ -7822,15 +7855,24 @@ elif st.session_state.page == "tools":
                             if res.data:
                                 df = pd.DataFrame(res.data).drop(columns=["id", "user_id"], errors="ignore")
                                 df['trade_date'] = pd.to_datetime(df['trade_date'])
+                                
+                                # FIX: Sort by Date & Time (Newest First) and add Serial Numbers
+                                df = df.sort_values(by=['trade_date', 'trade_time'], ascending=[False, False]).reset_index(drop=True)
+                                df.insert(0, 'Sr. No.', range(1, len(df) + 1))
+                                
                                 total_pnl = df['pnl'].sum()
                                 wins = len(df[df['pnl'] > 0])
                                 losses = len(df[df['pnl'] <= 0])
                                 win_rate = (wins / len(df) * 100) if len(df) > 0 else 0
+                                
                                 col1, col2, col3 = st.columns(3)
                                 col1.metric("Total Trades", len(df))
                                 col2.metric("Win Rate", f"{win_rate:.1f}%")
                                 col3.metric("Total PnL", f"₹{total_pnl:.2f}")
-                                st.dataframe(df.sort_values('trade_time', ascending=False), use_container_width=True)
+                                
+                                # FIX: Display with hide_index=True
+                                st.dataframe(df, use_container_width=True, hide_index=True)
+                                
                                 if report_period == "Daily":
                                     today = get_ist().date()
                                     df_report = df[df['trade_date'].dt.date == today]
@@ -7839,6 +7881,7 @@ elif st.session_state.page == "tools":
                                     df_report = df[df['trade_date'].dt.date >= week_ago]
                                 else:
                                     df_report = df
+                                    
                                 output = io.BytesIO()
                                 with pd.ExcelWriter(output, engine='xlsxwriter') as w:
                                     df_report.to_excel(w, index=False)
