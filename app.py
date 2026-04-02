@@ -4735,13 +4735,12 @@ class SniperBot:
         try:
             if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
                 price = self.mt5_bridge.get_live_price(symbol)
-            elif exchange == "COINDCX" and self.coindcx_api:
+            elif exchange == "COINDCX": 
                 try:
-                    if symbol == "XAUUSD":
+                    if symbol in ["XAUUSD", "GOLD"]:
                         market_symbol = "XAUUSDT"
                     else:
                         market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-                        
                     res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
                     for coin in res:
                         mkt = coin.get('market', '')
@@ -4773,35 +4772,104 @@ class SniperBot:
                         price = float(res['data']['ltp'])
                 except:
                     pass
-            elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
-                price = self.fyers_bridge.get_live_price(symbol)
-            elif exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge:
-                price = self.upstox_bridge.get_live_price(symbol)
-            elif exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge:
-                price = self.fivepaisa_bridge.get_live_price(symbol)
-            elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
-                price = self.binance_bridge.get_live_price(symbol)
-            elif exchange == "ICICI" and self.is_icici_connected and self.icici_bridge:
-                price = self.icici_bridge.get_live_price(symbol)
-            elif exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge:
-                price = self.stoxkart_bridge.get_live_price(symbol)
-            elif exchange == "DHAN" and self.is_dhan_connected and self.dhan_bridge:
-                price = self.dhan_bridge.get_live_price(symbol)
-            elif exchange == "SHOONYA" and self.is_shoonya_connected and self.shoonya_bridge:
-                price = self.shoonya_bridge.get_live_price(symbol)
+            elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge: price = self.fyers_bridge.get_live_price(symbol)
+            elif exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge: price = self.upstox_bridge.get_live_price(symbol)
+            elif exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge: price = self.fivepaisa_bridge.get_live_price(symbol)
+            elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge: price = self.binance_bridge.get_live_price(symbol)
+            elif exchange == "ICICI" and self.is_icici_connected and self.icici_bridge: price = self.icici_bridge.get_live_price(symbol)
+            elif exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge: price = self.stoxkart_bridge.get_live_price(symbol)
+            elif exchange == "DHAN" and self.is_dhan_connected and self.dhan_bridge: price = self.dhan_bridge.get_live_price(symbol)
+            elif exchange == "SHOONYA" and self.is_shoonya_connected and self.shoonya_bridge: price = self.shoonya_bridge.get_live_price(symbol)
         except Exception as e:
             self.log(f"⚠️ Error in get_live_price: {e}")
 
-        if price is None and symbol in YF_TICKERS:
+        # ==========================================
+        # TRADINGVIEW LIVE FEED (Primary Fallback)
+        # ==========================================
+        if price is None:
+            now = time.time()
+            cache_key = f"tv_live_{symbol}"
+            
+            # STRICT 2-SECOND CACHE: Prevents TradingView IP Bans!
+            if hasattr(self, '_tv_cache') and cache_key in self._tv_cache:
+                last_time, last_price = self._tv_cache[cache_key]
+                if now - last_time < 2.0:
+                    return last_price
+
+            if HAS_TVDATAFEED:
+                try:
+                    # Initialize TV Datafeed silently ONLY ONCE per session
+                    if not hasattr(self, 'tv_feed'):
+                        from tvDatafeed import TvDatafeed, Interval
+                        import logging
+                        logging.getLogger('tvDatafeed').setLevel(logging.ERROR) # Suppress spam
+                        self.tv_feed = TvDatafeed(auto_login=False)
+
+                    # Route the symbol to the exact TradingView Exchange
+                    tv_exch = "NSE"
+                    tv_sym = symbol
+                    
+                    if symbol in ["XAUUSD", "GOLD"]:
+                        tv_exch, tv_sym = "OANDA", "XAUUSD" # Global Spot Gold
+                    elif symbol in COMMODITIES:
+                        tv_exch = "MCX" # Indian MCX Futures
+                        base_comm = symbol.replace("M", "") if symbol.endswith("M") else symbol
+                        tv_sym = f"{base_comm}1!"
+                    elif "BTC" in symbol or "ETH" in symbol or "SOL" in symbol:
+                        tv_exch, tv_sym = "BINANCE", symbol.replace("USD", "USDT") if not symbol.endswith("USDT") else symbol
+
+                    # Fetch the absolute latest 1-minute close price
+                    df = self.tv_feed.get_hist(symbol=tv_sym, exchange=tv_exch, interval=Interval.in_1_minute, n_bars=1)
+                    
+                    if df is not None and not df.empty:
+                        price = float(df['close'].iloc[-1])
+                        
+                        # Save to cache to protect from rate limits
+                        if not hasattr(self, '_tv_cache'): self._tv_cache = {}
+                        self._tv_cache[cache_key] = (now, price)
+                        return price
+                except Exception as e:
+                    pass # Silently fail over to Yahoo Finance if TV goes down
+
+        # ==========================================
+        # YFINANCE EMERGENCY FALLBACK (If TradingView fails)
+        # ==========================================
+        if price is None and (symbol in YF_TICKERS or "USD" in symbol or "GOLD" in symbol):
+            now = time.time()
+            yf_cache_key = f"yf_live_{symbol}"
+            
+            if hasattr(self, '_yf_cache') and yf_cache_key in self._yf_cache:
+                last_time, last_price = self._yf_cache[yf_cache_key]
+                if now - last_time < 3.0:
+                    return last_price
+
             try:
-                yf_ticker = YF_TICKERS[symbol]
-                time.sleep(0.2)
+                yf_ticker = "XAUUSD=X" if symbol in ["XAUUSD", "GOLD"] else YF_TICKERS.get(symbol, symbol)
+                if "USD" in symbol and yf_ticker == symbol:
+                    yf_ticker = f"{symbol.replace('USDT', '').replace('USD', '')}-USD"
+                    
                 df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
                 if not df.empty:
-                    price = float(df['Close'].iloc[-1])
-                    self.log(f"⚠️ Using yfinance fallback for {symbol} live price: {price}")
+                    raw_price = float(df['Close'].iloc[-1])
+                    
+                    # Apply Indian Import Duty & GST Multiplier for MCX fallback
+                    if symbol in COMMODITIES:
+                        usd_inr_rate = 83.50 
+                        indian_tax_premium = 1.185 # ~15% Custom Duty + 3% GST
+                        if symbol in ["GOLD", "GOLDM"]:
+                            price = raw_price * ((usd_inr_rate * 10) / 31.1035) * indian_tax_premium
+                        elif symbol in ["SILVER", "SILVERM"]:
+                            price = raw_price * ((usd_inr_rate * 1000) / 31.1035) * indian_tax_premium
+                        elif symbol in ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATURALGASM"]:
+                            price = raw_price * usd_inr_rate 
+                    else:
+                        price = raw_price
+                        
+                    if not hasattr(self, '_yf_cache'): self._yf_cache = {}
+                    self._yf_cache[yf_cache_key] = (now, price)
             except:
                 pass
+                
         return price
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
@@ -7802,7 +7870,7 @@ elif st.session_state.page == "tools":
                     for log in bot.state["logs"]:
                         st.markdown(f"`{log}`")
                 st.markdown('</div>', unsafe_allow_html=True)
-        with sub_tabs:
+        with sub_tabs[1]:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
