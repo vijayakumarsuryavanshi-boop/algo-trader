@@ -8195,63 +8195,77 @@ elif st.session_state.page == "tools":
             play_sound_ui(sound)
 
 # ==========================================
-# GLOBAL UI ELEMENTS (Visible on Dashboard & Tools)
+# MOBILE-FIRST FLOATING DOCK (Start, Sync, Exit)
 # ==========================================
 if st.session_state.page in ["dashboard", "tools"]:
     
     with st.container():
-        # 1. CSS SECTION: Wrapped in triple quotes so Python treats it as a string
+        # CSS to force a horizontal row and style buttons as small icons
         st.markdown("""
         <style>
         #operable-dock-anchor { display: none; }
         
+        /* Main Container: Forces everything into one row */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
             position: fixed;
-            bottom: 15px;
+            bottom: 10px;
             left: 50%;
             transform: translateX(-50%);
             background: rgba(15, 23, 42, 0.95);
             backdrop-filter: blur(10px);
-            border-radius: 50px;
-            padding: 5px 15px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            border-radius: 60px;
+            padding: 4px 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
             z-index: 999999;
-            width: 90% !important;
-            max-width: 350px;
+            width: 85% !important;
+            max-width: 300px;
             display: flex !important;
             flex-direction: row !important;
-            justify-content: space-around !important;
+            flex-wrap: nowrap !important; /* Prevents stacking on small screens */
+            justify-content: space-evenly !important;
             align-items: center !important;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.15);
         }
         
-        /* Force side-by-side on mobile */
+        /* Force Streamlit Columns to stay small and horizontal */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) > div {
             flex-direction: row !important;
             display: flex !important;
-            flex: 1 1 auto !important;
+            flex: 1 1 0 !important;
+            min-width: 0 !important;
         }
 
+        /* Small Circular Icon Buttons */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
             background: transparent !important;
             border: none !important;
-            color: white !important;
+            color: #ffffff !important;
             font-weight: 700 !important;
-            font-size: 13px !important;
-            height: 45px !important;
+            font-size: 11px !important; /* Smaller text */
+            height: 40px !important;
             width: 100% !important;
+            line-height: 1.1 !important;
+            padding: 0 !important;
+        }
+
+        /* Icon size boost */
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button p {
+            font-size: 18px !important;
+            margin-bottom: -2px;
         }
         </style>
         """, unsafe_allow_html=True)
 
-        # 2. BUTTON SECTION: 3 Columns
+        # 3 Columns for 3 Actions
         dock_col1, dock_col2, dock_col3 = st.columns()
         
-        # This anchor must be inside the container to trigger the CSS above
+        # This hidden anchor is what the CSS targets
         st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
 
         with dock_col1:
-            if st.button("▶️\nStart", key="dock_start", disabled=bot.state.get("is_running", False), use_container_width=True):
+            is_running = bot.state.get("is_running", False)
+            # We use \n to put the text below the icon
+            if st.button("▶️\nStart", key="nav_start", disabled=is_running, use_container_width=True):
                 bot.state["is_running"] = True
                 bot.state["engine_active"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
@@ -8262,13 +8276,13 @@ if st.session_state.page in ["dashboard", "tools"]:
                 st.rerun()
                 
         with dock_col2:
-            if st.button("🔄\nSync", key="dock_sync", use_container_width=True):
+            if st.button("🔄\nSync", key="nav_sync", use_container_width=True):
                 play_sound_now("click")
                 st.rerun()
                 
         with dock_col3:
             can_exit = bot.state.get("active_trade") is not None or len(bot.state.get("active_trades", [])) > 0
-            if st.button("☠️\nExit", key="dock_exit", disabled=not can_exit, use_container_width=True):
+            if st.button("☠️\nExit", key="nav_exit", disabled=not can_exit, use_container_width=True):
                 bot.force_exit()
                 play_sound_now("click")
                 st.rerun()
