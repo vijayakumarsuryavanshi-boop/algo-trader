@@ -8195,77 +8195,66 @@ elif st.session_state.page == "tools":
             play_sound_ui(sound)
 
 # ==========================================
-# MOBILE-FIRST FLOATING DOCK (Start, Sync, Exit)
+# GLOBAL UI ELEMENTS (Visible on Dashboard & Tools)
+# PUT THIS AT THE VERY END OF YOUR SCRIPT
 # ==========================================
 if st.session_state.page in ["dashboard", "tools"]:
     
+    # We wrap this in a container to safely isolate it from your Tools tabs
     with st.container():
-        # CSS to force a horizontal row and style buttons as small icons
         st.markdown("""
         <style>
         #operable-dock-anchor { display: none; }
         
-        /* Main Container: Forces everything into one row */
+        /* Strictly target ONLY the block containing this specific anchor */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
             position: fixed;
-            bottom: 10px;
+            bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(15, 23, 42, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 60px;
-            padding: 4px 10px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-            z-index: 999999;
-            width: 85% !important;
-            max-width: 300px;
-            display: flex !important;
-            flex-direction: row !important;
-            flex-wrap: nowrap !important; /* Prevents stacking on small screens */
-            justify-content: space-evenly !important;
-            align-items: center !important;
-            border: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255, 255, 255, 0.90);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border-radius: 50px;
+            padding: 5px 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255,255,255,0.4);
+            z-index: 99999;
+            width: max-content;
+            gap: 10px;
         }
         
-        /* Force Streamlit Columns to stay small and horizontal */
-        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) > div {
-            flex-direction: row !important;
-            display: flex !important;
-            flex: 1 1 0 !important;
-            min-width: 0 !important;
+        @media (prefers-color-scheme: dark) {
+            div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
+                background: rgba(15, 23, 42, 0.85);
+                border: 1px solid rgba(255,255,255,0.1);
+            }
         }
-
-        /* Small Circular Icon Buttons */
+        
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
             background: transparent !important;
             border: none !important;
-            color: #ffffff !important;
+            box-shadow: none !important;
             font-weight: 700 !important;
-            font-size: 11px !important; /* Smaller text */
-            height: 40px !important;
-            width: 100% !important;
-            line-height: 1.1 !important;
-            padding: 0 !important;
+            transition: all 0.2s ease !important;
+            border-radius: 30px !important;
         }
-
-        /* Icon size boost */
-        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button p {
-            font-size: 18px !important;
-            margin-bottom: -2px;
+        
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button:hover {
+            background: rgba(2, 132, 199, 0.2) !important;
+            color: #0284c7 !important;
+            transform: translateY(-2px);
         }
         </style>
         """, unsafe_allow_html=True)
 
-        # 3 Columns for 3 Actions
-        dock_col1, dock_col2, dock_col3 = st.columns()
+        # 4 columns: 3 for buttons, 1 tiny one for the CSS anchor
+        dock_col1, dock_col2, dock_col3, anchor_col = st.columns([1, 1, 1, 0.01])
         
-        # This hidden anchor is what the CSS targets
-        st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
+        with anchor_col:
+            st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
 
         with dock_col1:
-            is_running = bot.state.get("is_running", False)
-            # We use \n to put the text below the icon
-            if st.button("▶️\nStart", key="nav_start", disabled=is_running, use_container_width=True):
+            if st.button("▶️ Start", key="dock_start_btn", disabled=bot.state.get("is_running", False)):
                 bot.state["is_running"] = True
                 bot.state["engine_active"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
@@ -8276,16 +8265,17 @@ if st.session_state.page in ["dashboard", "tools"]:
                 st.rerun()
                 
         with dock_col2:
-            if st.button("🔄\nSync", key="nav_sync", use_container_width=True):
+            if st.button("🔄 Sync", key="dock_sync_btn"):
                 play_sound_now("click")
                 st.rerun()
                 
         with dock_col3:
             can_exit = bot.state.get("active_trade") is not None or len(bot.state.get("active_trades", [])) > 0
-            if st.button("☠️\nExit", key="nav_exit", disabled=not can_exit, use_container_width=True):
+            if st.button("☠️ Exit", key="dock_exit_btn", disabled=not can_exit):
                 bot.force_exit()
                 play_sound_now("click")
                 st.rerun()
+
 
 # ==========================================
 # BACKGROUND QUEUES & AUDIO
