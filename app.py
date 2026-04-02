@@ -1904,31 +1904,65 @@ class MT5WebBridge:
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                if not mt5.symbol_info(symbol):
-                    alt_symbol = symbol + "m" if symbol in ["XAUUSD", "BTCUSD", "ETHUSD"] else symbol
-                    if mt5.symbol_info(alt_symbol):
-                        symbol = alt_symbol
+                
+                # BTCDana, XM, Exness often have suffixes like "m", "micro", "c", ".r"
+                original_symbol = symbol
+                sym_info = mt5.symbol_info(symbol)
+                if not sym_info:
+                    for suffix in ["m", "micro", "c", ".r", "._a"]:
+                        if mt5.symbol_info(symbol + suffix):
+                            symbol = symbol + suffix
+                            sym_info = mt5.symbol_info(symbol)
+                            break
+                            
+                if not sym_info:
+                    return None, f"Symbol {original_symbol} not found in MT5 Market Watch."
+                    
+                # IMPORTANT: MT5 requires symbol to be visible in Market Watch!
+                if not sym_info.visible:
+                    mt5.symbol_select(symbol, True)
+                    
                 tick = mt5.symbol_info_tick(symbol)
                 if not tick:
-                    return None, f"Symbol {symbol} not found"
+                    return None, f"Tick data for {symbol} not found. Market closed?"
+                    
                 action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
-                # SEBI 2026: Use LIMIT order with MPP band
-                price = tick.ask * 1.005 if str(side).upper()=="BUY" else tick.bid * 0.995
+                
+                # FIX: Exact price, don't multiply by 1.005 for MT5 (causes invalid price errors)
+                price = tick.ask if action == mt5.ORDER_TYPE_BUY else tick.bid
+                
+                # FIX: Filling mode depends on the broker (XM/Exness usually reject IOC if not allowed)
+                filling_type = mt5.ORDER_FILLING_IOC
+                if (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK):
+                    filling_type = mt5.ORDER_FILLING_FOK
+                elif (sym_info.filling_mode & mt5.SYMBOL_FILLING_IOC):
+                    filling_type = mt5.ORDER_FILLING_IOC
+                else:
+                    filling_type = mt5.ORDER_FILLING_RETURN
+
                 req = {
                     "action": mt5.TRADE_ACTION_DEAL,
-                    "symbol": symbol, "volume": float(qty), "type": action,
-                    "price": price, "deviation": 20, "magic": 20250101,
-                    "comment": "SHREE_BOT", "type_time": mt5.ORDER_TIME_GTC,
-                    "type_filling": mt5.ORDER_FILLING_IOC,
+                    "symbol": symbol, 
+                    "volume": float(qty), 
+                    "type": action,
+                    "price": price, 
+                    "deviation": 20, 
+                    "magic": 20250101,
+                    "comment": "SHREE_BOT", 
+                    "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": filling_type,
                 }
+                
                 result = mt5.order_send(req)
                 if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                     return str(result.order), None
-                return None, f"MT5 retcode: {result.retcode if result else 'unknown'}"
+                    
+                # Return exact MT5 retcode for easier debugging
+                return None, f"MT5 retcode: {result.retcode if result else 'Request Failed'}, Price: {price}, Qty: {qty}"
             except Exception as e:
                 return None, str(e)
         return f"MT5_SIM_{int(time.time())}", None
-
+        
     def get_historical_data(self, symbol, interval):
         if self._use_local and HAS_MT5:
             try:
@@ -1950,10 +1984,16 @@ class MT5WebBridge:
             try:
                 import MetaTrader5 as mt5
                 info = mt5.account_info()
-                if info: return {"balance": float(info.balance), "login": self.account}
+                if info is not None: 
+                    return {
+                        "balance": float(info.balance), 
+                        "equity": float(info.equity),
+                        "profit": float(info.profit),
+                        "login": self.account
+                    }
             except Exception: pass
-        return {"balance": 0, "login": self.account}
-
+        return {"balance": 0.0, "equity": 0.0, "login": self.account}
+        
 class FyersBridge:
     def __init__(self, client_id, secret, token):
         self.client_id = client_id
@@ -4587,14 +4627,16 @@ class SniperBot:
         broker = self.settings.get("primary_broker", "")
 
         # 1. SMART ROUTING: Crypto & XAUUSD 
-        # (Auto-routes to CoinDCX/Delta/Binance even if Angel One is set as Primary in the UI)
         crypto_assets = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "BNBUSD", "LTCUSD", "DOTUSD", "XAUUSD"]
         if index_name in crypto_assets or "USD" in index_name:
+            # FIX: Respect explicitly selected broker first!
+            if broker == "MT5/Exness": return "MT5", index_name
             if broker == "CoinDCX": return "COINDCX", index_name
             if broker == "Delta Exchange": return "DELTA", index_name
             if broker == "Binance": return "BINANCE", index_name
             
             # If Primary Broker is Angel/Zerodha, but asset is Crypto -> Auto Route
+            if self.is_mt5_connected and index_name == "XAUUSD": return "MT5", index_name
             if self.is_coindcx_connected: return "COINDCX", index_name
             if self.is_delta_connected: return "DELTA", index_name
             if self.is_binance_connected: return "BINANCE", index_name
