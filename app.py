@@ -2033,7 +2033,7 @@ class MT5WebBridge:
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                # 🚨 THE FIX: Wake up terminal before fetching balance!
+                # 🚨 Wake up terminal before fetching balance!
                 if not mt5.terminal_info():
                     mt5.initialize()
                     mt5.login(login=int(self.account), password=self.password, server=self.server)
@@ -2048,10 +2048,14 @@ class MT5WebBridge:
                         "name": info.name,
                         "server": info.server
                     }
-            except Exception: pass
-        # 🚨 FIX: Return None if it fails to grab equity so the dashboard doesn't show $0
-        return None
-
+                else:
+                    # Terminal is open, but disconnected from broker server
+                    return {"balance": 0.0, "equity": 0.0, "error": f"Offline {mt5.last_error()}"}
+            except Exception as e: 
+                return {"balance": 0.0, "equity": 0.0, "error": f"Crash {str(e)}"}
+                
+        # Return a Paper Trading balance if simulated on Cloud
+        return {"balance": 10000.0, "equity": 10000.0, "error": "Simulated"}
 class FyersBridge:
     def __init__(self, client_id, secret, token):
         self.client_id = client_id
