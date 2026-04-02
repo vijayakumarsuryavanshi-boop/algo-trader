@@ -4817,32 +4817,74 @@ class SniperBot:
         except Exception as e:
             self.log(f"⚠️ Error in get_live_price: {e}")
 
-        # 5. THE FIX: YFINANCE CACHE (Stops the IP Ban Freeze)
-        if price is None and (symbol in YF_TICKERS or "USD" in symbol or "GOLD" in symbol):
+        # 5. THE FIX: TRADINGVIEW BACKEND DATAFEED (Matches the UI Chart Exactly)
+        if price is None:
             now = time.time()
-            cache_key = f"yf_live_{symbol}"
+            cache_key = f"tv_live_{symbol}"
             
-            # If we checked yfinance in the last 3 seconds, return the cached price to avoid getting blocked!
-            if hasattr(self, '_yf_cache') and cache_key in self._yf_cache:
-                last_time, last_price = self._yf_cache[cache_key]
-                if now - last_time < 3:
+            # 2-second cache to prevent IP bans
+            if hasattr(self, '_tv_cache') and cache_key in self._tv_cache:
+                last_time, last_price = self._tv_cache[cache_key]
+                if now - last_time < 2:
                     return last_price
 
-            try:
-                yf_ticker = "XAUUSD=X" if symbol in ["XAUUSD", "GOLD"] else YF_TICKERS.get(symbol, symbol)
-                if "USD" in symbol and yf_ticker == symbol:
-                    yf_ticker = f"{symbol.replace('USDT', '').replace('USD', '')}-USD"
+            if HAS_TVDATAFEED:
+                try:
+                    if not hasattr(self, 'tv_feed'):
+                        from tvDatafeed import TvDatafeed, Interval
+                        import logging
+                        logging.getLogger('tvDatafeed').setLevel(logging.ERROR)
+                        self.tv_feed = TvDatafeed(auto_login=False)
+
+                    tv_exch = "NSE"
+                    tv_sym = symbol
                     
-                df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-                if not df.empty:
-                    price = float(df['Close'].iloc[-1])
+                    # 🚨 THE FIX: Split XAUUSD (Forex) from GOLD (MCX)
+                    if symbol == "XAUUSD":
+                        tv_exch, tv_sym = "OANDA", "XAUUSD"
+                    elif symbol in COMMODITIES:
+                        # Force MCX continuous futures chart (e.g. MCX:GOLD1!)
+                        tv_exch = "MCX"
+                        base_comm = symbol.replace("M", "") if symbol.endswith("M") else symbol
+                        tv_sym = f"{base_comm}1!"
+                    elif "BTC" in symbol or "ETH" in symbol or "SOL" in symbol:
+                        tv_exch, tv_sym = "BINANCE", symbol.replace("USD", "USDT") if not symbol.endswith("USDT") else symbol
+
+                    df = self.tv_feed.get_hist(symbol=tv_sym, exchange=tv_exch, interval=Interval.in_1_minute, n_bars=1)
                     
-                    # Save to cache
-                    if not hasattr(self, '_yf_cache'): self._yf_cache = {}
-                    self._yf_cache[cache_key] = (now, price)
-            except:
-                pass
-                
+                    if df is not None and not df.empty:
+                        price = float(df['close'].iloc[-1])
+                        if not hasattr(self, '_tv_cache'): self._tv_cache = {}
+                        self._tv_cache[cache_key] = (now, price)
+                        return price
+                except Exception as e:
+                    pass
+
+            # Ultimate Emergency Fallback (Yahoo Finance)
+            if price is None and (symbol in YF_TICKERS or "USD" in symbol):
+                try:
+                    yf_ticker = "XAUUSD=X" if symbol == "XAUUSD" else YF_TICKERS.get(symbol, symbol)
+                    if "USD" in symbol and yf_ticker == symbol:
+                        yf_ticker = f"{symbol.replace('USDT', '').replace('USD', '')}-USD"
+                        
+                    df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+                    if not df.empty:
+                        raw_price = float(df['Close'].iloc[-1])
+                        
+                        # 🚨 THE FIX: Convert USD to INR for MCX Commodities if falling back to Yahoo
+                        if symbol in COMMODITIES:
+                            usd_inr = 83.50 # Approximate conversion rate
+                            if "GOLD" in symbol:
+                                price = raw_price * (usd_inr * 10) / 31.1035 # USD/oz to INR/10g
+                            elif "SILVER" in symbol:
+                                price = raw_price * (usd_inr * 1000) / 31.1035 # USD/oz to INR/1kg
+                            elif "CRUDEOIL" in symbol or "NATURALGAS" in symbol:
+                                price = raw_price * usd_inr # USD/barrel to INR/barrel
+                        else:
+                            price = raw_price
+                except:
+                    pass
+                    
         return price
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
