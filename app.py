@@ -5174,23 +5174,22 @@ class SniperBot:
                 return order_id, None
             except Exception as e:
                 return None, f"Zerodha error: {str(e)}"
-        # --- 🛡️ FIXED ANGEL ONE: SAFE LIMIT ORDERS + STRICT STRING FORMATTING ---
+        # --- 🛡️ FIXED ANGEL ONE: PURE NUMBER DATATYPES + SAFE LIMIT ---
         if self.api:
             try:
                 # 1. Product Type Logic
                 p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
 
-                # 2. 🚨 THE FIX: NSE Options require LIMIT orders. 
-                # We format 311.3 directly into the string "311.30" to bypass validation errors.
+                # 2. 🚨 THE FIX: Strict Math Rounding & Pure FLOAT datatype
                 if price and float(price) > 0:
-                    clean_num = round(round(float(price) / 0.05) * 0.05, 2)
-                    exec_price = "{:.2f}".format(clean_num) 
+                    # Rounds perfectly to nearest 0.05, and stays a FLOAT (e.g., 311.30)
+                    exec_price = float(round(round(float(price) / 0.05) * 0.05, 2))
                     order_type_final = "LIMIT"
                 else:
-                    exec_price = "0"
+                    exec_price = 0.0
                     order_type_final = "MARKET"
 
-                # 3. Lot Size Snapper
+                # 3. Lot Size Snapper & Pure INT datatype
                 LOT_SIZES = {
                     "FINNIFTY": 65, "MIDCPNIFTY": 120, "BANKNIFTY": 30, "BANKEX": 30,
                     "SENSEX": 20, "NIFTY": 65, "CRUDEOILM": 10, "CRUDEOIL": 100, 
@@ -5201,11 +5200,10 @@ class SniperBot:
                 lot_size = LOT_SIZES.get(base_asset, 1)
                 raw_qty = int(float(qty))
                 
-                # Snap to valid lot multiple
-                valid_qty = max(lot_size, (raw_qty // lot_size) * lot_size) if lot_size > 1 else raw_qty
-                qty_str = str(valid_qty)
+                # Snap to valid lot multiple and force it to be an INTEGER
+                valid_qty = int(max(lot_size, (raw_qty // lot_size) * lot_size)) if lot_size > 1 else raw_qty
 
-                # 4. THE 100% OFFICIAL PAYLOAD STRUCTURE
+                # 4. 🚨 THE PRISTINE PAYLOAD: No strings for numbers!
                 order_params = {
                     "variety": "NORMAL",
                     "tradingsymbol": str(symbol),
@@ -5215,23 +5213,22 @@ class SniperBot:
                     "ordertype": order_type_final,
                     "producttype": p_type,
                     "duration": "DAY",
-                    "price": exec_price,    # 🚨 Perfectly formatted (e.g., "311.30")
-                    "squareoff": "0",       # 🚨 Mandatory for Angel backend
-                    "stoploss": "0",        # 🚨 Mandatory for Angel backend
-                    "quantity": qty_str
+                    "price": exec_price,         # Pure Float (e.g., 311.3)
+                    "triggerprice": 0.0,         # Pure Float (Prevents backend None crashes)
+                    "quantity": valid_qty        # Pure Int (e.g., 65)
                 }
 
-                self.log(f"📤 Sending Safe Limit Payload: {order_params}")
+                self.log(f"📤 Sending Pristine Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
                 
-                # 5. Handle Silent Drops Instantly
+                # 5. Handle Silent Drops
                 if res is None:
-                    self.log("🚨 Angel API returned None. Forcing Re-Login...")
+                    self.log("🚨 Angel API returned None (Server Drop). Forcing Re-Login...")
                     if self.login():
                         self.log("🔄 Re-login successful. Retrying order...")
                         res = self.api.placeOrder(order_params)
                         if res is None:
-                            return None, "Angel returned None twice. Exchange dropped request."
+                            return None, "Angel Server is dead/unreachable right now."
 
                 if isinstance(res, dict) and res.get('status'):
                     return res.get('data', {}).get('orderid'), None
