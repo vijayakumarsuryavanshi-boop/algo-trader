@@ -1327,9 +1327,11 @@ LOT_SIZES = {
 
 YF_TICKERS = {
     "NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "FINNIFTY": "^FINNIFTY",
-    "CRUDEOIL": "CL=F", 
-    "NATURALGAS": "NG=F", "GOLD": "GC=F", "SILVER": "SI=F", "XAUUSD": "XAUUSD=X", "EURUSD": "EURUSD=X", 
-    "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD", "SOLUSD": "SOL-USD",
+    "CRUDEOIL": "CL=F", "CRUDEOILM": "CL=F", 
+    "NATURALGAS": "NG=F", "NATURALGASM": "NG=F", 
+    "GOLD": "GC=F", "GOLDM": "GC=F", "SILVER": "SI=F", "SILVERM": "SI=F", 
+    "XAUUSD": "XAUUSD=X", "EURUSD": "EURUSD=X", 
+    "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD", "SOLUSD": "SOL-USD"
     "XRPUSD": "XRP-USD", "ADAUSD": "ADA-USD", "DOGEUSD": "DOGE-USD", "BNBUSD": "BNB-USD",
     "LTCUSD": "LTC-USD", "DOTUSD": "DOT-USD", "MATICUSD": "MATIC-USD", "SHIBUSD": "SHIB-USD",
     "TRXUSD": "TRX-USD", "LINKUSD": "LINK-USD", "AVAXUSD": "AVAX-USD", "UNIUSD": "UNI-USD",
@@ -1347,7 +1349,7 @@ INDEX_TOKENS = {
     "FINNIFTY": ("NSE", "26037")
 }
 
-COMMODITIES = ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]
+COMMODITIES = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATURALGASM", "GOLD", "SILVER", "GOLDM", "SILVERM"]
 
 STRAT_LIST = [
     "Momentum Breakout + S&R",
@@ -1892,6 +1894,28 @@ class MT5WebBridge:
         self.connected = False
         self._use_local = False
 
+    def _resolve_mt5_symbol(self, base_symbol):
+        import MetaTrader5 as mt5
+        # Smart routing for Gold across XM 360, BTCDana, Exness, etc.
+        if "XAUUSD" in base_symbol or "GOLD" in base_symbol:
+            candidates = [
+                "XAUUSD", "XAUUSDm", "XAUUSDmicro", "XAUUSDc", "XAUUSD.r",
+                "GOLD", "GOLD#", "GOLDm", "GOLDmicro", "GOLDc", "GOLD.r"
+            ]
+            for cand in candidates:
+                info = mt5.symbol_info(cand)
+                if info: return cand, info
+                
+        # Standard check for other pairs (BTCUSDm, EURUSDm, etc.)
+        info = mt5.symbol_info(base_symbol)
+        if info: return base_symbol, info
+        
+        for suffix in ["m", "micro", "c", ".r", "._a", "#"]:
+            info = mt5.symbol_info(base_symbol + suffix)
+            if info: return base_symbol + suffix, info
+            
+        return None, None
+
     def connect(self):
         if HAS_MT5:
             try:
@@ -1911,34 +1935,17 @@ class MT5WebBridge:
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                original_symbol = symbol
-                sym_info = mt5.symbol_info(symbol)
+                resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
                 
-                # 1. Check suffixes if exact match not found
-                if not sym_info:
-                    for suffix in ["m", "micro", "c", ".r", "._a"]:
-                        if mt5.symbol_info(symbol + suffix):
-                            symbol = symbol + suffix
-                            sym_info = mt5.symbol_info(symbol)
-                            break
-                            
-                # 2. Check if broker uses 'GOLD' instead of 'XAUUSD'
-                if not sym_info and "XAUUSD" in original_symbol:
-                    for alt in ["GOLD", "GOLDm", "GOLDmicro", "GOLDc", "GOLD.r"]:
-                        if mt5.symbol_info(alt):
-                            symbol = alt
-                            sym_info = mt5.symbol_info(symbol)
-                            break
-
                 if sym_info:
                     if not sym_info.visible:
-                        mt5.symbol_select(symbol, True)
-                    tick = mt5.symbol_info_tick(symbol)
+                        mt5.symbol_select(resolved_sym, True)
+                    tick = mt5.symbol_info_tick(resolved_sym)
                     if tick: return float((tick.bid + tick.ask) / 2)
             except Exception: pass
             
         # Fallback to yfinance if MT5 fetch fails
-        yf_map = {"XAUUSD":"XAUUSD=X","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD","ETHUSD":"ETH-USD","SOLUSD":"SOL-USD"}
+        yf_map = {"XAUUSD":"XAUUSD=X","GOLD":"XAUUSD=X","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD","ETHUSD":"ETH-USD"}
         try:
             df = yf.Ticker(yf_map.get(symbol, symbol)).history(period="1d", interval="1m")
             if not df.empty: return float(df["Close"].iloc[-1])
@@ -1951,34 +1958,17 @@ class MT5WebBridge:
             try:
                 import MetaTrader5 as mt5
                 
-                original_symbol = symbol
-                sym_info = mt5.symbol_info(symbol)
-                
-                # 1. Check suffixes
-                if not sym_info:
-                    for suffix in ["m", "micro", "c", ".r", "._a"]:
-                        if mt5.symbol_info(symbol + suffix):
-                            symbol = symbol + suffix
-                            sym_info = mt5.symbol_info(symbol)
-                            break
-                            
-                # 2. Check GOLD alias for XAUUSD
-                if not sym_info and "XAUUSD" in original_symbol:
-                    for alt in ["GOLD", "GOLDm", "GOLDmicro", "GOLDc", "GOLD.r"]:
-                        if mt5.symbol_info(alt):
-                            symbol = alt
-                            sym_info = mt5.symbol_info(symbol)
-                            break
+                resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
                             
                 if not sym_info:
-                    return None, f"Symbol {original_symbol} not found in MT5 Market Watch."
+                    return None, f"Symbol {symbol} (or aliases) not found in MT5 Market Watch."
                     
                 if not sym_info.visible:
-                    mt5.symbol_select(symbol, True)
+                    mt5.symbol_select(resolved_sym, True)
                     
-                tick = mt5.symbol_info_tick(symbol)
+                tick = mt5.symbol_info_tick(resolved_sym)
                 if not tick:
-                    return None, f"Tick data for {symbol} not found. Market closed?"
+                    return None, f"Tick data for {resolved_sym} not found. Market closed?"
                     
                 action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
                 price = tick.ask if action == mt5.ORDER_TYPE_BUY else tick.bid
@@ -1994,7 +1984,7 @@ class MT5WebBridge:
 
                 req = {
                     "action": mt5.TRADE_ACTION_DEAL,
-                    "symbol": symbol, 
+                    "symbol": resolved_sym, 
                     "volume": float(qty), 
                     "type": action,
                     "price": price, 
@@ -2013,13 +2003,18 @@ class MT5WebBridge:
             except Exception as e:
                 return None, str(e)
         return f"MT5_SIM_{int(time.time())}", None
-        
+
     def get_historical_data(self, symbol, interval):
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
+                
+                # Use smart resolution for charts too!
+                resolved_sym, _ = self._resolve_mt5_symbol(symbol)
+                if not resolved_sym: return None
+                
                 tf_map = {"1m":mt5.TIMEFRAME_M1,"5m":mt5.TIMEFRAME_M5,"15m":mt5.TIMEFRAME_M15}
-                rates = mt5.copy_rates_from_pos(symbol, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
+                rates = mt5.copy_rates_from_pos(resolved_sym, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
                 if rates is not None:
                     df = pd.DataFrame(rates)
                     df["time"] = pd.to_datetime(df["time"], unit="s")
