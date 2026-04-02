@@ -1327,10 +1327,8 @@ LOT_SIZES = {
 
 YF_TICKERS = {
     "NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN", "FINNIFTY": "^FINNIFTY",
-    "CRUDEOIL": "CL=F", "CRUDEOILM": "CL=F", 
-    "NATURALGAS": "NG=F", "NATURALGASM": "NG=F", 
-    "GOLD": "GC=F", "GOLDM": "GC=F", "SILVER": "SI=F", "SILVERM": "SI=F", 
-    "XAUUSD": "XAUUSD=X", "EURUSD": "EURUSD=X", 
+    "CRUDEOIL": "CL=F", 
+    "NATURALGAS": "NG=F", "GOLD": "GC=F", "SILVER": "SI=F", "XAUUSD": "GC=F", "EURUSD": "EURUSD=X", 
     "BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD", "SOLUSD": "SOL-USD",
     "XRPUSD": "XRP-USD", "ADAUSD": "ADA-USD", "DOGEUSD": "DOGE-USD", "BNBUSD": "BNB-USD",
     "LTCUSD": "LTC-USD", "DOTUSD": "DOT-USD", "MATICUSD": "MATIC-USD", "SHIBUSD": "SHIB-USD",
@@ -1349,7 +1347,7 @@ INDEX_TOKENS = {
     "FINNIFTY": ("NSE", "26037")
 }
 
-COMMODITIES = ["CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATURALGASM", "GOLD", "SILVER", "GOLDM", "SILVERM"]
+COMMODITIES = ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"]
 
 STRAT_LIST = [
     "Momentum Breakout + S&R",
@@ -1786,7 +1784,6 @@ class DeltaExchangeBridge:
         self.api_key = api_key
         self.secret = secret
         self.connected = False
-        self.product_map = {}
 
     def connect(self):
         try:
@@ -1807,31 +1804,11 @@ class DeltaExchangeBridge:
         except:
             return None
 
-    def _get_product_id(self, target_symbol):
-        # Cache product IDs so we don't have to hit the API on every single trade
-        if target_symbol in self.product_map:
-            return self.product_map[target_symbol]
-        try:
-            res = requests.get("https://api.delta.exchange/v2/products", timeout=5)
-            if res.status_code == 200:
-                for p in res.json().get('result', []):
-                    self.product_map[p['symbol']] = int(p['id'])
-                return self.product_map.get(target_symbol)
-        except Exception as e:
-            print(f"Error fetching Delta products: {e}")
-        return None
-
     def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
         if not self.connected:
             return None, "Not connected"
         try:
             target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
-            
-            # FIX 1: Fetch the numeric integer product_id required by Delta API
-            product_id = self._get_product_id(target)
-            if not product_id:
-                return None, f"Could not find numerical product_id for {target} on Delta."
-
             # SEBI 2026: Convert MARKET to LIMIT with MPP band
             if order_type.upper() == "MARKET":
                 order_type = "LIMIT"
@@ -1843,24 +1820,20 @@ class DeltaExchangeBridge:
                         price = price_live * 0.995
                 else:
                     return None, "Cannot fetch live price for MPP band"
-            
             payload = {
-                "product_id": product_id,
+                "product_id": target,
                 "size": int(float(qty)),
-                "side": "buy" if side.upper() == "BUY" else "sell",
+                "side": "buy" if side == "BUY" else "sell",
                 "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order"
             }
             if order_type.upper() == "LIMIT" and price:
-                # FIX 2: Delta strict typing requires limit_price to be a string
-                payload["limit_price"] = str(round(float(price), 4))
-                
+                payload["limit_price"] = price
             payload_str = json.dumps(payload, separators=(',', ':'))
             ts, sig = generate_delta_signature('POST', '/v2/orders', payload_str, self.secret)
             headers = {'api-key': self.api_key, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
-            
             res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
             if res.status_code == 200:
-                return str(res.json().get('result', {}).get('id')), None
+                return res.json().get('result', {}).get('id'), None
             else:
                 return None, f"Delta error: {res.text}"
         except Exception as e:
@@ -1879,167 +1852,90 @@ class DeltaExchangeBridge:
             if res.status_code == 200:
                 for b in res.json().get('result', []):
                     if b['asset_symbol'] == 'USDT':
-                        # FIX 3: Prioritize available_balance over total balance
-                        bal = b.get('available_balance', b.get('balance', 0))
-                        return {'balance': float(bal)}
+                        return {'balance': float(b['balance'])}
             return None
         except:
             return None
+
 class MT5WebBridge:
     def __init__(self, account, password, server, api_url=""):
         self.account = account
         self.password = password
         self.server = server
-        self.api_url = api_url
+        self.api_url = api_url or "https://mt5-web-api.mtapi.io/v1"
         self.connected = False
         self._use_local = False
 
-    def _resolve_mt5_symbol(self, base_symbol):
-        import MetaTrader5 as mt5
-        # Smart routing for Gold across XM 360, BTCDana, Exness, etc.
-        if "XAUUSD" in base_symbol or "GOLD" in base_symbol:
-            candidates = [
-                "XAUUSD", "XAUUSDm", "XAUUSDmicro", "XAUUSDc", "XAUUSD.r",
-                "GOLD", "GOLD#", "GOLDm", "GOLDmicro", "GOLDc", "GOLD.r"
-            ]
-            for cand in candidates:
-                info = mt5.symbol_info(cand)
-                if info: return cand, info
-                
-        # Standard check for other pairs
-        info = mt5.symbol_info(base_symbol)
-        if info: return base_symbol, info
-        
-        # Check standard suffixes
-        for suffix in ["m", "micro", "c", ".r", "._a", "#"]:
-            info = mt5.symbol_info(base_symbol + suffix)
-            if info: return base_symbol + suffix, info
-            
-        return None, None
-
     def connect(self):
-        # 🚨 STRICT LOGIN CHECK: No more silent failures!
         if HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                if not mt5.initialize():
-                    err = mt5.last_error()
-                    return False, f"MT5 Init Failed: {err}. (Is the MT5 Terminal open on this PC?)"
-                
-                authorized = mt5.login(login=int(self.account), password=self.password, server=self.server)
-                if authorized:
+                if mt5.initialize(login=int(self.account), password=self.password, server=self.server):
                     self.connected = True
                     self._use_local = True
                     return True, f"MT5 local connected ({self.server})"
-                else:
-                    err = mt5.last_error()
-                    return False, f"MT5 Login Failed: {err}. Check Account, Password, and exact Server Name."
             except Exception as e:
-                return False, f"MT5 Python Error: {e}"
-        
-        # If running on Linux/Streamlit Cloud, HAS_MT5 is False
+                pass
         self.connected = True
         self._use_local = False
-        return True, f"MT5 bridge simulated (Running on Cloud/Linux)"
+        return True, f"MT5 bridge simulated ({self.server})"
 
     def get_live_price(self, symbol):
         if not self.connected: return None
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
-                
-                if sym_info:
-                    # Force it into Market Watch
-                    mt5.symbol_select(resolved_sym, True)
-                    
-                    # METHOD 1: Try Live Tick
-                    tick = mt5.symbol_info_tick(resolved_sym)
-                    if tick and tick.bid > 0: 
-                        return float((tick.bid + tick.ask) / 2)
-                        
-                    # METHOD 2: Force fetch last 1-min candle if tick is frozen
-                    rates = mt5.copy_rates_from_pos(resolved_sym, mt5.TIMEFRAME_M1, 0, 1)
-                    if rates is not None and len(rates) > 0:
-                        return float(rates['close'])
+                if not mt5.symbol_info(symbol):
+                    alt_symbol = symbol + "m" if symbol in ["XAUUSD", "BTCUSD", "ETHUSD"] else symbol
+                    if mt5.symbol_info(alt_symbol):
+                        symbol = alt_symbol
+                tick = mt5.symbol_info_tick(symbol)
+                if tick: return float((tick.bid + tick.ask) / 2)
             except Exception: pass
-            
-        # 🚨 FIX: Return None instead of fake Yahoo data. 
-        # This forces the main bot to use TradingView so the chart & execution match perfectly.
-        return None 
+        yf_map = {"XAUUSD":"GC=F","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD","ETHUSD":"ETH-USD","SOLUSD":"SOL-USD"}
+        try:
+            df = yf.Ticker(yf_map.get(symbol, symbol)).history(period="1d", interval="1m")
+            if not df.empty: return float(df["Close"].iloc[-1])
+        except Exception: pass
+        return None
 
     def place_order(self, symbol, qty, side):
         if not self.connected: return None, "Not connected"
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
-                            
-                if not sym_info:
-                    return None, f"Symbol {symbol} not found in MT5."
-                    
-                if not sym_info.visible:
-                    mt5.symbol_select(resolved_sym, True)
-                    
-                tick = mt5.symbol_info_tick(resolved_sym)
+                if not mt5.symbol_info(symbol):
+                    alt_symbol = symbol + "m" if symbol in ["XAUUSD", "BTCUSD", "ETHUSD"] else symbol
+                    if mt5.symbol_info(alt_symbol):
+                        symbol = alt_symbol
+                tick = mt5.symbol_info_tick(symbol)
                 if not tick:
-                    return None, f"Tick data for {resolved_sym} not found."
-                    
+                    return None, f"Symbol {symbol} not found"
                 action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
-                price = tick.ask if action == mt5.ORDER_TYPE_BUY else tick.bid
-                
-                # 🚨 DYNAMIC FILLING MODE (Fixes XM360 & BTCDana Rejections)
-                filling_type = mt5.ORDER_FILLING_IOC
-                if (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK):
-                    filling_type = mt5.ORDER_FILLING_FOK
-                elif (sym_info.filling_mode & mt5.SYMBOL_FILLING_IOC):
-                    filling_type = mt5.ORDER_FILLING_IOC
-                else:
-                    filling_type = mt5.ORDER_FILLING_RETURN
-
+                # SEBI 2026: Use LIMIT order with MPP band
+                price = tick.ask * 1.005 if str(side).upper()=="BUY" else tick.bid * 0.995
                 req = {
                     "action": mt5.TRADE_ACTION_DEAL,
-                    "symbol": resolved_sym, 
-                    "volume": float(qty), 
-                    "type": action,
-                    "price": price, 
-                    "deviation": 20, 
-                    "magic": 20250101,
-                    "comment": "SHREE_BOT", 
-                    "type_time": mt5.ORDER_TIME_GTC,
-                    "type_filling": filling_type,
+                    "symbol": symbol, "volume": float(qty), "type": action,
+                    "price": price, "deviation": 20, "magic": 20250101,
+                    "comment": "SHREE_BOT", "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_IOC,
                 }
-                
                 result = mt5.order_send(req)
                 if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                     return str(result.order), None
-                    
-                # Enhanced Error Translation
-                err_dict = {
-                    10015: "Invalid price", 10016: "Invalid stops", 10018: "Market closed", 
-                    10019: "Not enough money", 10027: "Auto-trading disabled by client terminal",
-                    10030: "Unsupported filling mode", 10031: "No connection"
-                }
-                err_msg = err_dict.get(result.retcode, f"Retcode {result.retcode}") if result else "Unknown Error"
-                return None, f"MT5 Rejected: {err_msg}"
-                
+                return None, f"MT5 retcode: {result.retcode if result else 'unknown'}"
             except Exception as e:
-                return None, f"MT5 Python Error: {str(e)}"
-                
-        # If simulated, return a fake order ID so the dashboard can keep testing
+                return None, str(e)
         return f"MT5_SIM_{int(time.time())}", None
 
     def get_historical_data(self, symbol, interval):
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                resolved_sym, _ = self._resolve_mt5_symbol(symbol)
-                if not resolved_sym: return None
-                
                 tf_map = {"1m":mt5.TIMEFRAME_M1,"5m":mt5.TIMEFRAME_M5,"15m":mt5.TIMEFRAME_M15}
-                rates = mt5.copy_rates_from_pos(resolved_sym, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
-                if rates is not None and len(rates) > 0:
-                    import pandas as pd
+                rates = mt5.copy_rates_from_pos(symbol, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
+                if rates is not None:
                     df = pd.DataFrame(rates)
                     df["time"] = pd.to_datetime(df["time"], unit="s")
                     df.set_index("time", inplace=True)
@@ -2054,18 +1950,10 @@ class MT5WebBridge:
             try:
                 import MetaTrader5 as mt5
                 info = mt5.account_info()
-                if info is not None: 
-                    return {
-                        "balance": float(info.balance), 
-                        "equity": float(info.equity), 
-                        "profit": float(info.profit), 
-                        "login": self.account,
-                        "name": info.name,
-                        "server": info.server
-                    }
+                if info: return {"balance": float(info.balance), "login": self.account}
             except Exception: pass
-        return {"balance": 0.0, "equity": 0.0, "login": self.account}
-        
+        return {"balance": 0, "login": self.account}
+
 class FyersBridge:
     def __init__(self, client_id, secret, token):
         self.client_id = client_id
@@ -4331,8 +4219,7 @@ class SniperBot:
             try:
                 acc = self.mt5_bridge.get_account_info()
                 if acc:
-                    live_eq = acc.get('equity', acc.get('balance', 0))
-                    balances["MT5"] = f"${live_eq:,.2f}"
+                    balances["MT5"] = f"${acc.get('balance',0):,.2f}"
             except: pass
         if self.fyers_bridge and self.is_fyers_connected:
             try:
@@ -4700,16 +4587,14 @@ class SniperBot:
         broker = self.settings.get("primary_broker", "")
 
         # 1. SMART ROUTING: Crypto & XAUUSD 
+        # (Auto-routes to CoinDCX/Delta/Binance even if Angel One is set as Primary in the UI)
         crypto_assets = ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "ADAUSD", "DOGEUSD", "BNBUSD", "LTCUSD", "DOTUSD", "XAUUSD"]
         if index_name in crypto_assets or "USD" in index_name:
-            # FIX: Respect explicitly selected broker first!
-            if broker == "MT5/Exness": return "MT5", index_name
             if broker == "CoinDCX": return "COINDCX", index_name
             if broker == "Delta Exchange": return "DELTA", index_name
             if broker == "Binance": return "BINANCE", index_name
             
             # If Primary Broker is Angel/Zerodha, but asset is Crypto -> Auto Route
-            if self.is_mt5_connected and index_name == "XAUUSD": return "MT5", index_name
             if self.is_coindcx_connected: return "COINDCX", index_name
             if self.is_delta_connected: return "DELTA", index_name
             if self.is_binance_connected: return "BINANCE", index_name
@@ -4747,144 +4632,97 @@ class SniperBot:
         return "NSE", "12345"
         
     def get_live_price(self, exchange, symbol, token):
-        # 1. Angel One WebSocket
+        # Use WebSocket if available for Angel One
         if exchange in ["NSE", "NFO", "BSE", "BFO", "MCX"] and self.ws_angel_connected and token in self.live_prices_angel:
             return self.live_prices_angel[token]
 
-        # 2. Paper Trading Generator (prevents getting stuck on Nifty)
         if self.is_mock and token == "12345":
             if "CE" in symbol or "PE" in symbol:
                 if self.state.get("active_trade") and self.state["active_trade"]["symbol"] == symbol:
                     base_price = self.state["active_trade"]["entry"]
-                    return base_price + np.random.normal(0, base_price * 0.005)
+                    change = np.random.normal(0, base_price * 0.005)
+                    return base_price + change
                 return np.random.uniform(150, 300)
             else:
-                if 'mock_prices' not in self.state:
-                    self.state['mock_prices'] = {}
-                if symbol not in self.state['mock_prices']:
-                    base = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, "XAUUSD": 2350.0, "GOLD": 62000.0, "BTCUSD": 65000.0}
-                    self.state['mock_prices'][symbol] = float(base.get(symbol, 500))
-                self.state['mock_prices'][symbol] += np.random.normal(0, self.state['mock_prices'][symbol] * 0.0005)
-                return float(self.state['mock_prices'][symbol])
+                if self.state.get('mock_price') is None:
+                    base_prices = {"NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, "XAUUSD": 2350.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0}
+                    base = base_prices.get(symbol, 500)
+                    self.state['mock_price'] = float(base)
+                change = np.random.normal(0, self.state['mock_price'] * 0.0005)
+                self.state['mock_price'] += change
+                return float(self.state['mock_price'])
 
         price = None
         try:
-            # 3. MT5 / Forex
             if exchange == "MT5" and self.is_mt5_connected and self.mt5_bridge:
                 price = self.mt5_bridge.get_live_price(symbol)
-                
-            # 4. CoinDCX (Crypto only, NO GOLD)
-            elif exchange == "COINDCX": 
-                if symbol not in ["XAUUSD", "GOLD"]: # Skip CoinDCX if it's Gold
-                    try:
+            elif exchange == "COINDCX" and self.coindcx_api:
+                try:
+                    if symbol == "XAUUSD":
+                        market_symbol = "XAUUSDT"
+                    else:
                         market_symbol = symbol.replace("USD", "USDT") if symbol.endswith("USD") and not symbol.endswith("USDT") else symbol
-                        res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=3).json()
-                        for coin in res:
-                            if coin.get('market', '').upper() in [market_symbol.upper(), market_symbol.replace('_', '').upper()]:
-                                price = float(coin['last_price'])
-                                break
-                    except: pass
-            
+                        
+                    res = requests.get("https://api.coindcx.com/exchange/ticker", timeout=5).json()
+                    for coin in res:
+                        mkt = coin.get('market', '')
+                        if mkt == market_symbol or mkt.upper() == market_symbol.upper() or mkt.replace('_', '').upper() == market_symbol.upper():
+                            price = float(coin['last_price'])
+                            break
+                except:
+                    pass
             elif exchange == "DELTA" and self.delta_api:
                 try:
                     target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
                     res = requests.get(f"https://api.delta.exchange/v2/products/ticker/24hr?symbol={target}").json()
-                    if res.get('success'): price = float(res['result']['close'])
-                except: pass
-            
+                    if res.get('success'):
+                        price = float(res['result']['close'])
+                except:
+                    pass
             elif self.kite and self.settings.get("primary_broker") == "Zerodha":
                 try:
                     tsym = f"{exchange}:{symbol}"
                     res = self.kite.quote([tsym])
                     price = float(res[tsym]['last_price'])
-                except: pass
-                
+                except:
+                    pass
             elif self.api:
                 try:
                     trading_symbol = INDEX_SYMBOLS.get(symbol, symbol)
                     res = self.api.ltpData(exchange, trading_symbol, str(token))
-                    if res and res.get('status'): price = float(res['data']['ltp'])
-                except: pass
-
-            elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge: price = self.fyers_bridge.get_live_price(symbol)
-            elif exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge: price = self.upstox_bridge.get_live_price(symbol)
-            elif exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge: price = self.fivepaisa_bridge.get_live_price(symbol)
-            elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge: price = self.binance_bridge.get_live_price(symbol)
-            elif exchange == "ICICI" and self.is_icici_connected and self.icici_bridge: price = self.icici_bridge.get_live_price(symbol)
-            elif exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge: price = self.stoxkart_bridge.get_live_price(symbol)
-            elif exchange == "DHAN" and self.is_dhan_connected and self.dhan_bridge: price = self.dhan_bridge.get_live_price(symbol)
-            elif exchange == "SHOONYA" and self.is_shoonya_connected and self.shoonya_bridge: price = self.shoonya_bridge.get_live_price(symbol)
+                    if res and res.get('status'):
+                        price = float(res['data']['ltp'])
+                except:
+                    pass
+            elif exchange == "FYERS" and self.is_fyers_connected and self.fyers_bridge:
+                price = self.fyers_bridge.get_live_price(symbol)
+            elif exchange == "UPSTOX" and self.is_upstox_connected and self.upstox_bridge:
+                price = self.upstox_bridge.get_live_price(symbol)
+            elif exchange == "5PAISA" and self.is_fivepaisa_connected and self.fivepaisa_bridge:
+                price = self.fivepaisa_bridge.get_live_price(symbol)
+            elif exchange == "BINANCE" and self.is_binance_connected and self.binance_bridge:
+                price = self.binance_bridge.get_live_price(symbol)
+            elif exchange == "ICICI" and self.is_icici_connected and self.icici_bridge:
+                price = self.icici_bridge.get_live_price(symbol)
+            elif exchange == "STOXKART" and self.is_stoxkart_connected and self.stoxkart_bridge:
+                price = self.stoxkart_bridge.get_live_price(symbol)
+            elif exchange == "DHAN" and self.is_dhan_connected and self.dhan_bridge:
+                price = self.dhan_bridge.get_live_price(symbol)
+            elif exchange == "SHOONYA" and self.is_shoonya_connected and self.shoonya_bridge:
+                price = self.shoonya_bridge.get_live_price(symbol)
         except Exception as e:
             self.log(f"⚠️ Error in get_live_price: {e}")
 
-        # 5. THE FIX: TRADINGVIEW BACKEND DATAFEED (Matches the UI Chart Exactly)
-        if price is None:
-            now = time.time()
-            cache_key = f"tv_live_{symbol}"
-            
-            # 2-second cache to prevent IP bans
-            if hasattr(self, '_tv_cache') and cache_key in self._tv_cache:
-                last_time, last_price = self._tv_cache[cache_key]
-                if now - last_time < 2:
-                    return last_price
-
-            if HAS_TVDATAFEED:
-                try:
-                    if not hasattr(self, 'tv_feed'):
-                        from tvDatafeed import TvDatafeed, Interval
-                        import logging
-                        logging.getLogger('tvDatafeed').setLevel(logging.ERROR)
-                        self.tv_feed = TvDatafeed(auto_login=False)
-
-                    tv_exch = "NSE"
-                    tv_sym = symbol
-                    
-                    # 🚨 THE FIX: Split XAUUSD (Forex) from GOLD (MCX)
-                    if symbol == "XAUUSD":
-                        tv_exch, tv_sym = "OANDA", "XAUUSD"
-                    elif symbol in COMMODITIES:
-                        # Force MCX continuous futures chart (e.g. MCX:GOLD1!)
-                        tv_exch = "MCX"
-                        base_comm = symbol.replace("M", "") if symbol.endswith("M") else symbol
-                        tv_sym = f"{base_comm}1!"
-                    elif "BTC" in symbol or "ETH" in symbol or "SOL" in symbol:
-                        tv_exch, tv_sym = "BINANCE", symbol.replace("USD", "USDT") if not symbol.endswith("USDT") else symbol
-
-                    df = self.tv_feed.get_hist(symbol=tv_sym, exchange=tv_exch, interval=Interval.in_1_minute, n_bars=1)
-                    
-                    if df is not None and not df.empty:
-                        price = float(df['close'].iloc[-1])
-                        if not hasattr(self, '_tv_cache'): self._tv_cache = {}
-                        self._tv_cache[cache_key] = (now, price)
-                        return price
-                except Exception as e:
-                    pass
-
-            # Ultimate Emergency Fallback (Yahoo Finance)
-            if price is None and (symbol in YF_TICKERS or "USD" in symbol):
-                try:
-                    yf_ticker = "XAUUSD=X" if symbol == "XAUUSD" else YF_TICKERS.get(symbol, symbol)
-                    if "USD" in symbol and yf_ticker == symbol:
-                        yf_ticker = f"{symbol.replace('USDT', '').replace('USD', '')}-USD"
-                        
-                    df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
-                    if not df.empty:
-                        raw_price = float(df['Close'].iloc[-1])
-                        
-                        # 🚨 THE FIX: Convert USD to INR for MCX Commodities if falling back to Yahoo
-                        if symbol in COMMODITIES:
-                            usd_inr = 83.50 # Approximate conversion rate
-                            if "GOLD" in symbol:
-                                price = raw_price * (usd_inr * 10) / 31.1035 # USD/oz to INR/10g
-                            elif "SILVER" in symbol:
-                                price = raw_price * (usd_inr * 1000) / 31.1035 # USD/oz to INR/1kg
-                            elif "CRUDEOIL" in symbol or "NATURALGAS" in symbol:
-                                price = raw_price * usd_inr # USD/barrel to INR/barrel
-                        else:
-                            price = raw_price
-                except:
-                    pass
-                    
+        if price is None and symbol in YF_TICKERS:
+            try:
+                yf_ticker = YF_TICKERS[symbol]
+                time.sleep(0.2)
+                df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+                if not df.empty:
+                    price = float(df['Close'].iloc[-1])
+                    self.log(f"⚠️ Using yfinance fallback for {symbol} live price: {price}")
+            except:
+                pass
         return price
 
     def get_historical_data(self, exchange, token, symbol="NIFTY", interval="5m"):
@@ -4979,34 +4817,21 @@ class SniperBot:
                 
         # Ultimate Mock Data Fallback so the app never crashes
         periods = 500 if interval == "1m" else 200
-        
-        # FIX: Convert yfinance 'm' to Pandas 'min' to prevent frequency crash
-        pd_freq = interval.replace('m', 'min').replace('h', 'h').replace('d', 'D')
-        
-        times = pd.date_range(end=get_ist(), periods=periods, freq=pd_freq)
-        trend = np.linspace(0, 1, periods) * (200 if "USD" not in symbol else 10)
-        noise = np.random.normal(0, (10 if "USD" not in symbol else 2), periods).cumsum()
-        
-        # FIX: Use correct base price instead of hardcoding 22000!
-        base_prices = {
-            "NIFTY": 22000, "BANKNIFTY": 47000, "SENSEX": 73000, "FINNIFTY": 21000, 
-            "NATURALGAS": 145.0, "CRUDEOIL": 6500.0, "GOLD": 62000.0, "SILVER": 72000.0, 
-            "XAUUSD": 2350.0, "EURUSD": 1.0850, "BTCUSD": 65000.0, "ETHUSD": 3500.0, "SOLUSD": 150.0
-        }
-        base_val = base_prices.get(symbol, 500.0)
-        
-        close_prices = base_val + trend + noise
-        
+        times = pd.date_range(end=get_ist(), periods=periods, freq=interval)
+        trend = np.linspace(0, 1, periods) * 200
+        noise = np.random.normal(0, 10, periods).cumsum()
+        close_prices = 22000 + trend + noise
         df = pd.DataFrame({
             'timestamp': times,
-            'open': close_prices - (2 if base_val > 1000 else 0.5),
-            'high': close_prices + (5 if base_val > 1000 else 1.0),
-            'low': close_prices - (5 if base_val > 1000 else 1.0),
+            'open': close_prices - 2,
+            'high': close_prices + 5,
+            'low': close_prices - 5,
             'close': close_prices,
             'volume': np.random.randint(1000, 50000, periods)
         })
         df.index = df['timestamp']
         return df
+
     def analyze_oi_and_greeks(self, df, is_hero_zero, signal):
         if not is_hero_zero or df is None or len(df) < 20:
             return True, ""
@@ -5349,76 +5174,57 @@ class SniperBot:
                 return order_id, None
             except Exception as e:
                 return None, f"Zerodha error: {str(e)}"
-        # --- 🛡️ FIXED ANGEL ONE: DYNAMIC PAYLOAD CONSTRUCTION ---
         if self.api:
             try:
-                # 1. Product Type Logic
-                p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
-
-                # 2. Strict Limit Rounding
-                if price and float(price) > 0:
-                    exec_price = float(round(round(float(price) / 0.05) * 0.05, 2))
-                    order_type_final = "LIMIT"
+                p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX", "NCO"] else "INTRADAY"
+                order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
+                
+                # 🛡️ THE FIX: Exact Tick Size Matching & 2-Decimal String Formatting
+                if order_type_final == "LIMIT" and price:
+                    if exchange == "MCX":
+                        if "CRUDEOIL" in symbol or "GOLD" in symbol or "SILVER" in symbol:
+                            exec_price = float(round(float(price)))  # Tick size 1
+                        elif "NATURALGAS" in symbol:
+                            exec_price = round(round(float(price) / 0.10) * 0.10, 2)  # Tick size 0.10
+                        else:
+                            exec_price = round(round(float(price) / 0.05) * 0.05, 2)
+                    elif exchange in ["CDS", "BCD", "NCO"]:
+                        exec_price = round(round(float(price) / 0.0025) * 0.0025, 4)
+                    else:
+                        exec_price = round(round(float(price) / 0.05) * 0.05, 2)
+                    
+                    # Angel One STRICTLY requires 2 decimal places to avoid payload rejection!
+                    if exchange in ["CDS", "BCD", "NCO"]:
+                        price_str = f"{exec_price:.4f}"
+                    else:
+                        price_str = f"{exec_price:.2f}"
                 else:
-                    order_type_final = "MARKET"
-
-                # 3. Lot Size Snapper
-                LOT_SIZES = {
-                    "FINNIFTY": 65, "MIDCPNIFTY": 120, "BANKNIFTY": 30, "BANKEX": 30,
-                    "SENSEX": 20, "NIFTY": 65, "CRUDEOILM": 10, "CRUDEOIL": 100, 
-                    "NATURALGAS": 1250, "GOLD": 100, "SILVER": 30
+                    price_str = "0"
+                
+                order_params = {
+                    "variety": "NORMAL", 
+                    "tradingsymbol": str(symbol).strip(), 
+                    "symboltoken": str(token).strip(), 
+                    "transactiontype": str(side).upper().strip(), 
+                    "exchange": str(exchange).upper().strip(), 
+                    "ordertype": str(order_type_final).upper().strip(), 
+                    "producttype": str(p_type).upper().strip(), 
+                    "duration": "DAY", 
+                    "price": price_str, 
+                    "quantity": str(int(float(qty))) 
                 }
                 
-                base_asset = next((asset for asset in sorted(LOT_SIZES.keys(), key=len, reverse=True) if str(symbol).startswith(asset)), None)
-                lot_size = LOT_SIZES.get(base_asset, 1)
-                raw_qty = int(float(qty))
-                valid_qty = int(max(lot_size, (raw_qty // lot_size) * lot_size)) if lot_size > 1 else raw_qty
-
-                # 4. 🚨 THE BARE MINIMUM PAYLOAD
-                order_params = {
-                    "variety": "NORMAL",
-                    "tradingsymbol": str(symbol),
-                    "symboltoken": str(token),
-                    "transactiontype": str(side.upper()),
-                    "exchange": str(exchange.upper()),
-                    "ordertype": order_type_final,
-                    "producttype": p_type,
-                    "duration": "DAY",
-                    "quantity": valid_qty
-                }
-
-                # 5. 🚨 ONLY attach the price key if it's a LIMIT order
-                if order_type_final == "LIMIT":
-                    order_params["price"] = exec_price
-
-                self.log(f"📤 Sending Dynamic Payload: {order_params}")
+                self.log(f"📤 Sending Angel Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
                 
-                # 6. Handle Server Drops
-                if res is None:
-                    self.log("🚨 Angel API returned None. Forcing Re-Login...")
-                    if self.login():
-                        res = self.api.placeOrder(order_params)
-                        if res is None:
-                            return None, "Angel Server is dead/unreachable right now."
-
-                if isinstance(res, dict) and res.get('status'):
-                    return res.get('data', {}).get('orderid'), None
+                if res and isinstance(res, dict) and res.get('status'):
+                    return res.get('data', {}).get('orderid', 'UNKNOWN_ID'), None
+                elif isinstance(res, str):
+                    return res, None
                 else:
-                    raw_error = res.get('message', str(res)) if isinstance(res, dict) else str(res)
-                    self.log(f"🚨 RAW API ERROR: {raw_error}")
-                    
-                    if "session expired" in raw_error.lower() or "invalid token" in raw_error.lower():
-                        self.log("🔑 Session Expired. Re-logging...")
-                        if self.login():
-                            res_retry = self.api.placeOrder(order_params)
-                            if isinstance(res_retry, dict) and res_retry.get('status'):
-                                return res_retry.get('data', {}).get('orderid'), None
-                            return None, f"Rejected after retry: {res_retry}"
-                    return None, f"Rejected: {raw_error}"
-
+                    return None, f"API Rejected payload. Sent Price: {price_str}"
             except Exception as e:
-                return None, f"Angel Payload Error: {str(e)}"
+                return None, f"Angel exception: {str(e)}"
         
         return None, "No broker available"
     def start_angel_ws(self):
@@ -5537,9 +5343,7 @@ class SniperBot:
             try:
                 acc_info = self.mt5_bridge.get_account_info()
                 if acc_info:
-                    # Use Equity for accurate live tracking (includes open PnL)
-                    live_eq = acc_info.get('equity', acc_info.get('balance', 0))
-                    balance_strs.append(f"MT5: $ {live_eq:,.2f}")
+                    balance_strs.append(f"MT5: $ {acc_info.get('balance', 0):,.2f}")
             except:
                 pass
         if self.is_fyers_connected and self.fyers_bridge:
@@ -6932,15 +6736,8 @@ elif st.session_state.page == "dashboard":
             with st.spinner(f"Fetching Live Market Data for {INDEX}..."):
                 exch, token = bot.get_token_info(INDEX)
                 df_preload = bot.get_historical_data(exch, token, symbol=INDEX, interval=TIMEFRAME) if not bot.is_mock else bot.get_historical_data("MOCK", "12345", symbol=INDEX, interval=TIMEFRAME)
-                
-                # FIX: Prioritize real live spot price over chart close price!
-                live_spot = bot.get_live_price(exch, INDEX, token)
-                if live_spot:
-                    bot.state["spot"] = live_spot
-                elif df_preload is not None and not df_preload.empty:
-                    bot.state["spot"] = df_preload['close'].iloc[-1]
-                    
                 if df_preload is not None and not df_preload.empty:
+                    bot.state["spot"] = df_preload['close'].iloc[-1]
                     bot.state["latest_candle"] = df_preload.iloc[-1].to_dict()
                     if STRATEGY == "Keyword Rule Builder":
                         t, s, v, e, df_c, atr, fib, strength = bot.analyzer.apply_keyword_strategy(df_preload, CUSTOM_CODE, INDEX)
@@ -7926,7 +7723,7 @@ elif st.session_state.page == "tools":
                     for log in bot.state["logs"]:
                         st.markdown(f"`{log}`")
                 st.markdown('</div>', unsafe_allow_html=True)
-        with sub_tabs[1]:
+        with sub_tabs:
             with st.container():
                 st.markdown('<div class="modern-card">', unsafe_allow_html=True)
                 report_period = st.selectbox("Select report period", ["Daily", "Weekly", "All Time"], index=0)
