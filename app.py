@@ -4504,14 +4504,14 @@ class SniperBot:
         if self.mt5_acc and self.mt5_server:
             if self.connect_mt5():
                 if self.is_mt5_connected and self.mt5_bridge:
-            try:
-                acc_info = self.mt5_bridge.get_account_info()
-                if acc_info:
-                    # Use Equity for accurate live tracking (includes open PnL)
-                    live_eq = acc_info.get('equity', acc_info.get('balance', 0))
-                    balance_strs.append(f"MT5: $ {live_eq:,.2f}")
-            except:
-                pass
+                    try:
+                        acc_info = self.mt5_bridge.get_account_info()
+                        if acc_info:
+                            # Use Equity for accurate live tracking (includes open PnL)
+                            live_eq = acc_info.get('equity', acc_info.get('balance', 0))
+                            balance_strs.append(f"MT5: $ {live_eq:,.2f}")
+                    except:
+                        pass
 
         if self.connect_coindcx():
             if self.is_coindcx_connected and self.coindcx_bridge:
