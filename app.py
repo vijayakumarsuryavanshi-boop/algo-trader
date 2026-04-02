@@ -5174,57 +5174,54 @@ class SniperBot:
                 return order_id, None
             except Exception as e:
                 return None, f"Zerodha error: {str(e)}"
+        # --- 🛡️ FIXED ANGEL ONE: FORCED MARKET ORDER ---
         if self.api:
             try:
-                p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX", "NCO"] else "INTRADAY"
-                order_type_final = "LIMIT" if order_type.upper() == "LIMIT" and price else "MARKET"
-                
-                # 🛡️ THE FIX: Exact Tick Size Matching & 2-Decimal String Formatting
-                if order_type_final == "LIMIT" and price:
-                    if exchange == "MCX":
-                        if "CRUDEOIL" in symbol or "GOLD" in symbol or "SILVER" in symbol:
-                            exec_price = float(round(float(price)))  # Tick size 1
-                        elif "NATURALGAS" in symbol:
-                            exec_price = round(round(float(price) / 0.10) * 0.10, 2)  # Tick size 0.10
-                        else:
-                            exec_price = round(round(float(price) / 0.05) * 0.05, 2)
-                    elif exchange in ["CDS", "BCD", "NCO"]:
-                        exec_price = round(round(float(price) / 0.0025) * 0.0025, 4)
-                    else:
-                        exec_price = round(round(float(price) / 0.05) * 0.05, 2)
-                    
-                    # Angel One STRICTLY requires 2 decimal places to avoid payload rejection!
-                    if exchange in ["CDS", "BCD", "NCO"]:
-                        price_str = f"{exec_price:.4f}"
-                    else:
-                        price_str = f"{exec_price:.2f}"
+                # 1. Product Type Logic
+                if exchange in ["NFO", "BFO", "MCX"]:
+                    p_type = "CARRYFORWARD"
                 else:
-                    price_str = "0"
-                
+                    p_type = "INTRADAY"
+
+                # 2. 🚨 THE OVERRIDE: Force MARKET to bypass all price rejections
+                order_type_final = "MARKET"
+                exec_price = "0"  # Market orders MUST send exactly "0" as a string
+
+                # 3. Strict String Casting for Quantity
+                qty_str = str(int(float(qty)))
+
+                # 4. THE BULLETPROOF PAYLOAD
                 order_params = {
-                    "variety": "NORMAL", 
-                    "tradingsymbol": str(symbol).strip(), 
-                    "symboltoken": str(token).strip(), 
-                    "transactiontype": str(side).upper().strip(), 
-                    "exchange": str(exchange).upper().strip(), 
-                    "ordertype": str(order_type_final).upper().strip(), 
-                    "producttype": str(p_type).upper().strip(), 
-                    "duration": "DAY", 
-                    "price": price_str, 
-                    "quantity": str(int(float(qty))) 
+                    "variety": "NORMAL",
+                    "tradingsymbol": str(symbol),
+                    "symboltoken": str(token),
+                    "transactiontype": str(side.upper()),
+                    "exchange": str(exchange.upper()),
+                    "ordertype": order_type_final,
+                    "producttype": str(p_type),
+                    "duration": "DAY",
+                    "price": exec_price,     # Bypasses the 299.60 error
+                    "quantity": qty_str
                 }
-                
-                self.log(f"📤 Sending Angel Payload: {order_params}")
+
+                self.log(f"📤 Sending Market Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
                 
                 if res and isinstance(res, dict) and res.get('status'):
-                    return res.get('data', {}).get('orderid', 'UNKNOWN_ID'), None
-                elif isinstance(res, str):
-                    return res, None
+                    return res.get('data', {}).get('orderid'), None
                 else:
-                    return None, f"API Rejected payload. Sent Price: {price_str}"
+                    # Capture the EXACT raw error from Angel One for debugging
+                    raw_error = res.get('message', str(res)) if isinstance(res, dict) else str(res)
+                    self.log(f"🚨 RAW API ERROR: {raw_error}")
+                    
+                    if "session expired" in raw_error.lower() or "invalid token" in raw_error.lower():
+                        self.log("🔑 Session Expired. Re-logging...")
+                        if self.login():
+                            return self.place_real_order(symbol, token, qty, side, exchange, order_type, price)
+                    return None, f"Rejected: {raw_error}"
+
             except Exception as e:
-                return None, f"Angel exception: {str(e)}"
+                return None, f"Angel Payload Error: {str(e)}"
         
         return None, "No broker available"
     def start_angel_ws(self):
