@@ -8196,65 +8196,76 @@ elif st.session_state.page == "tools":
 
 # ==========================================
 # GLOBAL UI ELEMENTS (Visible on Dashboard & Tools)
-# PUT THIS AT THE VERY END OF YOUR SCRIPT
+# MOBILE OPTIMIZED DOCK
 # ==========================================
 if st.session_state.page in ["dashboard", "tools"]:
-    
-    # We wrap this in a container to safely isolate it from your Tools tabs
     with st.container():
+        # CSS to force horizontal layout on mobile and style buttons as icons
         st.markdown("""
         <style>
         #operable-dock-anchor { display: none; }
         
-        /* Strictly target ONLY the block containing this specific anchor */
+        /* The main horizontal block container */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
             position: fixed;
-            bottom: 20px;
+            bottom: 15px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(255, 255, 255, 0.90);
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
             border-radius: 50px;
             padding: 5px 15px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255,255,255,0.4);
-            z-index: 99999;
-            width: max-content;
-            gap: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            z-index: 999999;
+            width: 90% !important;
+            max-width: 320px;
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            justify-content: space-around !important;
+            align-items: center !important;
+            border: 1px solid rgba(255,255,255,0.1);
         }
         
-        @media (prefers-color-scheme: dark) {
-            div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) {
-                background: rgba(15, 23, 42, 0.85);
-                border: 1px solid rgba(255,255,255,0.1);
-            }
+        /* Force individual columns to not wrap */
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) > div {
+            width: auto !important;
+            flex: 1 1 0 !important;
+            min-width: 0 !important;
         }
-        
+
+        /* Style buttons as small icons with tiny text */
         div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button {
             background: transparent !important;
             border: none !important;
-            box-shadow: none !important;
-            font-weight: 700 !important;
-            transition: all 0.2s ease !important;
-            border-radius: 30px !important;
+            color: white !important;
+            padding: 0 !important;
+            font-size: 11px !important;
+            height: 45px !important;
+            line-height: 1.2 !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
         }
-        
-        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button:hover {
-            background: rgba(2, 132, 199, 0.2) !important;
-            color: #0284c7 !important;
-            transform: translateY(-2px);
+
+        /* Icon size adjustment */
+        div[data-testid="stHorizontalBlock"]:has(#operable-dock-anchor) button p {
+            font-size: 18px !important;
+            margin-bottom: 2px !important;
         }
         </style>
         """, unsafe_allow_html=True)
 
-        # 4 columns: 3 for buttons, 1 tiny one for the CSS anchor
-        dock_col1, dock_col2, dock_col3, anchor_col = st.columns([1, 1, 1, 0.01])
+        # Create 3 equal columns for mobile
+        dock_col1, dock_col2, dock_col3 = st.columns(3)
         
-        with anchor_col:
-            st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
+        # Hidden anchor to trigger the CSS
+        st.markdown('<div id="operable-dock-anchor"></div>', unsafe_allow_html=True)
 
         with dock_col1:
-            if st.button("▶️ Start", key="dock_start_btn", disabled=bot.state.get("is_running", False)):
+            is_running = bot.state.get("is_running", False)
+            if st.button("▶️\nStart", key="dock_start_mob", disabled=is_running, use_container_width=True):
                 bot.state["is_running"] = True
                 bot.state["engine_active"] = True
                 t = threading.Thread(target=bot.trading_loop, daemon=True)
@@ -8265,17 +8276,16 @@ if st.session_state.page in ["dashboard", "tools"]:
                 st.rerun()
                 
         with dock_col2:
-            if st.button("🔄 Sync", key="dock_sync_btn"):
+            if st.button("🔄\nSync", key="dock_sync_mob", use_container_width=True):
                 play_sound_now("click")
                 st.rerun()
                 
         with dock_col3:
             can_exit = bot.state.get("active_trade") is not None or len(bot.state.get("active_trades", [])) > 0
-            if st.button("☠️ Exit", key="dock_exit_btn", disabled=not can_exit):
+            if st.button("☠️\nExit", key="dock_exit_mob", disabled=not can_exit, use_container_width=True):
                 bot.force_exit()
                 play_sound_now("click")
                 st.rerun()
-
 
 # ==========================================
 # BACKGROUND QUEUES & AUDIO
