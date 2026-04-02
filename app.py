@@ -1862,80 +1862,146 @@ class MT5WebBridge:
         self.account = account
         self.password = password
         self.server = server
-        self.api_url = api_url or "https://mt5-web-api.mtapi.io/v1"
+        self.api_url = api_url
         self.connected = False
         self._use_local = False
+
+    def _resolve_mt5_symbol(self, base_symbol):
+        import MetaTrader5 as mt5
+        # Smart routing for Gold across XM360, BTCDana, Exness, etc.
+        if "XAU" in base_symbol or "GOLD" in base_symbol:
+            candidates = [
+                "XAUUSD", "XAUUSDm", "XAUUSDmicro", "XAUUSDc", "XAUUSD.r",
+                "GOLD", "GOLD#", "GOLDm", "GOLDmicro", "GOLDc", "GOLD.r"
+            ]
+            for cand in candidates:
+                info = mt5.symbol_info(cand)
+                if info: return cand, info
+                
+        info = mt5.symbol_info(base_symbol)
+        if info: return base_symbol, info
+        
+        for suffix in ["m", "micro", "c", ".r", "._a", "#"]:
+            info = mt5.symbol_info(base_symbol + suffix)
+            if info: return base_symbol + suffix, info
+            
+        return None, None
 
     def connect(self):
         if HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                if mt5.initialize(login=int(self.account), password=self.password, server=self.server):
+                if not mt5.initialize():
+                    return False, f"MT5 Init Failed: {mt5.last_error()}"
+                
+                acc_int = int(str(self.account).strip())
+                pwd = str(self.password).strip()
+                srv = str(self.server).strip()
+                
+                authorized = mt5.login(login=acc_int, password=pwd, server=srv)
+                if authorized:
                     self.connected = True
                     self._use_local = True
-                    return True, f"MT5 local connected ({self.server})"
+                    return True, f"MT5 local connected ({srv})"
+                else:
+                    return False, f"MT5 Login Failed: {mt5.last_error()}"
             except Exception as e:
-                pass
+                return False, f"MT5 Python Error: {e}"
+        
         self.connected = True
         self._use_local = False
-        return True, f"MT5 bridge simulated ({self.server})"
+        return True, "MT5 simulated (Cloud Environment)"
 
     def get_live_price(self, symbol):
         if not self.connected: return None
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                if not mt5.symbol_info(symbol):
-                    alt_symbol = symbol + "m" if symbol in ["XAUUSD", "BTCUSD", "ETHUSD"] else symbol
-                    if mt5.symbol_info(alt_symbol):
-                        symbol = alt_symbol
-                tick = mt5.symbol_info_tick(symbol)
-                if tick: return float((tick.bid + tick.ask) / 2)
+                # Wake up terminal if sleeping
+                if not mt5.terminal_info():
+                    mt5.initialize()
+                    mt5.login(login=int(self.account), password=self.password, server=self.server)
+
+                resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
+                if sym_info:
+                    mt5.symbol_select(resolved_sym, True)
+                    tick = mt5.symbol_info_tick(resolved_sym)
+                    if tick and tick.bid > 0: 
+                        return float((tick.bid + tick.ask) / 2)
+                    rates = mt5.copy_rates_from_pos(resolved_sym, mt5.TIMEFRAME_M1, 0, 1)
+                    if rates is not None and len(rates) > 0:
+                        return float(rates['close'])
             except Exception: pass
-        yf_map = {"XAUUSD":"GC=F","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD","ETHUSD":"ETH-USD","SOLUSD":"SOL-USD"}
-        try:
-            df = yf.Ticker(yf_map.get(symbol, symbol)).history(period="1d", interval="1m")
-            if not df.empty: return float(df["Close"].iloc[-1])
-        except Exception: pass
-        return None
+        return None 
 
     def place_order(self, symbol, qty, side):
         if not self.connected: return None, "Not connected"
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                if not mt5.symbol_info(symbol):
-                    alt_symbol = symbol + "m" if symbol in ["XAUUSD", "BTCUSD", "ETHUSD"] else symbol
-                    if mt5.symbol_info(alt_symbol):
-                        symbol = alt_symbol
-                tick = mt5.symbol_info_tick(symbol)
-                if not tick:
-                    return None, f"Symbol {symbol} not found"
+                # Wake up terminal if sleeping
+                if not mt5.terminal_info():
+                    mt5.initialize()
+                    mt5.login(login=int(self.account), password=self.password, server=self.server)
+
+                resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
+                            
+                if not sym_info: return None, f"Symbol {symbol} not found in MT5."
+                if not sym_info.visible: mt5.symbol_select(resolved_sym, True)
+                    
+                tick = mt5.symbol_info_tick(resolved_sym)
+                if not tick: return None, f"Tick data for {resolved_sym} not found."
+                
+                # 🚨 THE FIX: Strict Broker Volume Step Rounding
+                vol_step = sym_info.volume_step
+                clean_qty = round(float(qty) / vol_step) * vol_step
+                if clean_qty < sym_info.volume_min:
+                    clean_qty = sym_info.volume_min
+                    
                 action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
-                # SEBI 2026: Use LIMIT order with MPP band
-                price = tick.ask * 1.005 if str(side).upper()=="BUY" else tick.bid * 0.995
+                price = tick.ask if action == mt5.ORDER_TYPE_BUY else tick.bid
+                
+                filling_type = mt5.ORDER_FILLING_IOC
+                if (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK): filling_type = mt5.ORDER_FILLING_FOK
+                elif (sym_info.filling_mode & mt5.SYMBOL_FILLING_IOC): filling_type = mt5.ORDER_FILLING_IOC
+                else: filling_type = mt5.ORDER_FILLING_RETURN
+
                 req = {
                     "action": mt5.TRADE_ACTION_DEAL,
-                    "symbol": symbol, "volume": float(qty), "type": action,
-                    "price": price, "deviation": 20, "magic": 20250101,
-                    "comment": "SHREE_BOT", "type_time": mt5.ORDER_TIME_GTC,
-                    "type_filling": mt5.ORDER_FILLING_IOC,
+                    "symbol": resolved_sym, 
+                    "volume": float(clean_qty), 
+                    "type": action,
+                    "price": price, 
+                    "deviation": 20, 
+                    "magic": 20250101,
+                    "comment": "SHREE_BOT", 
+                    "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": filling_type,
                 }
+                
                 result = mt5.order_send(req)
                 if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                     return str(result.order), None
-                return None, f"MT5 retcode: {result.retcode if result else 'unknown'}"
+                    
+                # Detailed Error Report for XM360/BTCDana
+                err = result.comment if result else mt5.last_error()
+                return None, f"MT5 Rejected (Code {result.retcode if result else 'None'}): {err}"
+                
             except Exception as e:
-                return None, str(e)
+                return None, f"MT5 Python Error: {str(e)}"
         return f"MT5_SIM_{int(time.time())}", None
 
     def get_historical_data(self, symbol, interval):
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
+                resolved_sym, _ = self._resolve_mt5_symbol(symbol)
+                if not resolved_sym: return None
+                
                 tf_map = {"1m":mt5.TIMEFRAME_M1,"5m":mt5.TIMEFRAME_M5,"15m":mt5.TIMEFRAME_M15}
-                rates = mt5.copy_rates_from_pos(symbol, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
-                if rates is not None:
+                rates = mt5.copy_rates_from_pos(resolved_sym, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
+                if rates is not None and len(rates) > 0:
+                    import pandas as pd
                     df = pd.DataFrame(rates)
                     df["time"] = pd.to_datetime(df["time"], unit="s")
                     df.set_index("time", inplace=True)
@@ -1949,10 +2015,23 @@ class MT5WebBridge:
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
+                # 🚨 THE FIX: Wake up terminal before fetching balance!
+                if not mt5.terminal_info():
+                    mt5.initialize()
+                    mt5.login(login=int(self.account), password=self.password, server=self.server)
+                
                 info = mt5.account_info()
-                if info: return {"balance": float(info.balance), "login": self.account}
+                if info is not None: 
+                    return {
+                        "balance": float(info.balance), 
+                        "equity": float(info.equity), 
+                        "profit": float(info.profit), 
+                        "login": self.account,
+                        "name": info.name,
+                        "server": info.server
+                    }
             except Exception: pass
-        return {"balance": 0, "login": self.account}
+        return {"balance": 0.0, "equity": 0.0, "login": self.account}
 
 class FyersBridge:
     def __init__(self, client_id, secret, token):
