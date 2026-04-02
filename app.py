@@ -1890,7 +1890,7 @@ class MT5WebBridge:
         self.account = account
         self.password = password
         self.server = server
-        self.api_url = api_url or "https://mt5-web-api.mtapi.io/v1"
+        self.api_url = api_url
         self.connected = False
         self._use_local = False
 
@@ -1906,10 +1906,11 @@ class MT5WebBridge:
                 info = mt5.symbol_info(cand)
                 if info: return cand, info
                 
-        # Standard check for other pairs (BTCUSDm, EURUSDm, etc.)
+        # Standard check for other pairs
         info = mt5.symbol_info(base_symbol)
         if info: return base_symbol, info
         
+        # Check standard suffixes
         for suffix in ["m", "micro", "c", ".r", "._a", "#"]:
             info = mt5.symbol_info(base_symbol + suffix)
             if info: return base_symbol + suffix, info
@@ -1917,18 +1918,29 @@ class MT5WebBridge:
         return None, None
 
     def connect(self):
+        # 🚨 STRICT LOGIN CHECK: No more silent failures!
         if HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                if mt5.initialize(login=int(self.account), password=self.password, server=self.server):
+                if not mt5.initialize():
+                    err = mt5.last_error()
+                    return False, f"MT5 Init Failed: {err}. (Is the MT5 Terminal open on this PC?)"
+                
+                authorized = mt5.login(login=int(self.account), password=self.password, server=self.server)
+                if authorized:
                     self.connected = True
                     self._use_local = True
                     return True, f"MT5 local connected ({self.server})"
+                else:
+                    err = mt5.last_error()
+                    return False, f"MT5 Login Failed: {err}. Check Account, Password, and exact Server Name."
             except Exception as e:
-                pass
+                return False, f"MT5 Python Error: {e}"
+        
+        # If running on Linux/Streamlit Cloud, HAS_MT5 is False
         self.connected = True
         self._use_local = False
-        return True, f"MT5 bridge simulated ({self.server})"
+        return True, f"MT5 bridge simulated (Running on Cloud/Linux)"
 
     def get_live_price(self, symbol):
         if not self.connected: return None
@@ -1938,42 +1950,45 @@ class MT5WebBridge:
                 resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
                 
                 if sym_info:
-                    if not sym_info.visible:
-                        mt5.symbol_select(resolved_sym, True)
+                    # Force it into Market Watch
+                    mt5.symbol_select(resolved_sym, True)
+                    
+                    # METHOD 1: Try Live Tick
                     tick = mt5.symbol_info_tick(resolved_sym)
-                    if tick: return float((tick.bid + tick.ask) / 2)
+                    if tick and tick.bid > 0: 
+                        return float((tick.bid + tick.ask) / 2)
+                        
+                    # METHOD 2: Force fetch last 1-min candle if tick is frozen
+                    rates = mt5.copy_rates_from_pos(resolved_sym, mt5.TIMEFRAME_M1, 0, 1)
+                    if rates is not None and len(rates) > 0:
+                        return float(rates['close'])
             except Exception: pass
             
-        # Fallback to yfinance if MT5 fetch fails
-        yf_map = {"XAUUSD":"XAUUSD=X","GOLD":"XAUUSD=X","EURUSD":"EURUSD=X","BTCUSD":"BTC-USD","ETHUSD":"ETH-USD"}
-        try:
-            df = yf.Ticker(yf_map.get(symbol, symbol)).history(period="1d", interval="1m")
-            if not df.empty: return float(df["Close"].iloc[-1])
-        except Exception: pass
-        return None
+        # 🚨 FIX: Return None instead of fake Yahoo data. 
+        # This forces the main bot to use TradingView so the chart & execution match perfectly.
+        return None 
 
     def place_order(self, symbol, qty, side):
         if not self.connected: return None, "Not connected"
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                
                 resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
                             
                 if not sym_info:
-                    return None, f"Symbol {symbol} (or aliases) not found in MT5 Market Watch."
+                    return None, f"Symbol {symbol} not found in MT5."
                     
                 if not sym_info.visible:
                     mt5.symbol_select(resolved_sym, True)
                     
                 tick = mt5.symbol_info_tick(resolved_sym)
                 if not tick:
-                    return None, f"Tick data for {resolved_sym} not found. Market closed?"
+                    return None, f"Tick data for {resolved_sym} not found."
                     
                 action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
                 price = tick.ask if action == mt5.ORDER_TYPE_BUY else tick.bid
                 
-                # Dynamic filling mode
+                # 🚨 DYNAMIC FILLING MODE (Fixes XM360 & BTCDana Rejections)
                 filling_type = mt5.ORDER_FILLING_IOC
                 if (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK):
                     filling_type = mt5.ORDER_FILLING_FOK
@@ -1999,23 +2014,32 @@ class MT5WebBridge:
                 if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                     return str(result.order), None
                     
-                return None, f"MT5 retcode: {result.retcode if result else 'Request Failed'}, Price: {price}"
+                # Enhanced Error Translation
+                err_dict = {
+                    10015: "Invalid price", 10016: "Invalid stops", 10018: "Market closed", 
+                    10019: "Not enough money", 10027: "Auto-trading disabled by client terminal",
+                    10030: "Unsupported filling mode", 10031: "No connection"
+                }
+                err_msg = err_dict.get(result.retcode, f"Retcode {result.retcode}") if result else "Unknown Error"
+                return None, f"MT5 Rejected: {err_msg}"
+                
             except Exception as e:
-                return None, str(e)
+                return None, f"MT5 Python Error: {str(e)}"
+                
+        # If simulated, return a fake order ID so the dashboard can keep testing
         return f"MT5_SIM_{int(time.time())}", None
 
     def get_historical_data(self, symbol, interval):
         if self._use_local and HAS_MT5:
             try:
                 import MetaTrader5 as mt5
-                
-                # Use smart resolution for charts too!
                 resolved_sym, _ = self._resolve_mt5_symbol(symbol)
                 if not resolved_sym: return None
                 
                 tf_map = {"1m":mt5.TIMEFRAME_M1,"5m":mt5.TIMEFRAME_M5,"15m":mt5.TIMEFRAME_M15}
                 rates = mt5.copy_rates_from_pos(resolved_sym, tf_map.get(interval, mt5.TIMEFRAME_M5), 0, 500)
-                if rates is not None:
+                if rates is not None and len(rates) > 0:
+                    import pandas as pd
                     df = pd.DataFrame(rates)
                     df["time"] = pd.to_datetime(df["time"], unit="s")
                     df.set_index("time", inplace=True)
@@ -2033,9 +2057,11 @@ class MT5WebBridge:
                 if info is not None: 
                     return {
                         "balance": float(info.balance), 
-                        "equity": float(info.equity),
-                        "profit": float(info.profit),
-                        "login": self.account
+                        "equity": float(info.equity), 
+                        "profit": float(info.profit), 
+                        "login": self.account,
+                        "name": info.name,
+                        "server": info.server
                     }
             except Exception: pass
         return {"balance": 0.0, "equity": 0.0, "login": self.account}
