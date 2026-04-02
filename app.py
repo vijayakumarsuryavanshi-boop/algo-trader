@@ -1784,6 +1784,7 @@ class DeltaExchangeBridge:
         self.api_key = api_key
         self.secret = secret
         self.connected = False
+        self.product_map = {}
 
     def connect(self):
         try:
@@ -1804,11 +1805,31 @@ class DeltaExchangeBridge:
         except:
             return None
 
+    def _get_product_id(self, target_symbol):
+        # Cache product IDs so we don't have to hit the API on every single trade
+        if target_symbol in self.product_map:
+            return self.product_map[target_symbol]
+        try:
+            res = requests.get("https://api.delta.exchange/v2/products", timeout=5)
+            if res.status_code == 200:
+                for p in res.json().get('result', []):
+                    self.product_map[p['symbol']] = int(p['id'])
+                return self.product_map.get(target_symbol)
+        except Exception as e:
+            print(f"Error fetching Delta products: {e}")
+        return None
+
     def place_order(self, symbol, qty, side, order_type="MARKET", price=None):
         if not self.connected:
             return None, "Not connected"
         try:
             target = symbol if symbol.endswith("USD") or symbol.endswith("USDT") else f"{symbol}USD"
+            
+            # FIX 1: Fetch the numeric integer product_id required by Delta API
+            product_id = self._get_product_id(target)
+            if not product_id:
+                return None, f"Could not find numerical product_id for {target} on Delta."
+
             # SEBI 2026: Convert MARKET to LIMIT with MPP band
             if order_type.upper() == "MARKET":
                 order_type = "LIMIT"
@@ -1820,20 +1841,24 @@ class DeltaExchangeBridge:
                         price = price_live * 0.995
                 else:
                     return None, "Cannot fetch live price for MPP band"
+            
             payload = {
-                "product_id": target,
+                "product_id": product_id,
                 "size": int(float(qty)),
-                "side": "buy" if side == "BUY" else "sell",
+                "side": "buy" if side.upper() == "BUY" else "sell",
                 "order_type": "limit_order" if order_type.upper() == "LIMIT" else "market_order"
             }
             if order_type.upper() == "LIMIT" and price:
-                payload["limit_price"] = price
+                # FIX 2: Delta strict typing requires limit_price to be a string
+                payload["limit_price"] = str(round(float(price), 4))
+                
             payload_str = json.dumps(payload, separators=(',', ':'))
             ts, sig = generate_delta_signature('POST', '/v2/orders', payload_str, self.secret)
             headers = {'api-key': self.api_key, 'signature': sig, 'timestamp': ts, 'Content-Type': 'application/json'}
+            
             res = requests.post("https://api.delta.exchange/v2/orders", headers=headers, data=payload_str)
             if res.status_code == 200:
-                return res.json().get('result', {}).get('id'), None
+                return str(res.json().get('result', {}).get('id')), None
             else:
                 return None, f"Delta error: {res.text}"
         except Exception as e:
@@ -1852,11 +1877,12 @@ class DeltaExchangeBridge:
             if res.status_code == 200:
                 for b in res.json().get('result', []):
                     if b['asset_symbol'] == 'USDT':
-                        return {'balance': float(b['balance'])}
+                        # FIX 3: Prioritize available_balance over total balance
+                        bal = b.get('available_balance', b.get('balance', 0))
+                        return {'balance': float(bal)}
             return None
         except:
             return None
-
 class MT5WebBridge:
     def __init__(self, account, password, server, api_url=""):
         self.account = account
@@ -4502,8 +4528,6 @@ class SniperBot:
                 self.log(f"❌ Zerodha Exception: {e}")
 
         if self.mt5_acc and self.mt5_server:
-            if self.connect_mt5():
-                if self.mt5_acc and self.mt5_server:
             if self.connect_mt5():
                 if self.is_mt5_connected and self.mt5_bridge:
                     acc_info = self.mt5_bridge.get_account_info()
