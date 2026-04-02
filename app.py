@@ -5174,7 +5174,7 @@ class SniperBot:
                 return order_id, None
             except Exception as e:
                 return None, f"Zerodha error: {str(e)}"
-        # --- 🛡️ FIXED ANGEL ONE: FORCED MARKET ORDER ---
+        # --- 🛡️ FIXED ANGEL ONE: FORCED MARKET + UPDATED SEBI LOT SIZES ---
         if self.api:
             try:
                 # 1. Product Type Logic
@@ -5183,12 +5183,43 @@ class SniperBot:
                 else:
                     p_type = "INTRADAY"
 
-                # 2. 🚨 THE OVERRIDE: Force MARKET to bypass all price rejections
+                # 2. Force MARKET to bypass price rejections
                 order_type_final = "MARKET"
-                exec_price = "0"  # Market orders MUST send exactly "0" as a string
+                exec_price = "0"
 
-                # 3. Strict String Casting for Quantity
-                qty_str = str(int(float(qty)))
+                # 3. 🚨 THE FIX: Updated SEBI/Exchange Revised Lot Sizes
+                LOT_SIZES = {
+                    "FINNIFTY": 65,
+                    "MIDCPNIFTY": 120,
+                    "BANKNIFTY": 30,
+                    "BANKEX": 30,
+                    "SENSEX": 20,
+                    "NIFTY": 65,        # 🚨 Updated to your parameters!
+                    "CRUDEOILM": 10,    # Crude Mini
+                    "CRUDEOIL": 100,    # Crude Main
+                    "NATURALGAS": 1250,
+                    "GOLD": 100, 
+                    "SILVER": 30
+                }
+                
+                # Detect which asset we are trading from the symbol string
+                # We sort by length so "FINNIFTY" is checked before "NIFTY"
+                base_asset = None
+                for asset in sorted(LOT_SIZES.keys(), key=len, reverse=True):
+                    if str(symbol).startswith(asset):
+                        base_asset = asset
+                        break
+                
+                lot_size = LOT_SIZES.get(base_asset, 1)
+                raw_qty = int(float(qty))
+                
+                # Snap to the nearest valid lot multiple (e.g., forces exact multiples of 65)
+                if lot_size > 1:
+                    valid_qty = max(lot_size, (raw_qty // lot_size) * lot_size)
+                else:
+                    valid_qty = raw_qty
+                    
+                qty_str = str(valid_qty)
 
                 # 4. THE BULLETPROOF PAYLOAD
                 order_params = {
@@ -5200,17 +5231,20 @@ class SniperBot:
                     "ordertype": order_type_final,
                     "producttype": str(p_type),
                     "duration": "DAY",
-                    "price": exec_price,     # Bypasses the 299.60 error
-                    "quantity": qty_str
+                    "price": exec_price,     
+                    "quantity": qty_str      # Now perfectly formatted and scaled
                 }
 
                 self.log(f"📤 Sending Market Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
                 
-                if res and isinstance(res, dict) and res.get('status'):
+                # The API will sometimes return None if the payload isn't readable or network drops
+                if res is None:
+                    return None, "Angel returned None – No response from server"
+
+                if isinstance(res, dict) and res.get('status'):
                     return res.get('data', {}).get('orderid'), None
                 else:
-                    # Capture the EXACT raw error from Angel One for debugging
                     raw_error = res.get('message', str(res)) if isinstance(res, dict) else str(res)
                     self.log(f"🚨 RAW API ERROR: {raw_error}")
                     
