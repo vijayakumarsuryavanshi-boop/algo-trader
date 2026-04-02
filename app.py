@@ -5174,22 +5174,20 @@ class SniperBot:
                 return order_id, None
             except Exception as e:
                 return None, f"Zerodha error: {str(e)}"
-        # --- 🛡️ FIXED ANGEL ONE: PURE NUMBER DATATYPES + SAFE LIMIT ---
+        # --- 🛡️ FIXED ANGEL ONE: DYNAMIC PAYLOAD CONSTRUCTION ---
         if self.api:
             try:
                 # 1. Product Type Logic
                 p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
 
-                # 2. 🚨 THE FIX: Strict Math Rounding & Pure FLOAT datatype
+                # 2. Strict Limit Rounding
                 if price and float(price) > 0:
-                    # Rounds perfectly to nearest 0.05, and stays a FLOAT (e.g., 311.30)
                     exec_price = float(round(round(float(price) / 0.05) * 0.05, 2))
                     order_type_final = "LIMIT"
                 else:
-                    exec_price = 0.0
                     order_type_final = "MARKET"
 
-                # 3. Lot Size Snapper & Pure INT datatype
+                # 3. Lot Size Snapper
                 LOT_SIZES = {
                     "FINNIFTY": 65, "MIDCPNIFTY": 120, "BANKNIFTY": 30, "BANKEX": 30,
                     "SENSEX": 20, "NIFTY": 65, "CRUDEOILM": 10, "CRUDEOIL": 100, 
@@ -5199,11 +5197,9 @@ class SniperBot:
                 base_asset = next((asset for asset in sorted(LOT_SIZES.keys(), key=len, reverse=True) if str(symbol).startswith(asset)), None)
                 lot_size = LOT_SIZES.get(base_asset, 1)
                 raw_qty = int(float(qty))
-                
-                # Snap to valid lot multiple and force it to be an INTEGER
                 valid_qty = int(max(lot_size, (raw_qty // lot_size) * lot_size)) if lot_size > 1 else raw_qty
 
-                # 4. 🚨 THE PRISTINE PAYLOAD: No strings for numbers!
+                # 4. 🚨 THE BARE MINIMUM PAYLOAD
                 order_params = {
                     "variety": "NORMAL",
                     "tradingsymbol": str(symbol),
@@ -5213,19 +5209,20 @@ class SniperBot:
                     "ordertype": order_type_final,
                     "producttype": p_type,
                     "duration": "DAY",
-                    "price": exec_price,         # Pure Float (e.g., 311.3)
-                    "triggerprice": 0.0,         # Pure Float (Prevents backend None crashes)
-                    "quantity": valid_qty        # Pure Int (e.g., 65)
+                    "quantity": valid_qty
                 }
 
-                self.log(f"📤 Sending Pristine Payload: {order_params}")
+                # 5. 🚨 ONLY attach the price key if it's a LIMIT order
+                if order_type_final == "LIMIT":
+                    order_params["price"] = exec_price
+
+                self.log(f"📤 Sending Dynamic Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
                 
-                # 5. Handle Silent Drops
+                # 6. Handle Server Drops
                 if res is None:
-                    self.log("🚨 Angel API returned None (Server Drop). Forcing Re-Login...")
+                    self.log("🚨 Angel API returned None. Forcing Re-Login...")
                     if self.login():
-                        self.log("🔄 Re-login successful. Retrying order...")
                         res = self.api.placeOrder(order_params)
                         if res is None:
                             return None, "Angel Server is dead/unreachable right now."
