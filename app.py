@@ -1928,68 +1928,86 @@ class MT5WebBridge:
                     tick = mt5.symbol_info_tick(resolved_sym)
                     if tick and tick.bid > 0: 
                         return float((tick.bid + tick.ask) / 2)
+                    
                     rates = mt5.copy_rates_from_pos(resolved_sym, mt5.TIMEFRAME_M1, 0, 1)
                     if rates is not None and len(rates) > 0:
                         return float(rates['close'])
             except Exception: pass
+            
+        # 🚨 FIX: Return None so TradingView datafeed triggers in SniperBot
         return None 
 
     def place_order(self, symbol, qty, side):
         if not self.connected: return None, "Not connected"
-        if self._use_local and HAS_MT5:
-            try:
-                import MetaTrader5 as mt5
-                # Wake up terminal if sleeping
-                if not mt5.terminal_info():
-                    mt5.initialize()
-                    mt5.login(login=int(self.account), password=self.password, server=self.server)
+        
+        # 🚨 FIX: Aggressively block fake cloud trades. No more fake SIM order IDs.
+        if not self._use_local or not HAS_MT5:
+            return None, "MT5 cannot execute real trades from Streamlit Cloud. You MUST run app.py locally on Windows."
+            
+        try:
+            import MetaTrader5 as mt5
+            # Wake up terminal if sleeping
+            if not mt5.terminal_info():
+                mt5.initialize()
+                mt5.login(login=int(self.account), password=self.password, server=self.server)
 
-                resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
-                            
-                if not sym_info: return None, f"Symbol {symbol} not found in MT5."
-                if not sym_info.visible: mt5.symbol_select(resolved_sym, True)
-                    
-                tick = mt5.symbol_info_tick(resolved_sym)
-                if not tick: return None, f"Tick data for {resolved_sym} not found."
+            resolved_sym, sym_info = self._resolve_mt5_symbol(symbol)
+                        
+            if not sym_info: return None, f"Symbol {symbol} not found in MT5."
+            if not mt5.symbol_select(resolved_sym, True): return None, f"Failed to select {resolved_sym}."
                 
-                # 🚨 THE FIX: Strict Broker Volume Step Rounding
-                vol_step = sym_info.volume_step
-                clean_qty = round(float(qty) / vol_step) * vol_step
-                if clean_qty < sym_info.volume_min:
-                    clean_qty = sym_info.volume_min
-                    
-                action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
-                price = tick.ask if action == mt5.ORDER_TYPE_BUY else tick.bid
+            tick = mt5.symbol_info_tick(resolved_sym)
+            if not tick or tick.ask == 0.0: return None, f"Tick data for {resolved_sym} not found. Market closed?"
+            
+            # 🚨 THE FIX: Strict Broker Volume Step Rounding (Prevents XM360 rejection)
+            vol_step = sym_info.volume_step
+            clean_qty = round(float(qty) / vol_step) * vol_step
+            if clean_qty < sym_info.volume_min: clean_qty = sym_info.volume_min
+            if clean_qty > sym_info.volume_max: clean_qty = sym_info.volume_max
+            clean_qty = round(clean_qty, 2)
                 
-                filling_type = mt5.ORDER_FILLING_IOC
-                if (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK): filling_type = mt5.ORDER_FILLING_FOK
-                elif (sym_info.filling_mode & mt5.SYMBOL_FILLING_IOC): filling_type = mt5.ORDER_FILLING_IOC
-                else: filling_type = mt5.ORDER_FILLING_RETURN
+            action = mt5.ORDER_TYPE_BUY if str(side).upper()=="BUY" else mt5.ORDER_TYPE_SELL
+            price = tick.ask if action == mt5.ORDER_TYPE_BUY else tick.bid
+            
+            filling_type = mt5.ORDER_FILLING_IOC
+            if (sym_info.filling_mode & mt5.SYMBOL_FILLING_FOK): filling_type = mt5.ORDER_FILLING_FOK
+            elif (sym_info.filling_mode & mt5.SYMBOL_FILLING_IOC): filling_type = mt5.ORDER_FILLING_IOC
+            else: filling_type = mt5.ORDER_FILLING_RETURN
 
-                req = {
-                    "action": mt5.TRADE_ACTION_DEAL,
-                    "symbol": resolved_sym, 
-                    "volume": float(clean_qty), 
-                    "type": action,
-                    "price": price, 
-                    "deviation": 20, 
-                    "magic": 20250101,
-                    "comment": "SHREE_BOT", 
-                    "type_time": mt5.ORDER_TIME_GTC,
-                    "type_filling": filling_type,
-                }
+            req = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": resolved_sym, 
+                "volume": float(clean_qty), 
+                "type": action,
+                "price": price, 
+                "deviation": 50, # Widened for Gold volatility
+                "magic": 20250101,
+                "comment": "SHREE_BOT", 
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": filling_type,
+            }
+            
+            result = mt5.order_send(req)
+            if result is None:
+                return None, f"MT5 order_send returned None. Terminal Error: {mt5.last_error()}"
                 
-                result = mt5.order_send(req)
-                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                    return str(result.order), None
-                    
-                # Detailed Error Report for XM360/BTCDana
-                err = result.comment if result else mt5.last_error()
-                return None, f"MT5 Rejected (Code {result.retcode if result else 'None'}): {err}"
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                return str(result.order), None
                 
-            except Exception as e:
-                return None, f"MT5 Python Error: {str(e)}"
-        return f"MT5_SIM_{int(time.time())}", None
+            # 🚨 THE FIX: Translate MT5 Error Codes directly to the UI
+            err_dict = {
+                10013: "Invalid Request", 
+                10014: f"Invalid Volume (Broker requires steps of {vol_step})", 
+                10015: "Invalid Price", 10016: "Invalid Stops", 10018: "Market Closed", 
+                10019: "Not Enough Margin (Add Funds)", 
+                10027: "Auto-Trading Disabled (Click 'Algo Trading' button in MT5 terminal!)",
+                10030: "Unsupported Filling Mode", 10031: "No Connection", 10038: "Volume too large"
+            }
+            err_msg = err_dict.get(result.retcode, f"Retcode {result.retcode}: {result.comment}")
+            return None, f"MT5 Rejected: {err_msg}"
+            
+        except Exception as e:
+            return None, f"MT5 Python Error: {str(e)}"
 
     def get_historical_data(self, symbol, interval):
         if self._use_local and HAS_MT5:
@@ -2031,7 +2049,8 @@ class MT5WebBridge:
                         "server": info.server
                     }
             except Exception: pass
-        return {"balance": 0.0, "equity": 0.0, "login": self.account}
+        # 🚨 FIX: Return None if it fails to grab equity so the dashboard doesn't show $0
+        return None
 
 class FyersBridge:
     def __init__(self, client_id, secret, token):
