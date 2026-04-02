@@ -5174,16 +5174,17 @@ class SniperBot:
                 return order_id, None
             except Exception as e:
                 return None, f"Zerodha error: {str(e)}"
-        # --- 🛡️ FIXED ANGEL ONE: BULLETPROOF PAYLOAD + AUTO-RETRY ---
+        # --- 🛡️ FIXED ANGEL ONE: SAFE LIMIT ORDERS + STRICT STRING FORMATTING ---
         if self.api:
             try:
                 # 1. Product Type Logic
                 p_type = "CARRYFORWARD" if exchange in ["NFO", "BFO", "MCX"] else "INTRADAY"
 
-                # 2. Strict Tick Size Rounding (Allows LIMIT orders to work safely!)
-                if order_type.upper() == "LIMIT" and price and float(price) > 0:
+                # 2. 🚨 THE FIX: NSE Options require LIMIT orders. 
+                # We format 311.3 directly into the string "311.30" to bypass validation errors.
+                if price and float(price) > 0:
                     clean_num = round(round(float(price) / 0.05) * 0.05, 2)
-                    exec_price = "{:.2f}".format(clean_num) # Forces exactly 2 decimal places as a string
+                    exec_price = "{:.2f}".format(clean_num) 
                     order_type_final = "LIMIT"
                 else:
                     exec_price = "0"
@@ -5214,23 +5215,23 @@ class SniperBot:
                     "ordertype": order_type_final,
                     "producttype": p_type,
                     "duration": "DAY",
-                    "price": exec_price,
-                    "squareoff": "0",       # 🚨 ADDED BACK: Prevents the API from crashing to 'None'
-                    "stoploss": "0",        # 🚨 ADDED BACK: Prevents the API from crashing to 'None'
+                    "price": exec_price,    # 🚨 Perfectly formatted (e.g., "311.30")
+                    "squareoff": "0",       # 🚨 Mandatory for Angel backend
+                    "stoploss": "0",        # 🚨 Mandatory for Angel backend
                     "quantity": qty_str
                 }
 
-                self.log(f"📤 Sending Angel Payload: {order_params}")
+                self.log(f"📤 Sending Safe Limit Payload: {order_params}")
                 res = self.api.placeOrder(order_params)
                 
-                # 5. 🚨 HANDLE SILENT "NONE" FAILURES INSTANTLY
+                # 5. Handle Silent Drops Instantly
                 if res is None:
-                    self.log("🚨 Angel API returned None (Silent Drop/Network Error). Forcing Re-Login...")
+                    self.log("🚨 Angel API returned None. Forcing Re-Login...")
                     if self.login():
                         self.log("🔄 Re-login successful. Retrying order...")
                         res = self.api.placeOrder(order_params)
                         if res is None:
-                            return None, "Angel returned None twice. The Exchange server is dropping requests."
+                            return None, "Angel returned None twice. Exchange dropped request."
 
                 if isinstance(res, dict) and res.get('status'):
                     return res.get('data', {}).get('orderid'), None
@@ -5241,7 +5242,6 @@ class SniperBot:
                     if "session expired" in raw_error.lower() or "invalid token" in raw_error.lower():
                         self.log("🔑 Session Expired. Re-logging...")
                         if self.login():
-                            # One final retry after token refresh
                             res_retry = self.api.placeOrder(order_params)
                             if isinstance(res_retry, dict) and res_retry.get('status'):
                                 return res_retry.get('data', {}).get('orderid'), None
