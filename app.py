@@ -3663,6 +3663,147 @@ def fetch_option_chain(symbol, expiry):
     return merged
 
 # ==========================================
+# MUTUAL FUNDS MODULE (safe version)
+# ==========================================
+import time
+from http.client import IncompleteRead
+
+@st.cache_data(ttl=300)
+def fetch_top_mutual_funds(limit=50, retries=2):
+    """
+    Fetch top Indian mutual funds with retry logic.
+    Catches all possible network errors, including IncompleteRead.
+    """
+    for attempt in range(retries):
+        try:
+            resp = requests.get("https://api.mfapi.in/mf", timeout=15)
+            if resp.status_code != 200:
+                if attempt < retries - 1:
+                    time.sleep(1)
+                    continue
+                return _get_mock_mutual_funds()
+            all_funds = resp.json()
+            if not all_funds:
+                return _get_mock_mutual_funds()
+
+            funds_data = []
+            for fund in all_funds[:limit]:
+                try:
+                    code = fund['schemeCode']
+                    name = fund['schemeName']
+                    detail_resp = requests.get(f"https://api.mfapi.in/mf/{code}", timeout=10)
+                    if detail_resp.status_code == 200:
+                        detail = detail_resp.json()
+                        if 'data' in detail and len(detail['data']) > 0:
+                            latest = detail['data'][0]
+                            nav = float(latest['nav'])
+                            date = latest['date']
+                            if len(detail['data']) >= 365:
+                                year_ago_nav = float(detail['data'][364]['nav'])
+                                return_1y = (nav - year_ago_nav) / year_ago_nav * 100
+                            else:
+                                return_1y = 0.0
+                            funds_data.append({
+                                "Code": code,
+                                "Name": name,
+                                "NAV": nav,
+                                "Date": date,
+                                "1Y Return %": round(return_1y, 2),
+                                "AUM (Cr)": "N/A"
+                            })
+                except Exception:
+                    # Skip individual fund errors
+                    continue
+            if funds_data:
+                return pd.DataFrame(funds_data).sort_values("1Y Return %", ascending=False)
+            else:
+                return _get_mock_mutual_funds()
+        except (requests.exceptions.RequestException, ConnectionError, TimeoutError, IncompleteRead) as e:
+            if attempt < retries - 1:
+                time.sleep(1)
+                continue
+            else:
+                return _get_mock_mutual_funds()
+        except Exception:
+            # Any other unexpected error → mock data
+            return _get_mock_mutual_funds()
+    return _get_mock_mutual_funds()
+
+def _get_mock_mutual_funds():
+    """Fallback mock data when live API fails."""
+    mock_data = [
+        {"Code": "119551", "Name": "SBI Small Cap Fund", "NAV": 142.35, "Date": "2025-03-28", "1Y Return %": 28.5, "AUM (Cr)": "28,500"},
+        {"Code": "120202", "Name": "HDFC Balanced Advantage Fund", "NAV": 512.20, "Date": "2025-03-28", "1Y Return %": 18.2, "AUM (Cr)": "45,200"},
+        {"Code": "118530", "Name": "ICICI Prudential Bluechip Fund", "NAV": 89.45, "Date": "2025-03-28", "1Y Return %": 22.1, "AUM (Cr)": "38,700"},
+        {"Code": "121561", "Name": "Kotak Flexicap Fund", "NAV": 67.80, "Date": "2025-03-28", "1Y Return %": 25.4, "AUM (Cr)": "22,300"},
+        {"Code": "122682", "Name": "Axis Midcap Fund", "NAV": 103.90, "Date": "2025-03-28", "1Y Return %": 31.0, "AUM (Cr)": "15,600"},
+    ]
+    return pd.DataFrame(mock_data)
+
+def mutual_funds_tab():
+    st.subheader("💰 Mutual Funds – Search & Execute (Simulated)")
+    st.markdown("Explore top Indian mutual funds, search by name, and place simulated buy orders.")
+    
+    use_mock = st.checkbox("🔁 Use demo data (if API fails)", value=False)
+    
+    col1, col2 = st.columns([2,1])
+    with col1:
+        search_term = st.text_input("🔍 Search by fund name or code", placeholder="e.g., SBI, HDFC, 119551")
+    with col2:
+        sort_by = st.selectbox("Sort by", ["1Y Return %", "NAV", "Name"], index=0)
+    
+    if st.button("🔄 Refresh Funds", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    
+    with st.spinner("Fetching mutual funds (retrying if needed)..."):
+        if use_mock:
+            df_funds = _get_mock_mutual_funds()
+            st.info("ℹ️ Using demo data – live API unavailable or you selected demo mode.")
+        else:
+            df_funds = fetch_top_mutual_funds(limit=100)
+            if df_funds is None or df_funds.empty:
+                st.warning("Could not fetch live data. Try again later or enable demo mode.")
+                df_funds = _get_mock_mutual_funds()
+                st.info("Showing demo data instead.")
+    
+    if df_funds is None or df_funds.empty:
+        st.error("No mutual fund data available.")
+        return
+    
+    if search_term:
+        df_funds = df_funds[df_funds['Name'].str.contains(search_term, case=False) | 
+                           df_funds['Code'].astype(str).str.contains(search_term)]
+    df_funds = df_funds.sort_values(sort_by, ascending=False if sort_by != "Name" else True)
+    
+    st.dataframe(df_funds, use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    st.subheader("📝 Simulated Purchase")
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        selected_fund = st.selectbox("Select Fund", df_funds['Name'].tolist())
+    with col_b:
+        investment_amount = st.number_input("Investment Amount (₹)", 500, 500000, 5000, step=500)
+    with col_c:
+        sip = st.checkbox("SIP (Monthly)", value=False)
+        if sip:
+            sip_months = st.number_input("SIP Months", 1, 60, 12)
+    
+    if st.button("🚀 Execute Purchase (Simulated)", use_container_width=True):
+        fund_row = df_funds[df_funds['Name'] == selected_fund].iloc[0]
+        nav = fund_row['NAV']
+        units = investment_amount / nav
+        st.success(f"✅ **Simulated Order Placed!**\n\n"
+                   f"Fund: {selected_fund}\n"
+                   f"NAV: ₹{nav:.2f}\n"
+                   f"Amount: ₹{investment_amount:,.2f}\n"
+                   f"Units: {units:.4f}\n"
+                   f"SIP: {'Yes (' + str(sip_months) + ' months)' if sip else 'No'}\n\n"
+                   f"*(This is a simulated order. No real money has been transacted.)*")
+        play_sound_now("click")
+
+# ==========================================
 # CORE BOT ENGINE (SniperBot) – Full Implementation
 # ==========================================
 class SniperBot:
@@ -7662,6 +7803,35 @@ elif st.session_state.page == "tools":
 
     elif current_tab == 4:  # MUTUAL FUNDS
         mutual_funds_tab()
+
+    elif current_tab == 5:  # FIA ASSISTANT
+        st.subheader("🤖 FIA Assistant – Market Analysis")
+        def fia_assistant(df, index):
+            if df is None:
+                st.info("No data available.")
+                return
+            st.markdown(f"### 📊 Analysis for {index}")
+            last = df.iloc[-1]
+            prev = df.iloc[-2]
+            change = (last['close'] - prev['close']) / prev['close'] * 100
+            st.metric("Last Close", f"{last['close']:.2f}", f"{change:.2f}%")
+            rsi = last.get('rsi', 50)
+            st.metric("RSI (14)", f"{rsi:.1f}", "Overbought" if rsi > 70 else ("Oversold" if rsi < 30 else "Neutral"))
+            st.markdown("**Key Levels:**")
+            sup, res = bot.analyzer.get_support_resistance(df)
+            if sup:
+                st.markdown(f"- Support: {sup:.2f}")
+            if res:
+                st.markdown(f"- Resistance: {res:.2f}")
+            trend = "🟢 Bullish" if last['close'] > last.get('ema9', last['close']) else "🔴 Bearish"
+            st.markdown(f"**Short-term trend:** {trend}")
+            if st.button("Refresh Analysis", on_click=lambda: play_sound_now("click")):
+                st.rerun()
+        if bot.state.get("latest_data") is not None:
+            fia_assistant(bot.state["latest_data"], INDEX)
+        else:
+            st.info("No chart data available yet. Start the engine or refresh.")
+
 
     elif current_tab == 5:  # FIA ASSISTANT
         st.subheader("🤖 FIA Assistant – Market Analysis")
